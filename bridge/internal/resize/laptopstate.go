@@ -66,8 +66,8 @@ func (l Laptop) known() bool { return l.SidebarWidthMilli > 0 && l.FontSize > 0 
 //   - the tree could not be read or says nothing, which is what an older agterm looks like from here;
 //   - the numbers are the same, which is the ordinary press and the whole reason this exists.
 //
-// In every one of those cases the press proceeds exactly as it did before the laptop was recorded at
-// all: one resize, no session, no jump.
+// In every one of those cases the press proceeds exactly as it did before the laptop was recorded
+// at all: one resize, no session, no jump.
 func laptopMoved(fit Fit, current Laptop) bool {
 	recorded := Laptop{SidebarWidthMilli: fit.SidebarWidthMilli, SidebarVisible: fit.SidebarVisible, FontSize: fit.FontSize}
 	if !recorded.known() || !current.known() {

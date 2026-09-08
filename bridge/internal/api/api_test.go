@@ -41,9 +41,10 @@ func tree() any {
 // # Why `session.close` was removed from this list on 2026-07-31, and why that is not a weakening
 //
 // It used to sit here, and it belonged here: it named an agterm command that this bridge had no verb
-// for, so sending it had to fall through to "unknown verb". The destructive verbs gave the bridge its own
-// `session.close` verb, and the two names coincide — so sending it now emits `session.close`
-// **because the bridge implements it**, not because a caller's string reached agterm.
+// for, so sending it had to fall through to "unknown verb". The destructive verbs gave the bridge
+// its own `session.close` verb, and the two names coincide — so sending it now emits
+// `session.close` **because the bridge implements it**, not because a caller's string reached
+// agterm.
 //
 // That distinction is the whole point of this test, so the input moved rather than the assertion
 // being loosened. The property being defended is unchanged and is checked below: a verb the bridge

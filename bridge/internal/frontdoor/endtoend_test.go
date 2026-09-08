@@ -216,10 +216,10 @@ func TestAnUnpinnedPhoneIsStillRefusedThroughTheWebSocket(t *testing.T) {
 
 // **The regression test for the collapsed-source lockout.**
 //
-// A TLS-terminating proxy proxies, so every connection's peer is the proxy. A per-source counter over one collapsed
-// source is a global ceiling wearing a per-source costume: five failed handshakes and every caller is
-// refused, the owner included, for the rest of the window — free to cause, now that the upgrade is
-// free.
+// A TLS-terminating proxy proxies, so every connection's peer is the proxy. A per-source counter
+// over one collapsed source is a global ceiling wearing a per-source costume: five failed
+// handshakes and every caller is refused, the owner included, for the rest of the window — free to
+// cause, now that the upgrade is free.
 //
 // Nothing in the front door was wrong on its own. The property lived in the listener and its
 // precondition — that the peer address is the caller's — was invalidated here, which is why nothing

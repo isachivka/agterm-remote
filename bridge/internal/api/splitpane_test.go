@@ -26,10 +26,10 @@ import (
 //
 // # It is not the silent-wrong-pane defect, and the difference is the interesting part
 //
-// The wrong-pane bug sent the read and the keystroke to different panes. Nothing here disagrees with
-// itself. What a collapsed split takes away is REACH: the phone's toggle is composed only when this
-// field is true, so a session opened while the split was collapsed offers no route to the second pane
-// at all — though the pane exists, is addressable, and reads perfectly.
+// The wrong-pane bug sent the read and the keystroke to different panes. Nothing here disagrees
+// with itself. What a collapsed split takes away is REACH: the phone's toggle is composed only when
+// this field is true, so a session opened while the split was collapsed offers no route to the
+// second pane at all — though the pane exists, is addressable, and reads perfectly.
 //
 // **The symptom first written here was wrong.** It said the toggle vanished mid-session, leaving the
 // owner on the right pane with no way back. It cannot: the phone's session row is a snapshot taken

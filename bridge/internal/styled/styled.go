@@ -1,11 +1,11 @@
 // Package styled reads a pane's screen WITH its colours, through zmx rather than through agterm.
 //
 // agterm's `session.text` is plain UTF-8: libghostty's read API drops every attribute before the
-// bridge sees the text, which is why the colours have to come from somewhere else. A pane running under agterm's
-// "Live sessions" mode is owned by a zmx daemon, and that daemon keeps its own ghostty-vt terminal so
-// it can rehydrate a reconnecting client. `zmx history <daemon> --vt` asks it to serialise that
-// terminal with SGR sequences intact — the same ghostty formatter agterm would use, running in
-// another process.
+// bridge sees the text, which is why the colours have to come from somewhere else. A pane running
+// under agterm's "Live sessions" mode is owned by a zmx daemon, and that daemon keeps its own
+// ghostty-vt terminal so it can rehydrate a reconnecting client. `zmx history <daemon> --vt` asks
+// it to serialise that terminal with SGR sequences intact — the same ghostty formatter agterm would
+// use, running in another process.
 //
 // What comes back is a REHYDRATION dump, not a screen read: it opens with the terminal's private
 // modes, closes with the cursor position, a charset select, keyboard-protocol flags and OSC 7, and
