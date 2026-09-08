@@ -17,18 +17,40 @@ import (
 // small enough that a window under noise shuts instead of standing open until its expiry.
 const maxAttempts = 5
 
-// The three ways Consume can refuse. They are distinguished for the bridge's own log, where "the
-// code had already expired" and "somebody sent the wrong bytes" are different events for the owner
-// reading it.
+// ErrRefused is every refusal Consume can return, and it is deliberately the only one that says
+// anything.
 //
-// The HTTP handler above this must NOT relay the distinction to the caller. Which of the three it
-// was tells an unauthenticated stranger whether a window is open at all and whether their guess had
-// the right shape; one refusal is all the caller is owed.
+// There are three underlying causes - no window, an expired window, the wrong bytes - and which one
+// it was must not reach the caller. It tells an unauthenticated stranger whether a window is open at
+// all and whether their guess had the right shape, and the shortest path to leaking it is the
+// handler that writes http.Error(w, err.Error(), 403) without thinking. So the message every refusal
+// carries is this one, and the causes below are unexported: the lazy handler leaks nothing because
+// there is nothing in its hand to leak.
+//
+// errors.Is(err, ErrRefused) is how a caller asks "was this a refusal rather than a bug", and the
+// causes remain distinguishable by errors.Is inside this package - see refused.Unwrap - which is
+// where the decision about what an owner may be told belongs. When the Mac app needs to say WHY a
+// code died, and it should, that wants a deliberate accessor on this package rather than an error
+// string that travels to a stranger by default.
+var ErrRefused = errors.New("enroll: enrolment refused")
+
+// The causes. Unexported on purpose; see ErrRefused.
 var (
-	ErrClosed  = errors.New("enroll: no enrolment window is open")
-	ErrExpired = errors.New("enroll: the enrolment window expired")
-	ErrToken   = errors.New("enroll: wrong enrolment token")
+	causeClosed  = errors.New("no enrolment window is open")
+	causeExpired = errors.New("the enrolment window expired")
+	causeToken   = errors.New("wrong enrolment token")
 )
+
+// refused is a refusal that knows why and will not say.
+//
+// Error() returns ErrRefused's text and nothing else - printing it, wrapping it in another message
+// or sending it over the wire discloses only that the enrolment was refused. Unwrap returns both
+// ErrRefused and the cause, so errors.Is answers for either without the cause ever being formatted.
+type refused struct{ cause error }
+
+func (refused) Error() string { return ErrRefused.Error() }
+
+func (r refused) Unwrap() []error { return []error{ErrRefused, r.cause} }
 
 // Window is the interval during which this Mac will accept a new phone.
 //
@@ -40,7 +62,11 @@ var (
 //     the owner has walked away.
 //   - It is compared in constant time. subtle.ConstantTimeCompare, never == or bytes.Equal. The
 //     caller here is one who can retry as fast as the network allows, which is exactly the caller a
-//     comparison that returns early on the first wrong byte leaks the prefix to.
+//     comparison that returns early on the first wrong byte leaks the prefix to. No test in this
+//     package holds that down and none can - a timing assertion over 32 bytes on a shared CI runner
+//     is either loose enough to pass on bytes.Equal or flaky enough to be deleted. It is held by
+//     scripts/check-constant-time-tokens.sh, which fails the build on a token compared with ==,
+//     bytes.Equal, reflect.DeepEqual or strings.Compare anywhere in this package.
 //   - It never touches disk. The token lives in this struct and nowhere else: not in a state file,
 //     not in a cache, not in a log line. Losing it to a crash is the correct behaviour - the code on
 //     the owner's screen is stale from that moment and the fix is to open a new one - whereas a
@@ -141,13 +167,13 @@ func (w *Window) Consume(token []byte) error {
 	defer w.mu.Unlock()
 
 	if !w.open {
-		return ErrClosed
+		return refused{causeClosed}
 	}
 	if !w.now().Before(w.expiry) {
 		// Refused AT the expiry, not after it: the payload states that instant as when the offer
 		// stops being accepted, and the phone will have stopped offering by then.
 		w.closeLocked()
-		return ErrExpired
+		return refused{causeExpired}
 	}
 	// ConstantTimeCompare, and its whole slice against the whole argument. It returns 0 on a length
 	// mismatch as well, which is the wanted answer here - the length of the token is public, and a
@@ -157,7 +183,7 @@ func (w *Window) Consume(token []byte) error {
 		if w.attempts >= maxAttempts {
 			w.closeLocked()
 		}
-		return ErrToken
+		return refused{causeToken}
 	}
 	w.closeLocked()
 	return nil

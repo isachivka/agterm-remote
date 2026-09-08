@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -197,6 +199,35 @@ func TestConcurrentConsumeSucceedsExactlyOnce(t *testing.T) {
 	}
 }
 
+// From outside this package the three refusals are one value. A handler that writes err.Error() to
+// the caller - the shape everybody reaches for first - must not thereby tell a stranger whether a
+// window is open and whether their guess had the right shape.
+func TestRefusalsAreIndistinguishableFromOutsideThePackage(t *testing.T) {
+	now := time.Unix(1000, 0)
+	w := enroll.NewWindow(func() time.Time { return now })
+
+	closed := w.Consume(make([]byte, 32))
+	token, _ := w.Open(time.Minute)
+	wrong := w.Consume(make([]byte, 32))
+	now = now.Add(2 * time.Minute)
+	expired := w.Consume(token[:])
+
+	for name, err := range map[string]error{"closed": closed, "wrong token": wrong, "expired": expired} {
+		if !errors.Is(err, enroll.ErrRefused) {
+			t.Fatalf("%s: every refusal must match ErrRefused, got %v", name, err)
+		}
+		if err.Error() != closed.Error() {
+			t.Fatalf("%s: refusals must be indistinguishable, %q differs from %q", name, err.Error(), closed.Error())
+		}
+		// The words that would give the cause away if a future refusal grew a message of its own.
+		for _, word := range []string{"expired", "expiry", "wrong", "open", "closed", "attempt", "token"} {
+			if strings.Contains(strings.ToLower(err.Error()), word) {
+				t.Fatalf("%s: a refusal must not say %q to the caller: %q", name, word, err.Error())
+			}
+		}
+	}
+}
+
 // The token exists in memory and nowhere else. Losing it to a crash is the correct outcome - the
 // code on the owner's screen is stale by then and the fix is a new one - whereas a token that
 // reached a log, a cache or a state file outlives the window it belongs to and is readable by
@@ -205,6 +236,15 @@ func TestConcurrentConsumeSucceedsExactlyOnce(t *testing.T) {
 // The search below is the point of this test, so it proves it can find before it is allowed to
 // report that it found nothing: it plants the token under the state directory in every rendering it
 // searches for, requires a hit on each, and only then removes them and requires none.
+//
+// # Why the streams are captured and not only the filesystem
+//
+// The first version of this test walked the filesystem alone, and a log.Printf("token=%x", token)
+// added to Open left it passing: the standard logger writes to stderr, and WalkDir never sees
+// stderr. It proved "this package writes no file", which is not what its name claims. The three
+// default destinations - the std logger, os.Stdout and os.Stderr - are therefore pointed at files
+// INSIDE the walked tree for the duration of the lifecycle, so that a token printed anywhere lands
+// somewhere the walk will find it. Both mutations were then confirmed to fail this test.
 func TestTokenNeverReachesDisk(t *testing.T) {
 	state := t.TempDir()
 	// Every directory a Go program writes to without being told to lands inside the tree this test
@@ -220,15 +260,49 @@ func TestTokenNeverReachesDisk(t *testing.T) {
 		t.Setenv(key, dir)
 	}
 
+	streams := filepath.Join(state, "streams")
+	if err := os.MkdirAll(streams, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	captured := map[string]*os.File{}
+	for _, name := range []string{"log", "stdout", "stderr"} {
+		f, err := os.Create(filepath.Join(streams, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		captured[name] = f
+	}
+	// os.Stdout and os.Stderr are read at call time by fmt.Println and friends, so replacing the
+	// variables catches a print made anywhere below. log.SetOutput catches the standard logger,
+	// which holds its own reference to the original stderr and would otherwise escape both.
+	realStdout, realStderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = captured["stdout"], captured["stderr"]
+	log.SetOutput(captured["log"])
+	restore := func() {
+		os.Stdout, os.Stderr = realStdout, realStderr
+		log.SetOutput(realStderr)
+	}
+	t.Cleanup(restore)
+
 	w := enroll.NewWindow(time.Now)
 	token, _ := w.Open(5 * time.Minute)
 	// The whole lifecycle, because a failed attempt is the thing most likely to be logged.
 	_ = w.Consume(make([]byte, 32))
 	_ = w.Consume([]byte("short"))
-	if err := w.Consume(token[:]); err != nil {
-		t.Fatalf("consume: %v", err)
-	}
+	consumeErr := w.Consume(token[:])
 	w.Close()
+
+	// Restored and closed BEFORE the walk: a buffered write still in a file handle is a leak the
+	// scan would not see, and t.Fatalf below has to reach the real stderr to be readable.
+	restore()
+	for name, f := range captured {
+		if err := f.Close(); err != nil {
+			t.Fatalf("closing the captured %s: %v", name, err)
+		}
+	}
+	if consumeErr != nil {
+		t.Fatalf("consume: %v", consumeErr)
+	}
 
 	// The working directory of a `go test` binary is the package source directory. It is walked
 	// too, so a stray write next to the source is caught, and so that the negative pass below is
@@ -276,9 +350,14 @@ type rendering struct {
 
 // The renderings a leak could plausibly take. Raw bytes are what a memory dump or a length-prefixed
 // record would carry; hex and base64 are what a log line, a JSON file or a QR-payload cache would.
+//
+// go-print is the one that is easy to forget and was found by mutation rather than by thinking:
+// fmt.Println of a [32]byte writes neither hex nor base64 but Go's own decimal form, [12 34 ...],
+// and a scan without it watched a deliberate fmt.Println leak go past.
 func renderings(token []byte) []rendering {
 	return []rendering{
 		{"raw", token},
+		{"go-print", []byte(fmt.Sprintf("%v", token))},
 		{"hex-lower", []byte(hex.EncodeToString(token))},
 		{"hex-upper", []byte(strings.ToUpper(hex.EncodeToString(token)))},
 		{"base64-std", []byte(base64.StdEncoding.EncodeToString(token))},
