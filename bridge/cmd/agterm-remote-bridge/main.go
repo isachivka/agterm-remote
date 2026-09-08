@@ -12,6 +12,11 @@
 // flags here and no configuration file - the parent already holds every one of these answers, and a
 // file would be a second copy of them that can disagree.
 //
+// Dying with the parent is not left to the operating system, which does not do it: a child is
+// re-parented and keeps running. --parent-pid names the process to follow and internal/parent polls
+// it, so a crashed app cannot leave a listener on the owner's exposed port with nothing left that
+// could close it.
+//
 // # No default address, ever
 //
 // --listen has no default and the program refuses to start without it. The address a phone dials
@@ -42,6 +47,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/frontdoor"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
+	"github.com/isachivka/agterm-remote/bridge/internal/parent"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 	"github.com/isachivka/agterm-remote/bridge/internal/trust"
 )
@@ -84,7 +90,7 @@ func main() {
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
 	stateDir := flag.String("state-dir", "", "directory holding identity and paired peers (required)")
 	logPath := flag.String("log", "", "log file; empty means stderr")
-	parent := flag.Int("parent-pid", 0, "exit when this pid goes away; 0 disables")
+	parentPID := flag.Int("parent-pid", 0, "exit when this pid goes away; 0 disables")
 	flag.Parse()
 
 	if *listen == "" || *stateDir == "" {
@@ -94,11 +100,11 @@ func main() {
 	// A negative pid is not a process this or any other program can wait on, so it is a typo rather
 	// than an instruction. Refused here rather than logged verbatim: a flag that accepts a value it
 	// can never act on is a flag that reports success for a mistake.
-	if *parent < 0 {
+	if *parentPID < 0 {
 		fmt.Fprintln(os.Stderr, "--parent-pid must be a pid, or 0 to disable")
 		os.Exit(2)
 	}
-	if err := run(*listen, *socket, *stateDir, *logPath, *parent); err != nil {
+	if err := run(*listen, *socket, *stateDir, *logPath, *parentPID); err != nil {
 		log.Fatalf("agterm-remote-bridge: %v", err)
 	}
 }
@@ -192,12 +198,26 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	log.Printf("listening on %s", listenAddr)
 	log.Printf("paired phones: %d", len(peers.Peers()))
 	log.Printf("agterm socket %s", socketPath)
-	if parentPID != 0 {
-		// Recorded rather than acted on. The supervisor that makes this binary exit with its parent
-		// is separate work; until it lands, the flag is accepted so the parent's command line does
-		// not have to change when it does, and this line is here so nobody reads the flag as a
-		// promise that is already being kept.
-		log.Printf("parent pid %d recorded; this process does not yet exit on its own when it goes", parentPID)
+	// **This process exits with the app that started it.**
+	//
+	// There is no launchd job to notice that the menu-bar app is gone, so a crash there would
+	// otherwise leave this bridge listening on the port its owner deliberately exposed to the
+	// internet, with no user interface left anywhere that could close it.
+	//
+	// **stop() rather than os.Exit, and that is the whole reason the watchdog reports through a
+	// callback instead of exiting for itself.** stop cancels the context above - the same one
+	// SIGTERM cancels - so the listener closes, the control socket is removed, and a window this
+	// bridge resized is put back the way it was found. An exit from inside the watcher would skip
+	// every one of those and the owner would be left looking at the consequences of the second one.
+	//
+	// Zero is the mode a person running this by hand from a terminal gets: no watcher is started at
+	// all, so the bridge lives until they stop it.
+	if parentPID > 0 {
+		log.Printf("watching parent pid %d", parentPID)
+		parent.Watch(ctx, parentPID, parent.DefaultEvery, func() {
+			log.Print("parent process is gone; exiting")
+			stop()
+		})
 	}
 
 	// If a previous run died with the owner's window resized, put it back. Logged and not fatal: a
