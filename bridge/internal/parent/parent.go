@@ -51,6 +51,14 @@
 // zero, it addresses **every process in the caller's process group**. Signal 0 makes that harmless
 // today - it would simply answer "alive" forever - which is precisely why the guard is explicit
 // rather than relied upon.
+//
+// # One is a pid, and watching it is a no-op
+//
+// A pid of 1 is accepted and starts a real watcher that will never fire, because init and launchd
+// outlive everything. That is left alone rather than guarded: watching a process that cannot die is
+// exactly equivalent to not watching, so the outcome is the one a caller passing 1 by mistake wanted
+// least but suffers not at all from. Recorded so the next reader does not take its absence from the
+// guard above for an oversight.
 package parent
 
 import (
@@ -97,6 +105,14 @@ func Watch(ctx context.Context, pid int, every time.Duration, gone func()) {
 				return
 			case <-tick.C:
 				if !alive(pid) {
+					// **Both cases can be ready at once, and select then picks at random.** A
+					// shutdown that coincides with the parent's death would otherwise announce
+					// "parent process is gone; exiting" on a context that was already cancelled by
+					// a SIGTERM - harmless, because stop() is idempotent, and untrue, which is
+					// worse: somebody debugging a shutdown reads that line as evidence.
+					if ctx.Err() != nil {
+						return
+					}
 					gone()
 					return
 				}
@@ -105,11 +121,19 @@ func Watch(ctx context.Context, pid int, every time.Duration, gone func()) {
 	}()
 }
 
-// alive reports whether pid still names a process.
-//
-// Signal 0 performs the permission checks and delivers nothing. ESRCH is the only answer that means
-// the process is gone; EPERM means it exists and belongs to somebody else, and anything else is an
-// answer this package does not understand and will not act on. See the package comment.
+// alive reports whether pid still names a process. Signal 0 performs the permission checks and
+// delivers nothing.
 func alive(pid int) bool {
-	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	return aliveFrom(syscall.Kill(pid, 0))
+}
+
+// aliveFrom is the rule, split from the syscall that feeds it so that it can be tested with every
+// answer the kernel can give rather than only with the answer this machine's euid happens to earn.
+//
+// ESRCH is the only answer that means the process is gone. nil means it exists and is signallable;
+// EPERM means it exists and belongs to somebody else; anything else is an answer this package does
+// not understand, and it will not shut the bridge down on the strength of one. See the package
+// comment for why the direction of that last clause is the one that matters.
+func aliveFrom(err error) bool {
+	return !errors.Is(err, syscall.ESRCH)
 }
