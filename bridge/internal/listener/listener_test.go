@@ -69,7 +69,7 @@ func start(t *testing.T) *harness {
 	}
 
 	rec := &recorder{}
-	srv := New(pinning.ServerConfig(bridgeOwn, phoneCert), rec, true)
+	srv := New(pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}), rec, true)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

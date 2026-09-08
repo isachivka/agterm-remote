@@ -99,7 +99,7 @@ func TestPinnedPairCompletesHandshake(t *testing.T) {
 	_, phoneOwn, phoneCert := mint(t, "agterm-remote phone")
 
 	clientErr, serverErr := handshake(t,
-		ServerConfig(bridgeOwn, phoneCert),
+		ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}),
 		ClientConfig(phoneOwn, bridgeCert))
 
 	if clientErr != nil {
@@ -117,7 +117,7 @@ func TestUnpinnedClientIsRejected(t *testing.T) {
 	_, strangerOwn, _ := mint(t, "somebody else")
 
 	clientErr, _ := handshake(t,
-		ServerConfig(bridgeOwn, phoneCert),
+		ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}),
 		ClientConfig(strangerOwn, bridgeCert))
 
 	if clientErr == nil {
@@ -133,9 +133,9 @@ func TestClientWithNoCertificateIsRejected(t *testing.T) {
 	anonymous := &tls.Config{
 		MinVersion:            tls.VersionTLS13,
 		InsecureSkipVerify:    true, //nolint:gosec // the test IS the attacker
-		VerifyPeerCertificate: pinnedPeer(bridgeCert),
+		VerifyPeerCertificate: pinnedPeers([]*x509.Certificate{bridgeCert}),
 	}
-	clientErr, _ := handshake(t, ServerConfig(bridgeOwn, phoneCert), anonymous)
+	clientErr, _ := handshake(t, ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}), anonymous)
 
 	if clientErr == nil {
 		t.Fatal("a caller with no client certificate must not get a connection")
@@ -150,7 +150,7 @@ func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 	_ = bridgeOwn
 
 	clientErr, _ := handshake(t,
-		ServerConfig(imposterOwn, phoneCert),
+		ServerConfig(imposterOwn, []*x509.Certificate{phoneCert}),
 		ClientConfig(phoneOwn, bridgeCert))
 
 	if clientErr == nil {
@@ -173,7 +173,7 @@ func TestCertificateSignedByThePinnedKeyIsStillRejected(t *testing.T) {
 	phoneID, _, phoneCert := mint(t, "agterm-remote phone")
 
 	forged := forgeSignedBy(t, phoneID, phoneCert, bridgeCert)
-	_, serverErr := handshake(t, ServerConfig(bridgeOwn, phoneCert), forged)
+	_, serverErr := handshake(t, ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}), forged)
 
 	if serverErr == nil {
 		t.Fatal("a certificate signed by the pinned key is not the pinned certificate and must be refused")
@@ -193,7 +193,7 @@ func TestReissuedCertificateWithTheSameKeyIsRejected(t *testing.T) {
 	_ = phoneID
 
 	clientErr, _ := handshake(t,
-		ServerConfig(bridgeOwn, otherPhoneCert),
+		ServerConfig(bridgeOwn, []*x509.Certificate{otherPhoneCert}),
 		ClientConfig(phoneOwn, bridgeCert))
 
 	if clientErr == nil {
@@ -276,7 +276,7 @@ func forgeSignedBy(t *testing.T, issuerID Identity, issuerCert, pinnedServer *x5
 		Certificates:          []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
 		MinVersion:            tls.VersionTLS13,
 		InsecureSkipVerify:    true, //nolint:gosec // the test IS the attacker
-		VerifyPeerCertificate: pinnedPeer(pinnedServer),
+		VerifyPeerCertificate: pinnedPeers([]*x509.Certificate{pinnedServer}),
 	}
 }
 
@@ -297,7 +297,7 @@ func TestMintedCertificateIsNotAnIssuer(t *testing.T) {
 // --- Validity, fingerprints, and the shape of what gets carried ----------------------------------
 
 // It was measured that PKIX does not validate a trust anchor's own validity dates. A pinned
-// certificate IS its own anchor, so without the explicit check in pinnedPeer an expired one would be
+// certificate IS its own anchor, so without the explicit check in pinnedPeers an expired one would be
 // accepted forever.
 func TestExpiredPinnedCertificateIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
@@ -321,7 +321,7 @@ func TestExpiredPinnedCertificateIsRejected(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	clientErr, _ := handshake(t,
-		ServerConfig(bridgeOwn, expiredCert),
+		ServerConfig(bridgeOwn, []*x509.Certificate{expiredCert}),
 		ClientConfig(expiredOwn, bridgeCert))
 
 	if clientErr == nil {
@@ -406,7 +406,7 @@ func TestAnExpiredPeerIsRefusedAsExpiredRatherThanAsAStranger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verify := pinnedPeer(peer)
+	verify := pinnedPeers([]*x509.Certificate{peer})
 
 	// While it is valid, the same bytes are accepted - so the refusal below is about the clock and
 	// nothing else.
@@ -447,12 +447,69 @@ func TestAStrangerIsStillRefusedAsAStrangerRatherThanAsExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = pinnedPeer(pinned)([][]byte{stranger.Raw}, nil)
+	err = pinnedPeers([]*x509.Certificate{pinned})([][]byte{stranger.Raw}, nil)
 
 	if !errors.Is(err, ErrNotPinned) {
 		t.Fatalf("a wrong certificate must be refused as not pinned, got %v", err)
 	}
 	if errors.Is(err, ErrExpired) {
 		t.Fatal("a stranger's certificate is not an expiry, whatever its dates say")
+	}
+}
+
+// --- The list, and what an empty one means -------------------------------------------------------
+
+// **Any phone on the list is accepted, not merely the first.**
+//
+// The store holds a list because a second phone should cost a screen and a call to Add rather than a
+// migration of the file, and a verifier that only ever consulted element zero would make that
+// promise false at the one point where it is enforced. Asserted with the LAST element, because a
+// loop that returns early on the first match passes with the first.
+func TestAnyPinnedPeerOnTheListIsAccepted(t *testing.T) {
+	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
+	_, _, firstPhone := mint(t, "agterm-remote phone")
+	_, secondOwn, secondPhone := mint(t, "agterm-remote phone")
+
+	clientErr, serverErr := handshake(t,
+		ServerConfig(bridgeOwn, []*x509.Certificate{firstPhone, secondPhone}),
+		ClientConfig(secondOwn, bridgeCert))
+
+	if clientErr != nil || serverErr != nil {
+		t.Fatalf("a phone on the list must be accepted: client=%v server=%v", clientErr, serverErr)
+	}
+}
+
+// **An empty list accepts nobody**, which is what a bridge nobody has paired yet must do.
+//
+// This is the case that lets the bridge start before enrolment: the door is open, and no certificate
+// that exists can get through it. A verifier that treated "nothing to compare against" as "nothing
+// to object to" would turn an unpaired bridge into an open one.
+func TestAnEmptyPeerListAcceptsNobody(t *testing.T) {
+	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
+	_, phoneOwn, _ := mint(t, "agterm-remote phone")
+
+	clientErr, _ := handshake(t,
+		ServerConfig(bridgeOwn, nil),
+		ClientConfig(phoneOwn, bridgeCert))
+
+	if clientErr == nil {
+		t.Fatal("a bridge with no paired phones must accept nobody")
+	}
+}
+
+// A stranger is still refused when other phones ARE paired, so the loop above widened what is
+// accepted by exactly the certificates on the list and by nothing else.
+func TestAStrangerIsRefusedByANonEmptyList(t *testing.T) {
+	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
+	_, _, firstPhone := mint(t, "agterm-remote phone")
+	_, _, secondPhone := mint(t, "agterm-remote phone")
+	_, strangerOwn, _ := mint(t, "somebody else")
+
+	clientErr, _ := handshake(t,
+		ServerConfig(bridgeOwn, []*x509.Certificate{firstPhone, secondPhone}),
+		ClientConfig(strangerOwn, bridgeCert))
+
+	if clientErr == nil {
+		t.Fatal("a certificate that is on no list must not be accepted")
 	}
 }

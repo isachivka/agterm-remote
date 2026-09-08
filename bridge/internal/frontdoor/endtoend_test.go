@@ -57,7 +57,7 @@ func stack(t *testing.T) (addr string, bridgeCert, phoneCert *x509.Certificate, 
 	}
 	front := Listen(tcp)
 	// false: every connection arrives from the router, so the peer address is not the caller's.
-	srv := listener.New(pinning.ServerConfig(bridgeOwn, pc), &recorder{}, false)
+	srv := listener.New(pinning.ServerConfig(bridgeOwn, []*x509.Certificate{pc}), &recorder{}, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = srv.Serve(ctx, front) }()

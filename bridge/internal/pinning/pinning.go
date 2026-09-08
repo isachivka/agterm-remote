@@ -12,7 +12,7 @@
 // Pinning REPLACES chain validation with a strictly narrower test: one specific
 // certificate, compared byte for byte. A permissive verifier widens what is accepted; this narrows it
 // to exactly one. The distinction matters because the mechanism below sets InsecureSkipVerify, which
-// looks identical to the thing that is forbidden and is the opposite of it — see pinnedPeer.
+// looks identical to the thing that is forbidden and is the opposite of it — see pinnedPeers.
 package pinning
 
 import (
@@ -167,30 +167,46 @@ var ErrNotPinned = errors.New("peer certificate is not the pinned certificate")
 // **The peer still cannot tell**, and that is a test rather than a claim.
 var ErrExpired = errors.New("peer certificate has expired")
 
-// pinnedPeer builds the verifier both sides use: the peer must present exactly one certificate, and
-// it must be byte-identical to the pinned one.
+// pinnedPeers builds the verifier both sides use: the peer must present exactly one certificate, and
+// it must be byte-identical to one of the pinned ones.
 //
 // Byte equality, not "signed by" and not "has the same public key". Two things follow that are worth
 // stating because they are the whole security argument:
 //
-//   - A certificate correctly signed by the pinned certificate's key still fails. That is the case a
+//   - A certificate correctly signed by a pinned certificate's key still fails. That is the case a
 //     CA model would accept and this one must not, and it is the assertion the package test makes.
 //   - A re-issued certificate with the same key fails too. Re-pinning is a deliberate act by the
 //     owner, never something that happens quietly.
 //
-// The validity window is checked explicitly. It was measured that PKIX does not validate a trust
-// anchor's own validity dates, so a pinned certificate — which IS its own anchor — would otherwise
-// never be checked for expiry at all.
-func pinnedPeer(want *x509.Certificate) func([][]byte, [][]*x509.Certificate) error {
+// **An empty list accepts nobody**, which is the whole of what a bridge nobody has paired yet should
+// do. It is a plain consequence of "must equal one of these" rather than a case handled separately,
+// and it is the reason the bridge can start and listen before a phone has ever enrolled: an unpaired
+// bridge is not a broken one, it is one whose door opens for no certificate that exists.
+//
+// The loop does not stop at the match. Its running time is a function of how many phones are paired
+// and of nothing the caller sends, so a peer cannot learn its position in the list from how long a
+// rejection took.
+//
+// The validity window is checked explicitly, and against the certificate that MATCHED rather than
+// against the list. It was measured that PKIX does not validate a trust anchor's own validity dates,
+// so a pinned certificate — which IS its own anchor — would otherwise never be checked for expiry at
+// all.
+func pinnedPeers(want []*x509.Certificate) func([][]byte, [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) != 1 {
 			return ErrNotPinned
 		}
-		if subtle.ConstantTimeCompare(rawCerts[0], want.Raw) != 1 {
+		var matched *x509.Certificate
+		for _, cert := range want {
+			if subtle.ConstantTimeCompare(rawCerts[0], cert.Raw) == 1 {
+				matched = cert
+			}
+		}
+		if matched == nil {
 			return ErrNotPinned
 		}
 		now := time.Now()
-		if now.Before(want.NotBefore) || now.After(want.NotAfter) {
+		if now.Before(matched.NotBefore) || now.After(matched.NotAfter) {
 			return ErrExpired
 		}
 		return nil
@@ -198,7 +214,15 @@ func pinnedPeer(want *x509.Certificate) func([][]byte, [][]*x509.Certificate) er
 }
 
 // ServerConfig is the bridge's listener configuration: TLS 1.3, a client certificate required, and
-// that certificate pinned.
+// that certificate pinned to one of the phones on the list.
+//
+// # Why a list, when the bridge accepts one phone
+//
+// The peer list is what the trust store keeps on disk, and it is a list there for reasons of its own
+// — a second phone should cost a screen and a call to Add, not a migration of a security-critical
+// file. Taking a single certificate here would put the "exactly one" rule in two places and make the
+// wiring between them a lie by one element. So this takes what the store hands out, and how many
+// elements are in it is the store's business.
 //
 // ClientAuth is RequireAnyClientCert rather than RequireAndVerifyClientCert, and ClientCAs is
 // deliberately empty. RequireAndVerify means "build a chain to something in ClientCAs", which is CA
@@ -206,18 +230,18 @@ func pinnedPeer(want *x509.Certificate) func([][]byte, [][]*x509.Certificate) er
 // CA. Putting it there would mean marking the phone's certificate IsCA: a certificate permitted to
 // sign others, which is precisely what this design says must not exist. The verification that matters
 // happens in VerifyPeerCertificate, which is stricter than any chain check: one certificate, exact
-// bytes.
+// bytes, equal to one on the list.
 //
 // Rejection still happens during the handshake. A VerifyPeerCertificate error aborts it with a TLS
 // alert, so an unauthenticated caller gets a handshake failure and never reaches a request parser, a
 // handler, or a log line containing anything they chose. That is the fail-closed rule, and
 // it is a property of where this runs rather than of anything a handler remembers to do.
-func ServerConfig(own tls.Certificate, pinnedClient *x509.Certificate) *tls.Config {
+func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.Config {
 	return &tls.Config{
 		Certificates:          []tls.Certificate{own},
 		MinVersion:            tls.VersionTLS13,
 		ClientAuth:            tls.RequireAnyClientCert,
-		VerifyPeerCertificate: pinnedPeer(pinnedClient),
+		VerifyPeerCertificate: pinnedPeers(pinnedClients),
 	}
 }
 
@@ -236,7 +260,7 @@ func ClientConfig(own tls.Certificate, pinnedServer *x509.Certificate) *tls.Conf
 	return &tls.Config{
 		Certificates:          []tls.Certificate{own},
 		MinVersion:            tls.VersionTLS13,
-		InsecureSkipVerify:    true, //nolint:gosec // replaced by pinnedPeer, which is narrower
-		VerifyPeerCertificate: pinnedPeer(pinnedServer),
+		InsecureSkipVerify:    true, //nolint:gosec // replaced by pinnedPeers, which is narrower
+		VerifyPeerCertificate: pinnedPeers([]*x509.Certificate{pinnedServer}),
 	}
 }
