@@ -19,7 +19,16 @@
 # Usage: scripts/check-no-private-keys.sh [path]      default: the whole working tree
 set -euo pipefail
 
-root="${1:-.}"
+# The repository root, not the directory this was invoked from. `git ls-files` run inside a
+# subdirectory lists only that subtree, and lists it relative to that subdirectory - so the
+# self-exclusion below stops matching and a clean subdirectory produces OK on a partial scan. A
+# guard that reports on a fraction of the tree while claiming to have checked it is worse than no
+# guard.
+if ! root="$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "::error::check-no-private-keys.sh found no git repository at '${1:-.}'."
+  echo "    A guard that cannot list the tracked files must not report a clean tree."
+  exit 2
+fi
 
 # Assembled at runtime rather than written out, so this file does not contain the shape it searches
 # for and cannot find itself. (It is also excluded below - the same belt and braces the siblings
@@ -75,11 +84,20 @@ trap - EXIT
 
 # Tracked files only. Anything gitignored is not what this protects, and a key has to be tracked to
 # be pushed.
+# The listing is captured and its status checked, rather than piped straight into the loop. A
+# failing `git ls-files` produces an empty list, the loop never runs, and the script prints OK and
+# exits 0 - a guard reporting a clean tree precisely because it could not look at one.
+if ! files="$(git -C "$root" ls-files)"; then
+  echo "::error::check-no-private-keys.sh could not list the tracked files in '$root'."
+  echo "    Refusing to report a clean tree on the strength of an empty listing."
+  exit 2
+fi
+
 self="scripts/check-no-private-keys.sh"
 found=0
 while IFS= read -r path; do
   [ "$path" = "$self" ] && continue
-  # ls-files prints repository-relative paths, so they are resolved against $root and not against
+  # ls-files prints repository-root-relative paths, so they are resolved against $root and not against
   # wherever this was invoked from. Reading them relative to the caller's directory makes every file
   # vanish and the whole check pass - silently, and only when it is pointed somewhere other than the
   # current directory, which is exactly what anyone testing it would do. Both siblings shipped with
@@ -95,7 +113,7 @@ while IFS= read -r path; do
     done
     found=1
   fi
-done <<< "$(git -C "$root" ls-files)"
+done <<< "$files"
 
 if [ "$found" -ne 0 ]; then
   echo "::error::A private key must never be committed. Assume it is published:"
