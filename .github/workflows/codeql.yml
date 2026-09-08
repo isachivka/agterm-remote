@@ -1,0 +1,39 @@
+name: CodeQL
+
+# Triggered by `pull_request` only - see the note on triggers in ci.yml.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    # TEMPORARY: both matrix entries have nothing to analyse. CodeQL fails with "no source code was
+    # seen" when a language's extractor finds no files, so `go` cannot pass before Task 8 lands
+    # `bridge/` and `java-kotlin` cannot pass before the Gradle project lands in Phase D. Task 25
+    # removes this line, once both are in the tree.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, java-kotlin]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        if: matrix.language == 'java-kotlin'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3

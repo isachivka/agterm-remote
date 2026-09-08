@@ -1,0 +1,81 @@
+name: CI
+
+# Triggered by `pull_request` only. A fork's pull request must run with the fork's permissions and
+# no access to this repository's secrets, so the base-repository-privileged trigger is banned here -
+# it is the standard way secrets leak out of a public repository through a fork. A guard greps
+# `.github/` for that trigger's name, so it is not written out anywhere, not even in a comment.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The one job that must be able to fail from the first run. It has everything it needs today:
+  # the guard scripts and their self-tests are already in the tree. It never gets continue-on-error.
+  guards:
+    name: guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/tests/guards_test.sh
+      - run: ./scripts/check-no-tokens.sh
+      - run: ./scripts/check-no-credentials.sh
+      - run: ./scripts/check-no-private-keys.sh
+      - run: ./scripts/check-no-addresses.sh
+
+  bridge:
+    name: bridge
+    runs-on: ubuntu-latest
+    # TEMPORARY: `bridge/` does not exist yet - it lands in Task 8, which removes this line.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          # The module has zero third-party dependencies, so there is no go.sum to key a cache on
+          # and setup-go fails outright when it cannot resolve cache-dependency-path.
+          cache: false
+      - name: Refuse any third-party dependency
+        run: |
+          if grep -q '^require' go.mod; then echo "third-party dependency added"; exit 1; fi
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
+
+  android:
+    name: android
+    runs-on: ubuntu-latest
+    # TEMPORARY: there is no Gradle project yet - it lands in Phase D, and Task 25 removes this line.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest
+
+  mac:
+    name: mac
+    runs-on: macos-latest
+    # TEMPORARY: `mac/` does not exist yet - it lands in Phase D, and Task 25 removes this line.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift build
+      - run: swift test

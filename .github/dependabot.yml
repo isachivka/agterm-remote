@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # `gradle` and `gomod` have no manifest to read until Phase B and Phase D land. Dependabot reports
+  # that on its own insights page and opens no pull requests; it does not affect any CI check.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /bridge
+    schedule:
+      interval: weekly
