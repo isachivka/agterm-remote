@@ -43,19 +43,18 @@
 // present as "my phone stopped connecting" with nothing left to look at. A store that refuses to
 // open is recoverable; one that quietly empties itself is not.
 //
-// # Certificates never hands back something it could not parse
+// # This store keeps bytes, and nothing here parses them
 //
-// Certificates is what the TLS layer asks which client certificates to accept, so every element of
-// its result is dereferenced during a handshake. A stored certificate can stop parsing — a Go
-// upgrade tightening what x509 accepts is the realistic way — and the answers to that are: drop it,
-// refuse to serve, or hand the listener a nil. Dropping it is the only one that leaves the bridge
-// running for whoever is still valid, and a dropped certificate cannot authenticate anyone, so
-// nothing is loosened by it.
+// It used to also answer "which client certificates should the TLS layer accept", parsing every
+// stored DER and dropping whatever no longer parsed. That method is gone. Its last caller became
+// enroll.PinnedClients, which has to cache the parse anyway because the question is now asked on
+// every handshake rather than once at startup — and a security rule ("drop what does not parse, log
+// the count and never the identity") stated in two places with one live user is the version that
+// drifts. The rule lives in enroll.parseAll; this package's job is what is on disk.
 //
-// The count of what was dropped is logged; the identity is not. A fingerprint identifies the
-// owner's phone, and this log is a file on a laptop that can be read by anything that can read it,
-// so the number is what a person needs to know something is wrong and the identity adds nothing to
-// that.
+// Nothing here validates a certificate either. The store keeps what it was given, so a certificate
+// that stops being acceptable to x509 cannot make the store unopenable — see the note below on the
+// difference between a missing file and an unreadable one.
 //
 // # Nothing shares the certificate bytes with a caller
 //
@@ -69,12 +68,10 @@ package trust
 
 import (
 	"bytes"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -106,9 +103,9 @@ type Peer struct {
 // only ever holds a list that a write returned nil for, so a caller never has to ask whether what it
 // just read survived a restart.
 //
-// The mutex is not decoration. Certificates is called from the accept path, which is concurrent by
-// nature, while Replace runs from pairing — a handshake arriving while the owner is pairing is
-// ordinary rather than exotic.
+// The mutex is not decoration. Peers is called from the accept path, which is concurrent by nature,
+// while Replace runs from pairing — a handshake arriving while the owner is pairing is ordinary
+// rather than exotic.
 type Store struct {
 	dir string
 
@@ -179,9 +176,9 @@ func (s *Store) Peers() []Peer {
 // it must leave one entry carrying the current name and time, not two entries where the stale one
 // still authenticates.
 //
-// Nothing here validates the certificate. The store keeps what it was given and Certificates
-// decides what parses, which is what keeps a store openable when a certificate in it stops being
-// acceptable to x509.
+// Nothing here validates the certificate. The store keeps what it was given and the caller that
+// hands the bytes to the TLS layer decides what parses — enroll.PinnedClients — which is what keeps a
+// store openable when a certificate in it stops being acceptable to x509.
 func (s *Store) Add(p Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -234,35 +231,6 @@ func (s *Store) Remove(fingerprint string) error {
 		return nil
 	}
 	return s.commit(kept)
-}
-
-// Certificates is the set of client certificates the TLS layer will accept.
-//
-// Anything that no longer parses is dropped, and the count of what was dropped is logged without
-// the identity. See the note at the top of the package for why that is the right answer rather than
-// refusing to serve.
-func (s *Store) Certificates() []*x509.Certificate {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	out := make([]*x509.Certificate, 0, len(s.peers))
-	dropped := 0
-	for _, p := range s.peers {
-		// Parsed from a copy. A parsed certificate keeps a reference to the DER it came from in
-		// its Raw field, and that field is what a pinning verifier compares against — so parsing
-		// the store's own bytes would hand every caller a writable alias to the thing the
-		// comparison trusts.
-		cert, err := x509.ParseCertificate(bytes.Clone(p.CertificateDER))
-		if err != nil {
-			dropped++
-			continue
-		}
-		out = append(out, cert)
-	}
-	if dropped > 0 {
-		log.Printf("trust: %d of %d stored certificates no longer parse and were ignored", dropped, len(s.peers))
-	}
-	return out
 }
 
 // commit writes next and adopts it only if the write succeeded.

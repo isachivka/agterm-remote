@@ -95,6 +95,7 @@ import (
 	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 )
 
 const (
@@ -140,10 +141,25 @@ type Requests interface {
 	Handle(ctx context.Context, req api.Request) api.Response
 }
 
+// Enrolment serves a connection that negotiated enroll.ProtoEnroll, and it is the ONLY thing such a
+// connection ever reaches.
+//
+// A function rather than an interface because there is nothing to ask it: it is handed an
+// already-handshaked connection, it owns that connection, and it closes it. In the bridge it is
+// enroll.Serve with the window, the trust store and the bridge's certificate closed over.
+//
+// **nil is a legitimate value and means "this listener serves no enrolment".** A connection that
+// negotiated the enrolment protocol is then closed unserved, which is the same answer the dispatch
+// gives to a protocol nobody claimed - see accept. That is what lets a caller that has no pairing
+// flow (the front door's tests, a bridge built before this argument existed) leave it out and be
+// safer for it rather than accidentally more permissive.
+type Enrolment func(conn net.Conn)
+
 // Server accepts pinned-mTLS connections and serves the two verbs.
 type Server struct {
 	tls      *tls.Config
 	handler  Requests
+	enrol    Enrolment
 	failures *failureCounter
 	// peerIsCaller reports whether a connection's peer address identifies the caller. False on any
 	// transport where something else dials on the caller's behalf - see the package comment.
@@ -154,13 +170,22 @@ type Server struct {
 	slots chan struct{}
 }
 
-// New builds a listener. peerIsCaller must be false whenever connections arrive via anything that
-// dials on the caller's behalf, because per-source blocking is meaningless then and actively harmful
-// - see the package comment.
-func New(tlsConfig *tls.Config, handler Requests, peerIsCaller bool) *Server {
+// New builds a listener.
+//
+// enrolment is what a connection that negotiated `agterm/enroll-1` reaches, and nil means none is
+// served - see [Enrolment]. It is a REQUIRED ARGUMENT rather than a setter for the same reason
+// peerIsCaller is: whoever stands this up has to have thought about it. A setter that can be
+// forgotten, on a type whose default would then be "serve enrolment connections as API connections",
+// is the exact shape of the bug this dispatch exists to close.
+//
+// peerIsCaller must be false whenever connections arrive via anything that dials on the caller's
+// behalf, because per-source blocking is meaningless then and actively harmful - see the package
+// comment.
+func New(tlsConfig *tls.Config, handler Requests, enrolment Enrolment, peerIsCaller bool) *Server {
 	return &Server{
 		tls:          tlsConfig,
 		handler:      handler,
+		enrol:        enrolment,
 		failures:     newFailureCounter(),
 		peerIsCaller: peerIsCaller,
 		slots:        make(chan struct{}, maxConcurrentHandshakes),
@@ -236,7 +261,52 @@ func (s *Server) accept(ctx context.Context, raw net.Conn) {
 	}
 	release()
 
-	s.serve(ctx, tlsConn)
+	// **THE DISPATCH, and it is what makes this package's headline claim true rather than merely
+	// intended.**
+	//
+	// Until this switch existed, every completed handshake went to s.serve whatever it had
+	// negotiated. That was safe only by accident: nothing in the repository could open an enrolment
+	// window, so the anonymous branch of enroll.ServerConfigFor was unreachable and every connection
+	// that got here had presented the pinned certificate. With a window open it was a hole, and it
+	// was measured as one - a caller with no client certificate, offering `agterm/enroll-1`, was
+	// answered `ok=true` with the owner's session list.
+	//
+	// Three properties, in the order they matter:
+	//
+	//   - **ProtoEnroll reaches enrolment and NOTHING ELSE.** The anonymous configuration and the API
+	//     handler are now in different branches of one switch, and the only way to move a connection
+	//     between them is to renegotiate ALPN, which TLS settles once in the ClientHello exchange and
+	//     never re-opens.
+	//   - **ProtoAPI reaches the API**, exactly as before, and it got here only by presenting a
+	//     certificate byte-identical to a pinned one.
+	//   - **Anything else is CLOSED, not served.** That is the fail-closed direction and it is
+	//     deliberately strict: a caller that offered no ALPN at all negotiates the empty string, and
+	//     the empty string is not the API protocol. Such a caller has still satisfied the pinned
+	//     verifier - the API config is what the handshake ran under - so serving it would not be
+	//     unsafe today. It is refused anyway, because "the default branch is the API" is the property
+	//     that made the original bug possible, and a dispatch whose unknown case is a request rather
+	//     than a refusal will be wrong the first time a third protocol exists. The bridge's own
+	//     phone offers exactly one protocol per connection, by design.
+	//
+	// Nothing here writes to the connection or logs. A protocol that leads nowhere is closed the same
+	// silent way a failed handshake is, so an unauthenticated caller still cannot make this process
+	// do anything at all.
+	//
+	// The handshake slot was released above, BEFORE either branch, and that is deliberate on the
+	// enrolment side too. Holding it across the exchange would cap concurrent enrolments at twelve -
+	// which sounds like the right kind of bound and is the wrong one here, because the semaphore is
+	// shared: twelve anonymous callers stalling inside enrolment would refuse the OWNER's handshake,
+	// which is the second invariant this package holds. What bounds an anonymous exchange instead is
+	// its own deadline, inside enroll.Serve, plus a bounded read - a goroutine and 64 KiB for ten
+	// seconds, and nothing that outlives the traffic.
+	switch tlsConn.ConnectionState().NegotiatedProtocol {
+	case enroll.ProtoAPI:
+		s.serve(ctx, tlsConn)
+	case enroll.ProtoEnroll:
+		if s.enrol != nil {
+			s.enrol(tlsConn)
+		}
+	}
 }
 
 // serve reads newline-delimited JSON requests until the caller stops, goes idle, or exhausts its

@@ -29,6 +29,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -136,10 +137,12 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// GetConfigForClient, so it asks this store for its certificates on the handshake that needs
 	// them, and a phone that enrolled a second ago connects.
 	//
-	// enroll.NewPinnedClients is what keeps that affordable. trust.Store.Certificates re-parses
-	// every stored DER on each call and logs a count when one fails, which is the wrong shape for a
-	// path that now runs per handshake; the cache parses once per version of the list and is keyed
-	// on the list's own bytes, so nothing has to remember to invalidate it.
+	// enroll.NewPinnedClients is what keeps that affordable, and it is now the ONLY thing that parses
+	// what the store holds. A parse per stored phone per handshake - and a log line per handshake the
+	// moment one stored certificate goes bad - is the wrong shape for this path; the cache parses once
+	// per version of the list and is keyed on the list's own bytes, so nothing has to remember to
+	// invalidate it. A phone that enrols is picked up by the next handshake, which the end-to-end test
+	// in internal/enroll measures rather than assumes.
 	peers, err := trust.Open(stateDir)
 	if err != nil {
 		return err
@@ -171,16 +174,27 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), stateDir)
 
-	// The enrolment window. Nothing opens it yet, and that is a SEQUENCING GATE rather than an
-	// omission: the listener still hands every completed handshake to the API handler, so it does not
-	// yet dispatch on the negotiated protocol. Until Task 12 wires that, a connection that negotiated
-	// `agterm/enroll-1` would reach the API with no client certificate - so nothing that can open a
-	// window may ship before it. See internal/enroll, the note by ProtoAPI.
+	// The enrolment window.
 	//
-	// With no window ever open, this bridge offers `agterm/api-1` and nothing else, which is exactly
-	// the behaviour it had before the split. A window is still constructed rather than left nil,
-	// because "closed" is a state this type has and nil is not one.
+	// **Nothing in this binary opens it, and that is no longer a gate on anything.** It used to be
+	// one: the listener handed every completed handshake to the API handler whatever it had
+	// negotiated, so an open window would have meant a connection reaching the API with no client
+	// certificate, and the note here said nothing that could open a window may ship first. The
+	// dispatch below is that missing half - `agterm/enroll-1` reaches enrolment and nothing else - so
+	// what remains is simply that the user interface for pairing lives in the Mac app, which will call
+	// Open and Close over the control socket.
+	//
+	// With no window open, this bridge offers `agterm/api-1` and nothing else, exactly as before the
+	// split. Constructed rather than left nil because "closed" is a state this type has and nil is not
+	// one.
 	window := enroll.NewWindow(time.Now)
+
+	// The bridge's own certificate, parsed, because enrolment hands it to the phone: the QR code
+	// carried only a fingerprint, and pinning compares bytes.
+	leaf, err := leafOf(own)
+	if err != nil {
+		return err
+	}
 
 	// false: this bridge may stand behind a TLS-terminating proxy, and behind one every
 	// connection's peer is the proxy rather than the caller. Per-source blocking over a single
@@ -188,9 +202,16 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// and everybody is refused, the owner included. The concurrency bound in the listener does the
 	// real work either way. See internal/listener, where the argument exists precisely so this is
 	// said rather than defaulted.
+	//
+	// The third argument is what a connection that negotiated `agterm/enroll-1` reaches, and the
+	// switch in listener.accept is what guarantees it reaches nothing else. Everything enrolment
+	// needs is closed over here rather than reachable from the API handler: the window, the trust
+	// store, this bridge's certificate.
 	srv := listener.New(
 		enroll.ServerConfigFor(own, enroll.NewPinnedClients(peers).Certificates, window),
-		handler, false)
+		handler,
+		func(conn net.Conn) { enroll.Serve(conn, window, peers, leaf, pairedPhone) },
+		false)
 
 	tcp, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -508,4 +529,39 @@ func writeTemp(dir, prefix string, content []byte) (string, error) {
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// leafOf is the parsed certificate behind this bridge's own identity.
+//
+// Enrolment needs it: the phone arrived holding a fingerprint off the QR code, and what it has to pin
+// is the bytes. tls.X509KeyPair has populated Leaf since Go 1.23, and this parses Certificate[0]
+// anyway when it has not - the leaf is a nil-able field on a value assembled several functions away,
+// and the cost of trusting it is a nil dereference on the one path that only ever runs while somebody
+// is standing at their Mac trying to pair.
+func leafOf(own tls.Certificate) (*x509.Certificate, error) {
+	if own.Leaf != nil {
+		return own.Leaf, nil
+	}
+	if len(own.Certificate) == 0 {
+		return nil, errors.New("bridge identity: it carries no certificate")
+	}
+	cert, err := x509.ParseCertificate(own.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("bridge certificate: %w", err)
+	}
+	return cert, nil
+}
+
+// pairedPhone is called after a phone has been pinned, and it is where the Mac app's menu gets told.
+//
+// One line, and deliberately a line that names nobody. **No fingerprint and no name**, for the same
+// reason the startup banner reports a count rather than an identity: a fingerprint identifies the
+// owner's phone, a name is a string that phone chose, and this log is a file that anything able to
+// read the disk can read. The count the owner actually wants is one line away with `paired phones`.
+//
+// The Mac app learns about this over the control socket rather than from here - it is the process that
+// opened the window and it is watching for the answer - so this callback exists to be that seam
+// rather than to carry the news itself.
+func pairedPhone(trust.Peer) {
+	log.Print("a phone enrolled and is now the paired phone")
 }

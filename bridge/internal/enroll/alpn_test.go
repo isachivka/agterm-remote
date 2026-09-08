@@ -743,7 +743,11 @@ func TestTheConfigDropsIntoTheListener(t *testing.T) {
 	cfg := enroll.ServerConfigFor(bridgeOwn, enroll.NewPinnedClients(store).Certificates, window)
 
 	rec := &recorder{}
-	srv := listener.New(cfg, rec, true)
+	// nil enrolment on purpose: this test is about the ALPN refusal travelling the listener's one
+	// refusal path, and a nil enrolment handler is the fail-closed default - a connection that
+	// negotiated the enrolment protocol is closed rather than served. The dispatch to a real
+	// enroll.Serve is exercised end to end in endtoend_test.go.
+	srv := listener.New(cfg, rec, nil, true)
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -894,8 +898,13 @@ func TestAnUnpairedPhoneCannotResumeItsWayBackIn(t *testing.T) {
 		t.Fatalf("the handshake resumed, so the pinned verifier never ran: %v", err)
 	}
 
-	// And the owner's own reconnection still works, ticket or no ticket - what was given up is a
-	// round trip, not the connection.
+	// And the owner's own reconnection still works, ticket or no ticket.
+	//
+	// What disabling tickets gave up is NOT a round trip, which an earlier version of this comment
+	// claimed. A Go TLS 1.3 full handshake and a PSK resumption are both 1-RTT - Go accepts early data
+	// only over QUIC, so there is no 0-RTT to lose here - and what is actually given up is a signature,
+	// a verification and a kilobyte or two of certificate. That is CPU and bytes, and neither of them
+	// scales with the network latency this bridge is otherwise so careful about.
 	second, secondCert := mint(t, "a phone that is still paired")
 	if err := store.Add(trust.Peer{
 		Fingerprint:    pinning.Fingerprint(secondCert),
