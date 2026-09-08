@@ -2,9 +2,12 @@ package parent_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -118,11 +121,24 @@ func TestGoneDoesNotFireWhileTheParentLives(t *testing.T) {
 // other users' processes.
 //
 // Pid 1 is the deterministic case: it exists on macOS and on Linux and in a container by definition,
-// and it belongs to root. An unprivileged run gets EPERM from it, which is the answer being asserted
-// on; a run that happens to be root gets success. Both mean alive, so the test is correct either way
-// and does real work in the case that matters.
+// and it belongs to root. An unprivileged run gets EPERM from it, which is the arm being asserted on.
+//
+// **As root it gets nil instead, and then this test passes without exercising that arm at all.** It
+// SKIPS rather than passing quietly, because a test that goes vacuous in an environment and says
+// nothing about it is worse than no test: it reports a guard that is not there. A root container or
+// a `sudo go test` would otherwise retire the only check on the errno rule reachable through a real
+// signal, and nobody would learn that from the output.
+//
+// The rule itself is pinned uid-independently by TestOnlyESRCHMeansGone, which is why a skip here is
+// a loss of one signal rather than of the coverage.
 func TestGoneDoesNotFireForAProcessThisUserMayNotSignal(t *testing.T) {
 	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: kill(1, 0) answers nil rather than EPERM, so this test would pass " +
+			"without touching the EPERM arm it exists for. TestOnlyESRCHMeansGone pins the same rule " +
+			"without depending on who is running the tests.")
+	}
 
 	fired := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -230,4 +246,75 @@ func TestANonPositiveIntervalIsNotFatal(t *testing.T) {
 
 	parent.Watch(ctx, os.Getpid(), 0, func() {})
 	time.Sleep(20 * time.Millisecond)
+}
+
+// **The errno rule, with every answer the kernel can give, and no dependence on who is running the
+// tests.**
+//
+// This is the invariant the package turns on, and until this test existed it was reachable only
+// through a real `kill(1, 0)` - whose answer is EPERM for an ordinary user and nil for root. So the
+// arm that matters most disappeared in exactly the environments that are easiest not to notice: a
+// root container, a `sudo go test`. Here the classification is called directly, so every arm runs
+// everywhere.
+//
+// The unrecognised errno is not filler. It fixes the DIRECTION this package fails in: an answer it
+// does not understand must read as alive, because guessing "gone" from an unfamiliar error is a
+// bridge that shuts itself down over a syscall quirk, and guessing "alive" is a bridge that stays up
+// one extra poll.
+func TestOnlyESRCHMeansGone(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name  string
+		err   error
+		alive bool
+	}{
+		{"nil: the process exists and this user may signal it", nil, true},
+		{"ESRCH: no process has that pid", syscall.ESRCH, false},
+		{"EPERM: the process exists and belongs to somebody else", syscall.EPERM, true},
+		{"an errno this package does not know", syscall.EINVAL, true},
+		{"a wrapped ESRCH is still ESRCH", fmt.Errorf("kill: %w", syscall.ESRCH), false},
+		{"a wrapped EPERM is still alive", fmt.Errorf("kill: %w", syscall.EPERM), true},
+		{"an error carrying no errno at all", errors.New("something else went wrong"), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := parent.AliveFrom(c.err); got != c.alive {
+				// Spelled out rather than %v/%v: the failure that will actually happen here is the
+				// rule being inverted, and the reader needs to be told which direction costs what.
+				if c.alive {
+					t.Fatalf("%v was classified as GONE; only ESRCH means gone, and reading any other "+
+						"answer that way makes the bridge quit at random on a machine where pids are "+
+						"recycled into other users' processes", c.err)
+				}
+				t.Fatalf("%v was classified as ALIVE; then a crashed parent leaves the bridge listening "+
+					"on the owner's exposed port forever", c.err)
+			}
+		})
+	}
+}
+
+// **A cancellation that coincides with the parent's death must not announce the parent's death.**
+//
+// Both channels in the watcher's select can be ready at the same instant, and select picks at random
+// between ready cases - so a SIGTERM arriving as the parent dies could log "parent process is gone;
+// exiting" about a shutdown the owner asked for. Nothing breaks (stop is idempotent), but the line is
+// untrue and it is exactly the line somebody will be reading when they are debugging a shutdown.
+//
+// The parent here is already gone before the watcher starts, so every tick would fire; the context is
+// cancelled at once. With the ctx re-check this can never call gone. Without it the outcome is a coin
+// toss on the first tick, which is why this is worth running with -count.
+func TestGoneDoesNotFireOnAnAlreadyCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	fired := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	parent.Watch(ctx, reapedPID(t), every, func() { close(fired) })
+	cancel()
+
+	select {
+	case <-fired:
+		t.Fatal("gone fired on a context that was already cancelled, so a shutdown would be reported " +
+			"as the parent having disappeared")
+	case <-time.After(window):
+	}
 }
