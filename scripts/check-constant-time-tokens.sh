@@ -43,9 +43,12 @@
 #     byte like every other one of these. It is the single most likely way this rule gets broken and
 #     it walked past the first version of this guard.
 #   - Comments are cut off before anything is matched, so neither the prose explaining this rule nor
-#     a trailing comment mentioning a token trips it. A comparison never lives inside a comment, so
-#     nothing is lost by ignoring them, and a check that objects to a comment sitting next to a
-#     comparison is a check somebody deletes.
+#     a trailing comment mentioning a token trips it - a check that objects to a comment sitting
+#     beside a comparison is a check somebody deletes. This is NOT free, and an earlier draft of the
+#     strip claimed it was: sed cannot tell a comment from a `//` inside a string literal, so the cut
+#     costs the guard any comparison written on a line that carries one. The rule below keeps the
+#     common cases - `://` in a URL, a `//` right after a quote - and what is left uncovered is a
+#     `//` inside a bare-backtick raw string. A comparison hidden behind one of those is missed.
 #
 # WHAT IT MUST NOT DO, which took as much care as the matching
 #
@@ -113,8 +116,19 @@ pattern="(${calls})|(${ops})|(${strcmp})"
 # Step 3 is where this guard nearly died. While it grepped for the word, `bytes.Equal(a, b)` next to
 # a `w.tokenCount` or a comment mentioning tokens was a failure, and a required check that objects to
 # a comment is a check that gets deleted - which costs more than it ever protected.
+#
+# Step 1 is two expressions, not one, and the difference is a whole class of missed comparisons. A
+# plain `s://.*::` truncates at the first `//` ANYWHERE, including inside a string, so
+# `bytes.Equal([]byte("https://x/"+given), w.token[:])` lost everything from the URL onwards and the
+# token with it - a line the guard caught before the strip existed. The first expression takes a
+# comment that owns its whole line; the second takes a trailing one only when the `//` is not
+# preceded by a colon, a quote, a backtick or another slash. What that still cannot see is a `//`
+# inside a bare-backtick raw string.
+#
+# grep -I is on the pipe rather than on the file now, so it guards the stream instead of sniffing the
+# original. For Go source that is the same answer either way.
 scan() {
-  sed 's://.*::' "$1" 2>/dev/null \
+  sed -e 's|^[[:space:]]*//.*||' -e 's|\([^:"`/]\)//.*|\1|' "$1" 2>/dev/null \
     | grep -InE -e "$pattern" \
     | grep -E "$tok"
 }
@@ -148,6 +162,10 @@ must_match=(
   # Code before a comment is still code.
   '	if w.token == candidate { // still the wrong comparison'
   '	if bytes.Equal(w.token[:], token) { // simplified, was subtle'
+  # And a `//` inside a string is not a comment. The first version of the comment strip truncated
+  # these at the URL and lost the token, turning a catch into a silent pass.
+  '	if bytes.Equal([]byte("https://x/"+given), w.token[:]) {'
+  '	if fmt.Sprintf("https://%s", host) == string(w.token[:]) {'
 )
 must_not_match=(
   '	if subtle.ConstantTimeCompare(w.token[:], token) != 1 {'
