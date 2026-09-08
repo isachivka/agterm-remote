@@ -13,27 +13,58 @@ permissions:
   security-events: write
 
 jobs:
-  analyze:
-    name: analyze
+  # Same shape and the same reason as `detect` in ci.yml: a language with no source in the tree is
+  # skipped rather than failed, so its check can be required from today and activates by itself.
+  detect:
+    name: detect
     runs-on: ubuntu-latest
-    # TEMPORARY: both matrix entries have nothing to analyse. CodeQL fails with "no source code was
-    # seen" when a language's extractor finds no files, so `go` cannot pass before Task 8 lands
-    # `bridge/` and `java-kotlin` cannot pass before the Gradle project lands in Phase D. Task 25
-    # removes this line, once both are in the tree.
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [go, java-kotlin]
+    outputs:
+      go: ${{ steps.probe.outputs.go }}
+      # Underscore, not a hyphen: `outputs.java-kotlin` parses as a subtraction in a
+      # GitHub expression, and the result is never the string 'true'.
+      java_kotlin: ${{ steps.probe.outputs.java_kotlin }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: probe
+        run: |
+          {
+            echo "go=$([ -f bridge/go.mod ] && echo true || echo false)"
+            echo "java_kotlin=$([ -f gradlew ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+  # These two are deliberately NOT a matrix over `language`. A job-level `if` cannot read the
+  # `matrix` context (only github, inputs, needs and vars are in scope there), so a matrix entry
+  # cannot be gated on `detect`; and computing the matrix instead would make the check run for an
+  # absent language disappear entirely rather than report as skipped - a required check that is
+  # never created stays pending forever and blocks the merge. Two jobs whose `name:` reproduces
+  # exactly what the matrix used to emit keep the check names `analyze (go)` and
+  # `analyze (java-kotlin)` stable from today through to when each language lands.
+  analyze-go:
+    name: analyze (go)
+    runs-on: ubuntu-latest
+    needs: detect
+    if: needs.detect.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  analyze-java-kotlin:
+    name: analyze (java-kotlin)
+    runs-on: ubuntu-latest
+    needs: detect
+    if: needs.detect.outputs.java_kotlin == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
-        if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
           java-version: '21'
       - uses: github/codeql-action/init@v3
         with:
-          languages: ${{ matrix.language }}
+          languages: java-kotlin
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
