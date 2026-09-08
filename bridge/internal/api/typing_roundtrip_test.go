@@ -12,17 +12,17 @@ import (
 // **The bytes that reach agterm are the bytes the owner typed, in their own language.**
 //
 // Written after the phone's input field was found declaring `KeyboardType.Ascii`, which hid Gboard's
-// language switch and stopped a Russian speaker typing Russian into their own terminal. The fix was on
-// the phone; this is the other half of the question — that nothing between the wire and agterm assumes
-// ASCII either. Asserted rather than reasoned from "UTF-8 works because it should".
+// language switch and stopped anyone typing a non-Latin language into their own terminal. The fix
+// was on the phone; this is the other half of the question — that nothing between the wire and
+// agterm assumes ASCII either. Asserted rather than reasoned from "UTF-8 works because it should".
 func TestTypedTextReachesAgtermAsTheSameUTF8(t *testing.T) {
 	for _, text := range []string{
-		"привет",
-		"эхо тест",
+		"καλημέρα",
+		"ηχω τεστ",
 		"日本語",
 		"café",
-		"ls -la ~/Документы",
-		"grep 'ошибка' log.txt",
+		"ls -la ~/Έγγραφα",
+		"grep 'σφάλμα' log.txt",
 	} {
 		var got string
 		fake := agtermtest.Start(t, func(req agtermtest.Request) any {

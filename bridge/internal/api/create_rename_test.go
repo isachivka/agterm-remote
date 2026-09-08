@@ -9,8 +9,8 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// The four creating and renaming verbs, and the property that matters most about three of them: **a request that
-// should be refused never reaches agterm at all.**
+// The four creating and renaming verbs, and the property that matters most about three of them: **a
+// request that should be refused never reaches agterm at all.**
 //
 // The fake records every request it is sent, so "the bridge did not call it" is asserted directly
 // rather than inferred from an error message that could have come from anywhere.
@@ -92,14 +92,14 @@ func TestTheTargetIsCheckedBeforeTheName(t *testing.T) {
 // keys.Label holds this at its own boundary; this holds it at the one the phone actually talks to,
 // because a wrapper that helpfully added the value would defeat it without touching that package.
 func TestARejectedNameIsNeverEchoedBackToTheCaller(t *testing.T) {
-	secret := strings.Repeat("хозяйская", 9)
+	secret := strings.Repeat("ιδιοκτητη", 9)
 	h, _ := handler(t, func(agtermtest.Request) any {
 		t.Error("a name that should have been refused reached agterm")
 		return agtermtest.Err("unreachable")
 	})
 	resp := h.Handle(context.Background(), Request{Verb: VerbSessionRename, Session: sessionA, Label: secret})
 
-	if strings.Contains(resp.Error, secret) || strings.Contains(resp.Error, "хозяйская") {
+	if strings.Contains(resp.Error, secret) || strings.Contains(resp.Error, "ιδιοκτητη") {
 		t.Errorf("the reply contains the rejected name: %q", resp.Error)
 	}
 }

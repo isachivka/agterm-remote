@@ -12,8 +12,8 @@ import (
 //
 // # What the owner asked for
 //
-// *"при переключении мы держим их фуллскрин"* — showing a pane maximizes it on his Mac, both
-// directions, and nothing is restored afterwards.
+// Panes are kept full screen when switching between them — showing a pane maximizes it on his Mac,
+// both directions, and nothing is restored afterwards.
 //
 // # What agterm does, measured rather than read
 //
@@ -180,9 +180,9 @@ func TestShowingAnUnknownPaneReachesNothing(t *testing.T) {
 
 // **It is a separate verb from `pane.open`, and this is the test that says why.**
 //
-// `Request.Pane` already existed, so a bridge that predates `pane.show` accepts a pane on a `pane.open`
-// and ignores it — a phone asking to maximize the LEFT pane would get a split CREATED instead,
-// silently. Separating the verbs is what makes an old bridge refuse by name instead.
+// `Request.Pane` already existed, so a bridge that predates `pane.show` accepts a pane on a
+// `pane.open` and ignores it — a phone asking to maximize the LEFT pane would get a split CREATED
+// instead, silently. Separating the verbs is what makes an old bridge refuse by name instead.
 //
 // Held here rather than in a comment: the two verbs must not become one, and the difference that
 // matters is that one of them can start a shell and the other cannot.

@@ -12,8 +12,9 @@ import (
 //
 // # Why there is a log at all
 //
-// The owner, on v0.20.0: *"а вот фит — опять нет. нажимаю и ничего, хотя нотификация есть… может логов
-// добавим?"* His bridge log for 2026-08-26 03:01 shows four holds in fifty seconds, each answering
+// The owner, on v0.20.0: the fit still does nothing when he presses it, although the notification
+// arrives — could there be logs? His bridge log for 2026-08-26 03:01 shows four holds in fifty
+// seconds, each answering
 // `calibrated, 45 columns now in effect`, then `off`. Every line was true and none was about what he
 // was looking at: the fit sizes the WINDOW and he was reading a PANE.
 //
@@ -109,10 +110,10 @@ func TestTheFitLogSaysWhetherThereIsASecondPane(t *testing.T) {
 // A pane that exists but is collapsed is still a second pane, and the log says which — the two states
 // give very different column counts, and they are different states.
 //
-// **The maximize reversed which of them is the alarming one.** Both panes on screen is now the failure;
-// one on screen is the phone getting what it asked for. The distinction is the same distinction and
-// this still asserts it in both directions, which is the point of keeping the test rather than
-// rewriting it around the new wording.
+// **The maximize reversed which of them is the alarming one.** Both panes on screen is now the
+// failure; one on screen is the phone getting what it asked for. The distinction is the same
+// distinction and this still asserts it in both directions, which is the point of keeping the test
+// rather than rewriting it around the new wording.
 func TestTheFitLogTellsCollapsedFromOnScreen(t *testing.T) {
 	shown := shapeOf(t, sessionShowing(true, surface("left", true), surface("right", true)), sessionA)
 	hidden := shapeOf(t, noisySession(surface("left", true), surface("right", false)), sessionA)
@@ -128,8 +129,8 @@ func TestTheFitLogTellsCollapsedFromOnScreen(t *testing.T) {
 	}
 }
 
-// **A scratch terminal is not a second pane**, the same distinction the split gate turns on, held here so the
-// log cannot start reporting a split that is not there.
+// **A scratch terminal is not a second pane**, the same distinction the split gate turns on, held
+// here so the log cannot start reporting a split that is not there.
 //
 // It asserts what the line DOES say as well as what it does not. Checking only for the absence of a
 // phrase would have turned into a test that cannot fail the moment the phrase changed — which
@@ -168,7 +169,7 @@ func TestTheFitLogAlwaysSaysSomething(t *testing.T) {
 	})
 }
 
-// --- the maximize ----------------------------------------------------------------------------------
+// --- the maximize --------------------------------------------------------------------------------
 
 // **Two panes ON SCREEN is now the finding, and one hidden pane is not.**
 //
@@ -233,7 +234,7 @@ func TestTheMaximizeLineNamesNothingOfHis(t *testing.T) {
 	}
 }
 
-// --- which window the fit acts on -----------------------------------------------------------------
+// --- which window the fit acts on ----------------------------------------------------------------
 
 // **THE FIELD THAT WAS DROPPED ON THE FLOOR.** agterm has always reported which window is active and
 // `agterm.Window` has always decoded it; this adapter is where it stopped, so `resize.active` could

@@ -18,7 +18,7 @@ import (
 // What is at stake is not an inconsistent reply. It is `pending_restore`, the file holding the only
 // record of where the owner's window came from, and a corruption here would be rare, unreproducible,
 // and would cost them a window they cannot get back. The owner's instruction on the day this was
-// written was "не сломать" — do not break it. This is the way it would have broken.
+// written was: do not break it. This is the way it would have broken.
 //
 // # Two locks, because one would trade a rare bug for a visible one
 //

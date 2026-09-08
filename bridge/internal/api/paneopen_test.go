@@ -12,8 +12,8 @@ import (
 //
 // # What the owner asked for
 //
-// *"я хочу кнопку которая будет по умолчанию показывать левый терминал… если сессия есть мы её
-// показываем, если её нет мы её создаём и потом показываем"* — one button, two states.
+// A button that shows the left terminal by default: if the session has one it is shown, and if it
+// does not it is made first — one button, two states.
 //
 // # What agterm does with it, measured rather than read
 //

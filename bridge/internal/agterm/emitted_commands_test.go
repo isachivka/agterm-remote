@@ -75,10 +75,9 @@ var emittable = map[string]string{
 	// **THE CALIBRATION PAIR, 2026-07-30.** Two verbs so the width feature measures something the
 	// bridge OWNS rather than whatever text happens to be in the owner's working session.
 	//
-	// Their ruling: *"для калибровки нельзя только использовать текущую сессию, нужно создавать
-	// специальную через сокет или agtermctl"*. Measuring their live session is what made three
-	// attempts at this feature wrong on their screen while green in tests - the content moves, so
-	// the answer moves.
+	// Their ruling: calibration may not use the current session, it must make a special one of its
+	// own over the socket. Measuring their live session is what made three attempts at this feature
+	// wrong on their screen while green in tests - the content moves, so the answer moves.
 	//
 	// ### The test to apply to anything proposed below
 	//
@@ -97,16 +96,16 @@ var emittable = map[string]string{
 	//
 	// Against the three questions: it does not DESTROY. It CREATES, and in both uses the creation is
 	// the point. It RE-TARGETS - agterm focuses what session.new makes, measured 2026-07-31, and there
-	// is no flag to suppress it. The owner accepted that cost for calibration - *"Это тоже окей не
-	// проблема"* - and for the phone it is arguably what they are asking for when they press +. It is
+	// is no flag to suppress it. The owner accepted that cost for calibration, and for the phone it
+	// is arguably what they are asking for when they press +. It is
 	// recorded here and in the PR body so they hear it from us rather than from their screen jumping.
 	"session.new": "Calibration, 2026-07-30, extended on 2026-07-31: calibration " +
 		"needs a session whose contents the bridge chose, AND the owner creates their own from the " +
 		"phone. Calibration's is closed in the same operation; the owner's is never closed by us. " +
 		"Both re-target: agterm focuses what it creates.",
 
-	// **THE CREATE PAIR, 2026-07-31.** The owner asked for it in their own words: *"на
-	// странице сессии я хочу чтобы мы могли создавать новые сессии или новые workspace"*.
+	// **THE CREATE PAIR, 2026-07-31.** The owner asked, from the session list, to be able to create
+	// a new session or a new workspace.
 	//
 	// Measured against the live socket rather than read off the CLI's argv: workspace.new returns an
 	// id, makes a workspace holding ZERO sessions, and does NOT move the owner's selection.
@@ -121,8 +120,8 @@ var emittable = map[string]string{
 	"workspace.new": "2026-07-31: the owner creates a workspace from the phone. Creates the " +
 		"state they asked for; measured not to re-target; destroys nothing.",
 
-	// **THE RENAMES, 2026-07-31.** Their words: *"надо подумать как сделать чтобы мы могли
-	// переименовывать воркспейс, и то же самое сессиями"*.
+	// **THE RENAMES, 2026-07-31.** They asked to be able to rename a workspace, and a session the
+	// same way.
 	//
 	// Against the three questions: a label changes and nothing else. No work is destroyed, no session
 	// or workspace comes into being, and the selection does not move.
@@ -144,8 +143,8 @@ var emittable = map[string]string{
 	//
 	// It was the narrowest permission here: only an id this bridge received from its own session.new,
 	// in the same operation, held in a variable. PROVENANCE was the whole safety argument, and it is
-	// no longer the whole of it, because the owner asked to close sessions from their phone:
-	// *"нужна кнопочка чтобы сессии и workspace иметь возможность закрыть"*.
+	// no longer the whole of it, because the owner asked for a button that closes a session or a
+	// workspace from their phone.
 	//
 	// **This is the first capability in this binary that destroys the owner's work.** Until now the
 	// worst a phone past pairing could do was read a screen, type into it, drop a file and create
@@ -193,8 +192,8 @@ var emittable = map[string]string{
 		"take every session inside it with it, silently. Only a full UUID for a workspace they " +
 		"long-pressed; never on this bridge's initiative, and never to tidy up after a failure.",
 
-	// **THE SECOND VERB THAT STARTS A PROCESS, 2026-08-25.** The owner's own words:
-	// *"если сессия есть мы её показываем, если её нет мы её создаём и потом показываем"*.
+	// **THE SECOND VERB THAT STARTS A PROCESS, 2026-08-25.** The owner asked for one tap that shows
+	// the pane if the session has one, and makes it first if it does not.
 	//
 	// Sent as `mode: "on"` and never any other way. `off` and `toggle` are agterm's and stay agterm's.
 	//
@@ -241,12 +240,13 @@ var emittable = map[string]string{
 	// It held the narrowest permission in this file: move a split session's divider, and only ever the
 	// divider of a session THIS BRIDGE CREATED. It existed because the fit's target was the PANE he is
 	// reading while the window was the only lever, with a sidebar and a hand-dragged divider in
-	// between — the owner: *"панели ещё и ресайзить можно, как и сайдбар. те все эти сущности
-	// неизвестной ширины."*
+	// between — the owner named both: panes can be resized and so can the sidebar, so all of these
+	// are things of unknown width.
 	//
-	// The maximize removed the problem instead of the permission. The phone maximizes the pane it shows,
-	// so there is no divider between the window and his text and nothing to shape a probe to. **A
-	// permission that is deleted because its reason stopped existing is the only kind worth having.**
+	// The maximize removed the problem instead of the permission. The phone maximizes the pane it
+	// shows, so there is no divider between the window and his text and nothing to shape a probe
+	// to. **A permission that is deleted because its reason stopped existing is the only kind worth
+	// having.**
 	//
 	// What it rejected still stands and is inherited by session.focus below: moving HIS divider would
 	// also have closed the arithmetic and was refused as the phone rearranging his desk for our
@@ -270,8 +270,8 @@ var emittable = map[string]string{
 	// # The rule this replaces was never his
 	//
 	// Every design in this feature until now routed around a prohibition on the phone moving focus on
-	// his machine. He was asked and said it plainly: *"не было никаких ограничений, ты их придумал"*.
-	// The rule was invented on this side. It is recorded here because a future reader finding a verb
+	// his machine. He was asked and said it plainly: there were never any such restrictions, they
+	// were invented on this side. It is recorded here because a future reader finding a verb
 	// that moves his focus deserves to know it was authorised by him rather than let through.
 	//
 	// # Against the three questions
@@ -302,7 +302,7 @@ var emittable = map[string]string{
 	//
 	// session.new focuses what it creates, so calibration moves the owner's view for a second or
 	// two. select was ruled permitted, restoration-only, to put it back. The owner overruled it:
-	// *"Это тоже окей не проблема"* - the jump is fine.
+	// the jump is fine.
 	//
 	// That answer is better than the design it replaced: it costs one permission fewer, less code,
 	// and one fewer thing to go wrong on an error path - all for a problem they did not have. **A
@@ -315,9 +315,7 @@ var emittable = map[string]string{
 
 	// **THE SECOND WRITE, AND IT IS A DIFFERENT KIND.** Read this before adding anything below it.
 	//
-	// Authorised by the owner on 2026-07-29, in their words:
-	//
-	//     «ну и можно приступать к вводу»
+	// Authorised by the owner on 2026-07-29, who said the bridge could go ahead and start typing.
 	//
 	// ### What was given up
 	//
@@ -340,8 +338,8 @@ var emittable = map[string]string{
 	// bytes that reach the pty are themselves a closed set: internal/keys admits a named key from a
 	// map of literals, or text proven to hold no control character, checked by its own AST guard.
 	// Nothing in this package inspects or builds those bytes.
-	"session.type": "Typing, 2026-07-29: authorised by the owner - " +
-		"«ну и можно приступать к вводу». Bytes validated in internal/keys, never assembled here.",
+	"session.type": "Typing, 2026-07-29: authorised by the owner, who said to go ahead and start " +
+		"typing. Bytes validated in internal/keys, never assembled here.",
 }
 
 // TestOnlyTheAllowlistedAgtermCommandsCanBeEmitted walks the bridge's own source and asserts two
@@ -384,8 +382,8 @@ func TestOnlyTheAllowlistedAgtermCommandsCanBeEmitted(t *testing.T) {
 			where := fset.Position(kv.Pos()).String()
 			lit, ok := kv.Value.(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
-				// The command was computed rather than written down. This is what the closed-set rule
-				// is actually about: a value assembled at runtime can be assembled FROM
+				// The command was computed rather than written down. This is what the closed-set
+				// rule is actually about: a value assembled at runtime can be assembled FROM
 				// INPUT, and then the allowlist below is decoration.
 				dynamic = append(dynamic, where)
 				return true
@@ -439,7 +437,7 @@ func TestOnlyTheAllowlistedAgtermCommandsCanBeEmitted(t *testing.T) {
 // command here on the way to adding it in the source.
 //
 // **`session.type` was the first name on this list and is no longer**, because the owner authorised
-// typing on 2026-07-29 — «ну и можно приступать к вводу» — and it is now an entry with its cost
+// typing on 2026-07-29, and it is now an entry with its cost
 // recorded beside it. It is removed from here rather than left to fail, because a guard that is
 // expected to fail is a guard nobody believes.
 //

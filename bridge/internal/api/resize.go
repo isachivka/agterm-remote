@@ -325,8 +325,8 @@ func (h *Handler) paneShape(ctx context.Context, session string) string {
 			}
 			// **A second pane is no longer a problem; a second pane ON SCREEN is**.
 			//
-			// The owner named the two terms that stand between the window and his text: *"панели ещё и
-			// ресайзить можно, как и сайдбар. те все эти сущности неизвестной ширины."* The phone now
+			// The owner named the two terms that stand between the window and his text: panes can
+			// be resized and so can the sidebar, so both are of unknown width. The phone now
 			// removes one of them by hiding the split, so a pane that exists but is not drawn costs
 			// the fit nothing and this says so rather than warning about it.
 			//
@@ -337,8 +337,8 @@ func (h *Handler) paneShape(ctx context.Context, session string) string {
 			// **agterm's own `isSplit`, not a count of visible surfaces.** Counting was written here
 			// first and was wrong: a scratch terminal is a surface, so a session with a HIDDEN split
 			// and an open scratch showed two visible surfaces and would have been reported as a failed
-			// maximize. The same conflation the split gate had to undo one question over — asking how many
-			// things are on screen is not asking whether the split is.
+			// maximize. The same conflation the split gate had to undo one question over — asking
+			// how many things are on screen is not asking whether the split is.
 			if s.Split {
 				return fmt.Sprintf(
 					"this session is SHOWING BOTH PANES %v - the phone maximizes what it shows, so this "+
@@ -415,9 +415,9 @@ func intentOf(req Request) (resize.Intent, error) {
 //
 // # Strictly narrower, never equal, and the two are not the same thing
 //
-// **The owner's report, on the first build of this that worked:** *"i see horizontal scroll, it means
-// one width symbol is лишний for phone screen"*. One column too many, so every line overflowed and the
-// phone panned - which is the entire complaint this feature exists to remove.
+// **The owner's report, on the first build of this that worked:** horizontal scroll, because one
+// width unit was surplus for the phone screen. One column too many, so every line overflowed and
+// the phone panned - which is the entire complaint this feature exists to remove.
 //
 // Measured on a Pixel 9 Pro XL: the box holds 440dp and a character is exactly 11.0dp, so a floor
 // division gives 40 and 40 x 11.0 is EXACTLY 440. The last glyph's right edge lands precisely on the
