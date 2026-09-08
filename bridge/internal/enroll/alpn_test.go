@@ -565,6 +565,11 @@ func peerOf(cert *x509.Certificate) trust.Peer {
 
 // The parse happens once per version of the list, not once per handshake - and it happens again the
 // moment the list changes, which is what makes the cache impossible to serve stale from.
+//
+// "Parsed once" is asserted through identity: a cached parse hands back the same *x509.Certificate
+// every time, and a fresh one cannot. The store's own Certificates is asserted to be called ZERO
+// times, because asking the store a second question about the same moment is the race that made this
+// type wrong the first time.
 func TestPinnedClientsParsesOncePerVersionOfTheList(t *testing.T) {
 	_, first := mint(t, "first phone")
 	_, second := mint(t, "second phone")
@@ -573,14 +578,23 @@ func TestPinnedClientsParsesOncePerVersionOfTheList(t *testing.T) {
 	src.set([]trust.Peer{peerOf(first)}, []*x509.Certificate{first})
 	cache := enroll.NewPinnedClients(src)
 
+	var parsed *x509.Certificate
 	for i := 0; i < 5; i++ {
-		if got := cache.Certificates(); len(got) != 1 || got[0] != first {
+		got := cache.Certificates()
+		if len(got) != 1 || !bytesEqual(got[0].Raw, first.Raw) {
 			t.Fatalf("handshake %d got the wrong list: %+v", i, got)
+		}
+		if i == 0 {
+			parsed = got[0]
+			continue
+		}
+		if got[0] != parsed {
+			t.Fatalf("handshake %d re-parsed a list that had not changed", i)
 		}
 	}
 	reads, parse := src.counts()
-	if parse != 1 {
-		t.Fatalf("five handshakes over one list must parse once, parsed %d times", parse)
+	if parse != 0 {
+		t.Fatalf("the cache must never ask the store to parse, asked %d times", parse)
 	}
 	if reads != 5 {
 		t.Fatalf("the store must be consulted per handshake, consulted %d times", reads)
@@ -589,11 +603,15 @@ func TestPinnedClientsParsesOncePerVersionOfTheList(t *testing.T) {
 	// A phone enrols. The next handshake sees a list whose bytes differ from the cached one, so it
 	// reparses - nothing had to remember to invalidate anything.
 	src.set([]trust.Peer{peerOf(first), peerOf(second)}, []*x509.Certificate{first, second})
-	if got := cache.Certificates(); len(got) != 2 {
+	got := cache.Certificates()
+	if len(got) != 2 {
 		t.Fatalf("a phone that enrolled is not in the list: %+v", got)
 	}
-	if _, parse := src.counts(); parse != 2 {
-		t.Fatalf("a changed list must be parsed again, parsed %d times", parse)
+	if got[0] == parsed {
+		t.Fatal("a changed list must be parsed again")
+	}
+	if !bytesEqual(got[1].Raw, second.Raw) {
+		t.Fatal("the phone that enrolled is not the one in the list")
 	}
 
 	// And unpairing everybody is a change like any other: the list the cache hands out is empty,
@@ -601,6 +619,27 @@ func TestPinnedClientsParsesOncePerVersionOfTheList(t *testing.T) {
 	src.set(nil, nil)
 	if got := cache.Certificates(); len(got) != 0 {
 		t.Fatalf("an emptied store must hand out an empty list, got %+v", got)
+	}
+	if _, parse := src.counts(); parse != 0 {
+		t.Fatalf("the cache must never ask the store to parse, asked %d times", parse)
+	}
+}
+
+// A stored certificate that no longer parses is dropped rather than served as a nil, and the list
+// keeps working for whoever is still valid.
+func TestPinnedClientsDropsWhatNoLongerParses(t *testing.T) {
+	_, first := mint(t, "first phone")
+
+	src := &countingSource{}
+	src.set([]trust.Peer{
+		{Fingerprint: "broken", CertificateDER: []byte{0x30, 0x00, 0x01}},
+		peerOf(first),
+	}, nil)
+	cache := enroll.NewPinnedClients(src)
+
+	got := cache.Certificates()
+	if len(got) != 1 || !bytesEqual(got[0].Raw, first.Raw) {
+		t.Fatalf("want only the certificate that parses, got %d", len(got))
 	}
 }
 
@@ -619,7 +658,7 @@ func TestPinnedClientsHandsOutACopyOfTheList(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("the test did not append: %+v", got)
 	}
-	if again := cache.Certificates(); len(again) != 1 || again[0] != first {
+	if again := cache.Certificates(); len(again) != 1 || !bytesEqual(again[0].Raw, first.Raw) {
 		t.Fatalf("the cached list was reachable from outside: %+v", again)
 	}
 }
@@ -802,4 +841,172 @@ func TestAnEnrolmentTicketCannotBeResumedIntoTheAPI(t *testing.T) {
 				enroll.ProtoAPI, got.DidResume)
 		}
 	}
+}
+
+// An unpaired phone must not be able to resume its way back in.
+//
+// # The hole this was written for
+//
+// Session resumption skips the only check this project has. On a resumed TLS 1.3 handshake Go sets
+// usingPSK, requestClientCert() is false, and VerifyPeerCertificate NEVER RUNS - the peer's
+// certificate is restored from the ticket with only a NotAfter check. The ticket keys live on the
+// long-lived outer config rather than on the one GetConfigForClient returns, so a ticket earned on
+// one connection is offered on the next.
+//
+// Measured before the fix: pair a phone, connect, Remove it from the store, reconnect with the same
+// ClientSessionCache - and the unpaired phone is SERVED, resumed=true, proto=agterm/api-1. The trust
+// store said no and the handshake never asked it. Up to seven days of that, which is Go's default
+// ticket lifetime.
+//
+// The whole suite stayed green through it because every other test in this file dials with a fresh
+// session cache. The shared cache is the point of this test, and so is asserting DidResume: a
+// refusal for the right reason and a refusal because resumption silently stopped working are
+// different facts, and only one of them survives a future Go release.
+func TestAnUnpairedPhoneCannotResumeItsWayBackIn(t *testing.T) {
+	srv, _, phone, store := testBridge(t)
+
+	cfg := clientConfig(srv.cert, &phone, []string{enroll.ProtoAPI})
+	cfg.ClientSessionCache = tls.NewLRUClientSessionCache(4)
+
+	state, err := dialWith(t, srv, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NegotiatedProtocol != enroll.ProtoAPI {
+		t.Fatalf("want %q, got %q", enroll.ProtoAPI, state.NegotiatedProtocol)
+	}
+
+	leaf, err := x509.ParseCertificate(phone.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remove(pinning.Fingerprint(leaf)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same client, the same cache, one ticket in hand.
+	resumed, err := dialWith(t, srv, cfg)
+	if err == nil {
+		t.Fatalf("an unpaired phone was served, resumed=%t proto=%q",
+			resumed.DidResume, resumed.NegotiatedProtocol)
+	}
+	if resumed.DidResume {
+		t.Fatalf("the handshake resumed, so the pinned verifier never ran: %v", err)
+	}
+
+	// And the owner's own reconnection still works, ticket or no ticket - what was given up is a
+	// round trip, not the connection.
+	second, secondCert := mint(t, "a phone that is still paired")
+	if err := store.Add(trust.Peer{
+		Fingerprint:    pinning.Fingerprint(secondCert),
+		CertificateDER: secondCert.Raw,
+		PairedAt:       time.Unix(3, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	live := clientConfig(srv.cert, &second, []string{enroll.ProtoAPI})
+	live.ClientSessionCache = tls.NewLRUClientSessionCache(4)
+	for i := 0; i < 3; i++ {
+		state, err := dialWith(t, srv, live)
+		if err != nil {
+			t.Fatalf("reconnection %d: %v", i, err)
+		}
+		if state.DidResume {
+			t.Fatalf("reconnection %d resumed, so the verifier was skipped", i)
+		}
+		if state.NegotiatedProtocol != enroll.ProtoAPI {
+			t.Fatalf("reconnection %d negotiated %q", i, state.NegotiatedProtocol)
+		}
+	}
+}
+
+// The cache must never hold a certificate the store does not.
+//
+// # The interleaving this was written for
+//
+// The first shape of this cache read the key with Peers() and then the certificates with
+// Certificates(), which is two reads of a store that can be written to between them. "Key first"
+// stops an OLDER parse being filed under a NEWER key. It permits the mirror image: key read at [A],
+// a write lands, certificates read as [A, B] - and the cache holds {key: [A], certs: [A, B]}. The
+// owner then unpairs B, the store returns to [A], the key MATCHES, and every later handshake trusts
+// B forever. An attacker who can enrol once and then hammer connections drives both sides of that
+// race, and the prize is surviving an unpair.
+//
+// The fix is not a tighter comparison, it is ONE snapshot: the cache parses the DER that came back
+// from Peers() and never asks the store a second question. This test drives the interleaving through
+// the seam - Peers returns [A] and, on its way out, makes any later Certificates() call answer
+// [A, B] - so it fails against a two-read cache and passes against a one-read one.
+func TestTheCacheNeverHoldsWhatTheStoreDoesNot(t *testing.T) {
+	_, first := mint(t, "the owner's phone")
+	_, second := mint(t, "a phone that enrolled mid-read")
+
+	src := &racingSource{}
+	src.set([]trust.Peer{peerOf(first)}, []*x509.Certificate{first})
+	// The write that lands between the two reads: whatever asks for certificates after Peers() has
+	// answered gets the longer list.
+	src.betweenReads = func() {
+		src.certs = []*x509.Certificate{first, second}
+	}
+
+	cache := enroll.NewPinnedClients(src)
+	// What this first call returns is not the point - the store genuinely did grow while it ran, so
+	// either answer is defensible. What is filed under the key is.
+	t.Logf("the handshake that raced the write saw %d certificates", len(cache.Certificates()))
+
+	// The store is back to [A] - either because the second phone was unpaired, or because it was
+	// never in the list this call keyed on. Either way the key matches and the cached parse is what
+	// every later handshake gets.
+	src.betweenReads = nil
+	src.set([]trust.Peer{peerOf(first)}, []*x509.Certificate{first})
+
+	got := cache.Certificates()
+	if len(got) != 1 {
+		t.Fatalf("the cache holds %d certificates for a store holding 1", len(got))
+	}
+	if !bytesEqual(got[0].Raw, first.Raw) {
+		t.Fatal("the cache holds a certificate that is not the one in the store")
+	}
+}
+
+// racingSource lets a test land a write between the cache's reads.
+type racingSource struct {
+	mu           sync.Mutex
+	peers        []trust.Peer
+	certs        []*x509.Certificate
+	betweenReads func()
+}
+
+func (r *racingSource) Peers() []trust.Peer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.peers
+	if r.betweenReads != nil {
+		r.betweenReads()
+	}
+	return out
+}
+
+func (r *racingSource) Certificates() []*x509.Certificate {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.certs
+}
+
+func (r *racingSource) set(peers []trust.Peer, certs []*x509.Certificate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.peers = peers
+	r.certs = certs
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

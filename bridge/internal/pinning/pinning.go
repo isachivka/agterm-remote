@@ -239,10 +239,29 @@ func pinnedPeers(want []*x509.Certificate) func([][]byte, [][]*x509.Certificate)
 // it is a property of where this runs rather than of anything a handler remembers to do.
 func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.Config {
 	return &tls.Config{
-		Certificates:          []tls.Certificate{own},
-		MinVersion:            tls.VersionTLS13,
-		ClientAuth:            tls.RequireAnyClientCert,
-		VerifyPeerCertificate: pinnedPeers(pinnedClients),
+		Certificates: []tls.Certificate{own},
+		MinVersion:   tls.VersionTLS13,
+		ClientAuth:   tls.RequireAnyClientCert,
+		// **A resumed handshake skips the only check this project has.**
+		//
+		// On a resumed TLS 1.3 handshake Go sets usingPSK, requestClientCert() is false, and
+		// VerifyPeerCertificate NEVER RUNS - the peer certificate is restored from the ticket and
+		// checked for nothing but expiry. So a phone the owner has unpaired goes on being served for
+		// as long as its ticket lives, which is seven days by default, and the trust store is never
+		// consulted at all. That was measured end to end, not reasoned about: pair, connect, remove
+		// from the store, reconnect with the same session cache, and the unpaired phone was served
+		// with didResume true.
+		//
+		// Everything else in this package narrows what is accepted to exactly one certificate's
+		// bytes. Tickets widen it back out to "whoever held a ticket when the answer was yes", and
+		// they do it by bypassing the verifier rather than by weakening it - which is why no amount
+		// of care inside pinnedPeers could have caught it.
+		//
+		// What this costs is one full handshake per reconnection instead of an abbreviated one. That
+		// is a round trip on a network the phone is already paying round trips on, against a trust
+		// decision the owner expects to take effect when they make it.
+		SessionTicketsDisabled: true,
+		VerifyPeerCertificate:  pinnedPeers(pinnedClients),
 	}
 }
 
@@ -258,11 +277,15 @@ func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.C
 //
 // Everything ServerConfig refuses, this accepts, so the only thing keeping the two apart is that a
 // connection is on one or the other and cannot cross. That separation is internal/enroll's
-// ServerConfigFor's job and it is made in the TLS handshake by ALPN, before a byte of application data exists: a
-// connection served by this config negotiated `agterm/enroll-1`, which leads to the enrolment
-// handler and to nothing else. Expressed instead as a path inside one authenticated stream, the same
-// claim would rest on routing code — a far weaker thing to assert about a port deliberately exposed
-// to the internet.
+// ServerConfigFor's job and it is made in the TLS handshake by ALPN, before a byte of application
+// data exists: a connection served by this config negotiated `agterm/enroll-1`. Expressed instead as
+// a path inside one authenticated stream, the same claim would rest on routing code — a far weaker
+// thing to assert about a port deliberately exposed to the internet.
+//
+// **What such a connection then reaches is not yet wired**, and this config must not become
+// reachable until it is. The listener currently hands every completed handshake to the API handler;
+// the dispatch on the negotiated protocol is Task 12. Nothing calls enroll.Window.Open today, so
+// nothing is ever served by this config — see the note by enroll.ProtoAPI, which states the gate.
 //
 // Two properties are what make an anonymous branch acceptable at all, and neither is here:
 //
@@ -287,6 +310,13 @@ func AnonymousServerConfig(own tls.Certificate) *tls.Config {
 		// the connection state with nothing having checked it, which is the shape a later reader
 		// mistakes for an identity. Nothing is asked for, so nothing is there.
 		ClientAuth: tls.NoClientCert,
+		// Off here for the same reason as in ServerConfig, and for one more that is specific to this
+		// branch: a ticket issued while an enrolment window was open outlives the window by days. An
+		// enrolment offer that is supposed to last five minutes must not leave a resumable credential
+		// behind it. Nothing here verifies anything, so there is also nothing a resumption could
+		// usefully skip - which makes this the cheap half of a rule that has to be true on both
+		// configs to be true at all.
+		SessionTicketsDisabled: true,
 	}
 }
 

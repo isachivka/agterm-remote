@@ -171,10 +171,15 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), stateDir)
 
-	// The enrolment window. Nothing opens it yet: the verb that does arrives with the pairing panel
-	// on the Mac side, and until then this bridge offers `agterm/api-1` and nothing else - which is
-	// exactly the behaviour it had before the split. A window is still constructed rather than left
-	// nil, because "closed" is a state this type has and nil is not one.
+	// The enrolment window. Nothing opens it yet, and that is a SEQUENCING GATE rather than an
+	// omission: the listener still hands every completed handshake to the API handler, so it does not
+	// yet dispatch on the negotiated protocol. Until Task 12 wires that, a connection that negotiated
+	// `agterm/enroll-1` would reach the API with no client certificate - so nothing that can open a
+	// window may ship before it. See internal/enroll, the note by ProtoAPI.
+	//
+	// With no window ever open, this bridge offers `agterm/api-1` and nothing else, which is exactly
+	// the behaviour it had before the split. A window is still constructed rather than left nil,
+	// because "closed" is a state this type has and nil is not one.
 	window := enroll.NewWindow(time.Now)
 
 	// false: this bridge may stand behind a TLS-terminating proxy, and behind one every
