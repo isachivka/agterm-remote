@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // The wire shape was read off agtermctl itself on 2026-09-05, by pointing `agtermctl sidebar width

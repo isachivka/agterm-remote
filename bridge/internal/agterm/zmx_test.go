@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 func TestZmxListReadsTheEndpointAndEveryPaneRow(t *testing.T) {

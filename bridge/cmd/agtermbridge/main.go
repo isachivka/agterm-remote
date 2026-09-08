@@ -29,14 +29,14 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/api"
-	"dev.isachivka.bewareofsugar/bridge/internal/control"
-	"dev.isachivka.bewareofsugar/bridge/internal/frontdoor"
-	"dev.isachivka.bewareofsugar/bridge/internal/limits"
-	"dev.isachivka.bewareofsugar/bridge/internal/listener"
-	"dev.isachivka.bewareofsugar/bridge/internal/logfile"
-	"dev.isachivka.bewareofsugar/bridge/internal/pinning"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/control"
+	"github.com/isachivka/agterm-remote/bridge/internal/frontdoor"
+	"github.com/isachivka/agterm-remote/bridge/internal/limits"
+	"github.com/isachivka/agterm-remote/bridge/internal/listener"
+	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
+	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
 // Config is read from disk rather than compiled in, so that rotating the address the bridge answers

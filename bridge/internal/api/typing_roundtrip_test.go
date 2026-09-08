@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // **The bytes that reach agterm are the bytes the owner typed, in their own language.**

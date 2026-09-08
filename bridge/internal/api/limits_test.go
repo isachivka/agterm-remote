@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
-	"dev.isachivka.bewareofsugar/bridge/internal/limits"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/limits"
 )
 
 // A handler with a counting reader and a clock the test moves. The agterm socket is absent on

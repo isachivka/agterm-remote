@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/keys"
+	"github.com/isachivka/agterm-remote/bridge/internal/keys"
 )
 
 // typing sends one keystroke, or a short run of text, to a session.

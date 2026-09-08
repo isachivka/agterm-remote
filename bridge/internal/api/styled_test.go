@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // zmxInventory answers `zmx.list` with one running daemon behind sessionA's left pane, and

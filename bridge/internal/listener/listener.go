@@ -93,7 +93,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/api"
 )
 
 const (

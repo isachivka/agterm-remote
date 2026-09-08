@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
 // Runs the calibration against the REAL agterm on this machine. Skipped unless BOS_REAL_AGTERM=1.

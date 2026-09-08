@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/dropoff"
+	"github.com/isachivka/agterm-remote/bridge/internal/dropoff"
 )
 
 // MaxRequestBytes is the ceiling on one request line, and it is derived rather than chosen.

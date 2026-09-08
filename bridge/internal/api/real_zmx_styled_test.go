@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/styled"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/styled"
 )
 
 // Reads one live pane with its colours through the REAL agterm and the REAL zmx on this machine.

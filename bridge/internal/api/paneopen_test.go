@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // The verb that opens a session's second pane — REQ-0035.

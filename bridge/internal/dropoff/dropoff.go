@@ -104,7 +104,7 @@ const (
 // being tidy.
 //
 // [MaxRootBytes] is the only bound, and it refuses new writes rather than removing old ones.
-const Root = "/tmp/beware-of-sugar"
+const Root = "/tmp/agterm-remote"
 
 // ErrTooLarge is a file over [MaxFileBytes]. Its own error so the API layer can say which bound.
 var ErrTooLarge = errors.New("file is too large")

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // The pane a request addresses — REQ-0032, and the silent defect it was written for.

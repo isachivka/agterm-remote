@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/limits"
+	"github.com/isachivka/agterm-remote/bridge/internal/limits"
 )
 
 // This file is VerbLimits — REQ-0045 — and its cache. The reading itself lives in internal/limits;

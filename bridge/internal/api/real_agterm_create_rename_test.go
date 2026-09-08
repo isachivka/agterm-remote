@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 )
 
 // liveName is what this test renames its workspace to, and it is deliberately not a plausible name.

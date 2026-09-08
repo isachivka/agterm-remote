@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
 // # What these logs may and may not contain

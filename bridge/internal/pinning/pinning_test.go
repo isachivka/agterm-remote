@@ -96,7 +96,7 @@ func handshake(t *testing.T, server, client *tls.Config) (clientErr, serverErr e
 // The happy path, and the only configuration that is supposed to exist in production.
 func TestPinnedPairCompletesHandshake(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	_, phoneOwn, phoneCert := mint(t, "beware-of-sugar phone")
+	_, phoneOwn, phoneCert := mint(t, "agterm-remote phone")
 
 	clientErr, serverErr := handshake(t,
 		ServerConfig(bridgeOwn, phoneCert),
@@ -113,7 +113,7 @@ func TestPinnedPairCompletesHandshake(t *testing.T) {
 // A different phone. The ordinary rejection case.
 func TestUnpinnedClientIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	_, _, phoneCert := mint(t, "beware-of-sugar phone")
+	_, _, phoneCert := mint(t, "agterm-remote phone")
 	_, strangerOwn, _ := mint(t, "somebody else")
 
 	clientErr, _ := handshake(t,
@@ -128,7 +128,7 @@ func TestUnpinnedClientIsRejected(t *testing.T) {
 // No certificate at all: the anonymous caller from REQ-0008's fail-closed ruling.
 func TestClientWithNoCertificateIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	_, _, phoneCert := mint(t, "beware-of-sugar phone")
+	_, _, phoneCert := mint(t, "agterm-remote phone")
 
 	anonymous := &tls.Config{
 		MinVersion:            tls.VersionTLS13,
@@ -146,7 +146,7 @@ func TestClientWithNoCertificateIsRejected(t *testing.T) {
 func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 	_, imposterOwn, _ := mint(t, "not the owner's laptop")
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	_, phoneOwn, phoneCert := mint(t, "beware-of-sugar phone")
+	_, phoneOwn, phoneCert := mint(t, "agterm-remote phone")
 	_ = bridgeOwn
 
 	clientErr, _ := handshake(t,
@@ -170,7 +170,7 @@ func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 // bytes and has no concept of an issuer at all.
 func TestCertificateSignedByThePinnedKeyIsStillRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	phoneID, _, phoneCert := mint(t, "beware-of-sugar phone")
+	phoneID, _, phoneCert := mint(t, "agterm-remote phone")
 
 	forged := forgeSignedBy(t, phoneID, phoneCert, bridgeCert)
 	_, serverErr := handshake(t, ServerConfig(bridgeOwn, phoneCert), forged)
@@ -186,10 +186,10 @@ func TestCertificateSignedByThePinnedKeyIsStillRejected(t *testing.T) {
 // Re-issuing with the same keypair is also refused: re-pinning is a deliberate act by the owner.
 func TestReissuedCertificateWithTheSameKeyIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	phoneID, phoneOwn, _ := mint(t, "beware-of-sugar phone")
+	phoneID, phoneOwn, _ := mint(t, "agterm-remote phone")
 
 	// Pin a DIFFERENT mint of the same name; the live phone still holds the first one.
-	_, _, otherPhoneCert := mint(t, "beware-of-sugar phone")
+	_, _, otherPhoneCert := mint(t, "agterm-remote phone")
 	_ = phoneID
 
 	clientErr, _ := handshake(t,
@@ -222,7 +222,7 @@ func TestReissuedCertificateWithTheSameKeyIsRejected(t *testing.T) {
 // That is a difference in how the property is held, not in whether it holds today.
 func TestClientCAsIsViableButHoldsTheSamePropertyMoreLoosely(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
-	phoneID, phoneOwn, phoneCert := mint(t, "beware-of-sugar phone")
+	phoneID, phoneOwn, phoneCert := mint(t, "agterm-remote phone")
 
 	pool := x509.NewCertPool()
 	pool.AddCert(phoneCert)
@@ -281,7 +281,7 @@ func forgeSignedBy(t *testing.T, issuerID Identity, issuerCert, pinnedServer *x5
 }
 
 func TestMintedCertificateIsNotAnIssuer(t *testing.T) {
-	_, _, cert := mint(t, "beware-of-sugar phone")
+	_, _, cert := mint(t, "agterm-remote phone")
 
 	if cert.IsCA {
 		t.Error("a pinned certificate must never be a CA")
@@ -355,7 +355,7 @@ func TestLoadPeerRefusesABundle(t *testing.T) {
 func TestCertificateFitsInAQRCode(t *testing.T) {
 	const qrVersion40BinaryCapacityL = 2953
 
-	_, _, cert := mint(t, "beware-of-sugar phone")
+	_, _, cert := mint(t, "agterm-remote phone")
 	derBytes := len(cert.Raw)
 	b64 := len(base64.StdEncoding.EncodeToString(cert.Raw))
 

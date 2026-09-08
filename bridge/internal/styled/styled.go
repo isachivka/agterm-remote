@@ -25,7 +25,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 )
 
 // Pick finds the running daemon behind one pane. False when the pane has none, which is the normal

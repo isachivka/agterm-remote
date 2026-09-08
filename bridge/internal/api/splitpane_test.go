@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // Whether a session HAS a second pane — REQ-0034, and the trap that shipped in v0.18.0.

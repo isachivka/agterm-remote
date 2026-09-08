@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/dropoff"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/dropoff"
 )
 
 // The verb, end to end through Handle, which is what the phone actually reaches.

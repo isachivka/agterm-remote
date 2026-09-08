@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
-	"dev.isachivka.bewareofsugar/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
 // The boundary between the wire's two booleans and the closed set behind it — REQ-0040.

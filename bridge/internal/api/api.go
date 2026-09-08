@@ -26,11 +26,11 @@ import (
 	"sync"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/keys"
-	"dev.isachivka.bewareofsugar/bridge/internal/limits"
-	"dev.isachivka.bewareofsugar/bridge/internal/resize"
-	"dev.isachivka.bewareofsugar/bridge/internal/styled"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/keys"
+	"github.com/isachivka/agterm-remote/bridge/internal/limits"
+	"github.com/isachivka/agterm-remote/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/styled"
 )
 
 // Bounds on `lines`. The floor is agterm's own (`--lines must be greater than 0`), re-checked here so

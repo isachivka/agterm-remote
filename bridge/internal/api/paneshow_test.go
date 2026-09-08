@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
 // The verb that shows one pane at the full width of the terminal area — REQ-0042.

@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm/agtermtest"
-	"dev.isachivka.bewareofsugar/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
+	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
 // **The race the control socket made reachable, run under -race.**

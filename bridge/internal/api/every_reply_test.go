@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 )
 
 // **Every reply carries the width setting.** It used to ride only on responses to `resize`, and the

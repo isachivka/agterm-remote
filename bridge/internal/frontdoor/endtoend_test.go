@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/api"
-	"dev.isachivka.bewareofsugar/bridge/internal/listener"
-	"dev.isachivka.bewareofsugar/bridge/internal/pinning"
+	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/listener"
+	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
 // The whole stack, with the listener untouched.

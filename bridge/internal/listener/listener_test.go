@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/api"
-	"dev.isachivka.bewareofsugar/bridge/internal/pinning"
+	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
 // recorder answers requests and, more importantly, records that it was reached at all.

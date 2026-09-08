@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"dev.isachivka.bewareofsugar/bridge/internal/agterm"
+	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 )
 
 // The shapes below are the ones a real `zmx history --vt` dump carried on 2026-09-05, read off a live
