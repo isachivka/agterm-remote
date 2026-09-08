@@ -18,6 +18,22 @@
 // So the on-disk format is a JSON array from the first write, and the one-phone rule lives in which
 // method the pairing code calls, where it can be changed by deleting a line.
 //
+// # Disk is the truth, and memory is only allowed to catch up
+//
+// Every mutator builds the list it wants, writes THAT, and adopts it only once the write returned
+// nil. Nothing assigns to the store's own slice first and saves afterwards.
+//
+// The order is the whole correctness of this package under a failing disk, and getting it the other
+// way round is not a cosmetic bug. A full disk during Add would leave the bridge trusting a
+// certificate it had just told the caller it could not pair, and which no restart would bring back.
+// The same fault during Replace would unpair the owner's phone in memory while the file still held
+// it — the bridge stops answering the only phone that can reach it, and the next write that DOES
+// succeed makes the divergence permanent. Both were reachable, and neither showed up as a failed
+// call: the caller got its error and the store had already moved.
+//
+// So the invariant is: what this store returns has been written. It is what makes an error from Add
+// mean "nothing happened" rather than "something happened, somewhere".
+//
 // # A missing file and an unreadable one are different
 //
 // No peers.json means a bridge nobody has paired yet, which is its ordinary first state: Open
@@ -40,9 +56,19 @@
 // owner's phone, and this log is a file on a laptop that can be read by anything that can read it,
 // so the number is what a person needs to know something is wrong and the identity adds nothing to
 // that.
+//
+// # Nothing shares the certificate bytes with a caller
+//
+// The DER is cloned on the way in and on the way out, so no caller holds a slice that aliases what
+// the TLS layer will authenticate against. This used to be asserted as a convention — "a
+// certificate is not edited, it is replaced" — and a convention is not a property: writing one byte
+// into the slice you passed to Replace, or into the one Peers handed back, changed which
+// certificate the bridge would go on to accept. A trust store whose contents can be edited from
+// outside by accident is not one.
 package trust
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -77,8 +103,8 @@ type Peer struct {
 }
 
 // Store is the peer list and the file behind it. The in-memory copy is authoritative for reads and
-// every write reaches disk before it returns, so a caller never has to ask whether what it just
-// wrote survived.
+// only ever holds a list that a write returned nil for, so a caller never has to ask whether what it
+// just read survived a restart.
 //
 // The mutex is not decoration. Certificates is called from the accept path, which is concurrent by
 // nature, while Replace runs from pairing — a handshake arriving while the owner is pairing is
@@ -88,6 +114,14 @@ type Store struct {
 
 	mu    sync.Mutex
 	peers []Peer
+
+	// write installs a complete peers.json, and is a field rather than a direct call to
+	// writeAtomically for one reason: the rollback above is only a claim until a write can be made
+	// to fail on demand. The alternative is making the real filesystem refuse — a read-only
+	// directory — which is not a test so much as a bet that the tests are not running as a user who
+	// can write to it anyway, and in CI that bet is frequently lost. Replaced only from
+	// export_test.go; nothing outside this package can reach it.
+	write func(data []byte) error
 }
 
 // Open reads the store in dir, creating the directory if the bridge has never written there.
@@ -102,6 +136,8 @@ func Open(dir string) (*Store, error) {
 	}
 
 	s := &Store{dir: dir}
+	s.write = s.writeAtomically
+
 	raw, err := os.ReadFile(s.path())
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, nil
@@ -112,6 +148,14 @@ func Open(dir string) (*Store, error) {
 	if err := json.Unmarshal(raw, &s.peers); err != nil {
 		return nil, fmt.Errorf("parse trust store: %w", err)
 	}
+	// A file whose entire content is `null` parses without error into a nil slice, which would open
+	// as a bridge nobody has paired — the fail-open reading of a file that plainly says something.
+	// Nothing here writes `null` and no truncation of a JSON array produces it, so this is not
+	// reachable today; it is one line, and it means the "missing file only" rule above is enforced
+	// by the code rather than by what the writer happens to emit.
+	if len(raw) > 0 && s.peers == nil {
+		return nil, errors.New("parse trust store: the file holds null, which is neither a peer list nor an absent one")
+	}
 	return s, nil
 }
 
@@ -119,16 +163,13 @@ func (s *Store) path() string { return filepath.Join(s.dir, fileName) }
 
 // Peers is the paired phones, in the order they were added.
 //
-// The slice is a copy: the caller holds this across a handshake, and a caller that could reach into
-// the store's own slice could unpair a phone by writing to it. The certificate bytes inside are
-// shared and are treated as immutable by everything here — a certificate is not edited, it is
-// replaced.
+// Both the slice and every certificate in it are copies. The caller holds this across a handshake,
+// and a caller that could reach into the store — through the slice or through the bytes inside it —
+// could change which phone the bridge accepts without going anywhere near a mutator.
 func (s *Store) Peers() []Peer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Peer, len(s.peers))
-	copy(out, s.peers)
-	return out
+	return clonePeers(s.peers)
 }
 
 // Add pairs a phone, keeping the ones already there.
@@ -144,14 +185,22 @@ func (s *Store) Peers() []Peer {
 func (s *Store) Add(p Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := range s.peers {
-		if s.peers[i].Fingerprint == p.Fingerprint {
-			s.peers[i] = p
-			return s.save()
+
+	p.CertificateDER = bytes.Clone(p.CertificateDER)
+	next := make([]Peer, len(s.peers), len(s.peers)+1)
+	copy(next, s.peers)
+	replaced := false
+	for i := range next {
+		if next[i].Fingerprint == p.Fingerprint {
+			next[i] = p
+			replaced = true
+			break
 		}
 	}
-	s.peers = append(s.peers, p)
-	return s.save()
+	if !replaced {
+		next = append(next, p)
+	}
+	return s.commit(next)
 }
 
 // Replace pairs a phone and drops every other, which is the bridge's behaviour today: one phone.
@@ -161,8 +210,9 @@ func (s *Store) Add(p Peer) error {
 func (s *Store) Replace(p Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.peers = []Peer{p}
-	return s.save()
+
+	p.CertificateDER = bytes.Clone(p.CertificateDER)
+	return s.commit([]Peer{p})
 }
 
 // Remove unpairs the phone with this fingerprint.
@@ -173,6 +223,7 @@ func (s *Store) Replace(p Peer) error {
 func (s *Store) Remove(fingerprint string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	kept := make([]Peer, 0, len(s.peers))
 	for _, p := range s.peers {
 		if p.Fingerprint != fingerprint {
@@ -182,8 +233,7 @@ func (s *Store) Remove(fingerprint string) error {
 	if len(kept) == len(s.peers) {
 		return nil
 	}
-	s.peers = kept
-	return s.save()
+	return s.commit(kept)
 }
 
 // Certificates is the set of client certificates the TLS layer will accept.
@@ -198,7 +248,11 @@ func (s *Store) Certificates() []*x509.Certificate {
 	out := make([]*x509.Certificate, 0, len(s.peers))
 	dropped := 0
 	for _, p := range s.peers {
-		cert, err := x509.ParseCertificate(p.CertificateDER)
+		// Parsed from a copy. A parsed certificate keeps a reference to the DER it came from in
+		// its Raw field, and that field is what a pinning verifier compares against — so parsing
+		// the store's own bytes would hand every caller a writable alias to the thing the
+		// comparison trusts.
+		cert, err := x509.ParseCertificate(bytes.Clone(p.CertificateDER))
 		if err != nil {
 			dropped++
 			continue
@@ -211,7 +265,49 @@ func (s *Store) Certificates() []*x509.Certificate {
 	return out
 }
 
-// save writes the list to a temporary file in the same directory and renames it over the store.
+// commit writes next and adopts it only if the write succeeded.
+//
+// The two lines are in this order on purpose, and the package comment says what happens when they
+// are not. On an error the store is exactly what it was, including on disk: save never touches
+// peers.json until it has a whole new file to rename over it.
+//
+// Callers hold s.mu.
+func (s *Store) commit(next []Peer) error {
+	if err := s.save(next); err != nil {
+		return err
+	}
+	s.peers = next
+	return nil
+}
+
+// save encodes the list and installs it. Callers hold s.mu.
+func (s *Store) save(peers []Peer) error {
+	// Never `null`. A nil slice marshals to null, which is not the empty list and would make an
+	// unpaired store read differently from a never-paired one — and Open refuses to read it.
+	if peers == nil {
+		peers = []Peer{}
+	}
+	data, err := json.MarshalIndent(peers, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode trust store: %w", err)
+	}
+	data = append(data, '\n')
+	return s.write(data)
+}
+
+// clonePeers copies the list and the certificate bytes inside it, so neither half is shared with
+// whoever gets the result.
+func clonePeers(peers []Peer) []Peer {
+	out := make([]Peer, len(peers))
+	copy(out, peers)
+	for i := range out {
+		out[i].CertificateDER = bytes.Clone(out[i].CertificateDER)
+	}
+	return out
+}
+
+// writeAtomically writes data to a temporary file in the same directory and renames it over the
+// store.
 //
 // The rename is the whole point. A rename within one directory is atomic, so a crash at any instant
 // leaves either the file that was there before or the complete new one, and never a half-written
@@ -230,19 +326,7 @@ func (s *Store) Certificates() []*x509.Certificate {
 // now, and deleting the second is a worse bug than leaving the first.
 //
 // Callers hold s.mu.
-func (s *Store) save() error {
-	// Never `null`. A nil slice marshals to null, which is not the empty list and would make an
-	// unpaired store read differently from a never-paired one.
-	peers := s.peers
-	if peers == nil {
-		peers = []Peer{}
-	}
-	data, err := json.MarshalIndent(peers, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode trust store: %w", err)
-	}
-	data = append(data, '\n')
-
+func (s *Store) writeAtomically(data []byte) error {
 	tmp, err := os.CreateTemp(s.dir, fileName+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temporary trust store: %w", err)
