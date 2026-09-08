@@ -16,7 +16,9 @@ jobs:
   # Same shape and the same reason as `detect` in ci.yml: a language with no source in the tree is
   # skipped rather than failed, so its check can be required from today and activates by itself.
   detect:
-    name: detect
+    # Named apart from ci.yml's `detect` on purpose. Branch protection identifies a required check
+    # by name alone, so two check runs called `detect` would be indistinguishable to it.
+    name: detect (codeql)
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.probe.outputs.go }}
