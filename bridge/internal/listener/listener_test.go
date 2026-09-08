@@ -493,7 +493,7 @@ func TestTheAggregateIsCountedEvenWhenSourcesAreNotKeyed(t *testing.T) {
 	f := newFailureCounter()
 
 	for i := 0; i < 12; i++ {
-		f.record("192.168.1.1", false) // proxied: one peer for everybody, not keyed
+		f.record("203.0.113.1", false) // proxied: one peer for everybody, not keyed
 	}
 
 	f.mu.Lock()
@@ -506,7 +506,7 @@ func TestTheAggregateIsCountedEvenWhenSourcesAreNotKeyed(t *testing.T) {
 	if sources != 0 {
 		t.Fatalf("an unkeyed source must not enter the table, got %d entries", sources)
 	}
-	if f.blocked("192.168.1.1") {
+	if f.blocked("203.0.113.1") {
 		t.Fatal("counting the aggregate must not block anybody")
 	}
 }
@@ -520,7 +520,7 @@ func TestTheWindowLineDoesNotReportAMisleadingSourceCount(t *testing.T) {
 
 	f := newFailureCounter()
 	for i := 0; i < 7; i++ {
-		f.record("192.168.1.1", false)
+		f.record("203.0.113.1", false)
 	}
 	f.flush()
 

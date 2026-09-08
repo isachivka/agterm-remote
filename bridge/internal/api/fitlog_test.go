@@ -43,7 +43,7 @@ func sessionShowing(split bool, surfaces ...map[string]any) any {
 				"id": sessionA, "active": true,
 				"name":     "SESSIONNAME-4417",
 				"title":    "TITLE-9928-refactor the parser",
-				"cwd":      "/Users/somebody/PRIVATEDIR-5502",
+				"cwd":      "/example/PRIVATEDIR-5502",
 				"split":    split,
 				"surfaces": list,
 			},

@@ -17,7 +17,7 @@ import (
 func TestCleanKeepsSGRAndDropsEveryOtherEscape(t *testing.T) {
 	in := "\x1b[?1000h\x1b[?1049h\x1b[?2004h\r\n" +
 		"\x1b[0m\x1b[38;2;255;255;255mhello\x1b[0m \x1b[1mbold\x1b[0m\r\n" +
-		"plain\x1b[0m\x1b[=5;1u\x1b(B\x1b[53;3H\x1b[>4;2m\x1b]7;file://host/Users/is\x1b\\"
+		"plain\x1b[0m\x1b[=5;1u\x1b(B\x1b[53;3H\x1b[>4;2m\x1b]7;file://host/example/dir\x1b\\"
 	got := Clean(in)
 	want := "\n\x1b[0m\x1b[38;2;255;255;255mhello\x1b[0m \x1b[1mbold\x1b[0m\nplain\x1b[0m"
 	if got != want {
