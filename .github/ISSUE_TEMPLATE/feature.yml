@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something the project should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The project has deliberate non-goals: NAT traversal or a relay service, Android Auto,
+        in-app updates, more than one paired phone, and anything that is not a terminal. Requests in
+        those areas will most likely be declined — say why yours is different if it touches one.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and where the project gets in the way.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+    validations:
+      required: false
