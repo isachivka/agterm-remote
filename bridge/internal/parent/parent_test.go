@@ -248,8 +248,8 @@ func TestANonPositiveIntervalIsNotFatal(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
-// classify drives the REAL watcher loop once, with the kernel answering err, and reports whether the
-// loop decided the parent was alive.
+// pollOnce drives the REAL watcher loop through exactly one poll and reports whether it decided the
+// parent was alive. The caller must already have installed the kill seam.
 //
 // **No timeout and no sleep, and the two outcomes are told apart by which channel operation becomes
 // possible.** The tick channel is unbuffered, so the first send returns only once the loop has taken
@@ -258,22 +258,12 @@ func TestANonPositiveIntervalIsNotFatal(t *testing.T) {
 // ready - or it decided "alive" and came back to the select, in which case the second send is the
 // only one that can proceed. They are mutually exclusive and one of them always happens, so the
 // select below is a decision rather than a race.
-func classify(t *testing.T, pid int, err error) bool {
+//
+// It also returns only once the watcher has stopped, which is what lets the caller change what the
+// fake kernel answers between calls without synchronising anything: the channel operations order
+// every write before the read that follows it.
+func pollOnce(t *testing.T, pid int) bool {
 	t.Helper()
-
-	var (
-		asked   atomic.Int64
-		wrongIn atomic.Value
-	)
-	restore := parent.SetKill(func(got int, sig syscall.Signal) error {
-		asked.Add(1)
-		// The call site is under test too: it must ask about the pid it was given, with signal 0.
-		if got != pid || sig != 0 {
-			wrongIn.Store(fmt.Sprintf("kill(%d, %d)", got, sig))
-		}
-		return err
-	})
-	defer restore()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -296,19 +286,12 @@ func classify(t *testing.T, pid int, err error) bool {
 		isAlive = true
 	}
 
-	// **The watcher has to be off the seam before the seam is put back**, and the race detector
-	// found this the first time it was written without it: in the alive case the loop is parked at
-	// its select, still holding a reference to the faked kill, while the deferred restore writes it.
-	// Cancelling releases it; in the gone case it returned before the select above resolved.
+	// **The watcher has to be off the seam before the caller touches it again**, and the race
+	// detector found this the first time it was written without it: in the alive case the loop is
+	// parked at its select, still holding the faked kill. Cancelling releases it; in the gone case it
+	// returned before the select above resolved.
 	cancel()
 	<-done
-
-	if n := asked.Load(); n == 0 {
-		t.Fatal("the watcher decided without asking the kernel at all")
-	}
-	if bad, ok := wrongIn.Load().(string); ok {
-		t.Fatalf("the watcher asked %s; it must ask about the pid it was given, with signal 0", bad)
-	}
 	return isAlive
 }
 
@@ -323,16 +306,33 @@ func classify(t *testing.T, pid int, err error) bool {
 // version exported the classifier and tested it directly. It pinned the rule and pinned nothing to
 // the caller: `alive` could be rewritten to compare the error against nil and this table would still
 // have passed, leaving only the pid-1 test to catch it - the one test that skips under root. Faking
-// the kernel instead means the assertion runs through [parent.Watch]'s own loop and its own `alive`.
+// the kernel instead means the assertion runs through the watcher's own loop and its own `alive`.
 //
 // The unrecognised errno is not filler. It fixes the DIRECTION this package fails in: an answer it
 // does not understand must read as alive, because guessing "gone" from an unfamiliar error is a
 // bridge that shuts itself down over a syscall quirk, and guessing "alive" is a bridge that stays up
 // one extra poll.
 //
-// **This test must not call t.Parallel()**: it replaces a package-level seam. See [parent.SetKill].
+// **No subtests and no t.Parallel.** The seam is installed once, for this test, and every row is
+// driven through it; see [parent.SetKill], which now refuses both mistakes rather than documenting
+// them. The rows are ordered writes and reads separated by channel operations, so the fake needs no
+// lock of its own.
 func TestOnlyESRCHMeansGone(t *testing.T) {
 	const pid = 4242
+
+	var (
+		answer error
+		asked  int
+		wrong  string
+	)
+	parent.SetKill(t, func(got int, sig syscall.Signal) error {
+		asked++
+		// The call site is under test too: it must ask about the pid it was given, with signal 0.
+		if got != pid || sig != 0 {
+			wrong = fmt.Sprintf("kill(%d, %d)", got, sig)
+		}
+		return answer
+	})
 
 	for _, c := range []struct {
 		name  string
@@ -352,19 +352,30 @@ func TestOnlyESRCHMeansGone(t *testing.T) {
 		{"a wrapped EPERM is still alive", fmt.Errorf("kill: %w", syscall.EPERM), true},
 		{"an error carrying no errno at all", errors.New("something else went wrong"), true},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := classify(t, pid, c.err); got != c.alive {
-				// Spelled out rather than %v/%v: the failure that will actually happen here is the
-				// rule being inverted, and the reader needs to be told which direction costs what.
-				if c.alive {
-					t.Fatalf("%v was classified as GONE; only ESRCH means gone, and reading any other "+
-						"answer that way makes the bridge quit at random on a machine where pids are "+
-						"recycled into other users' processes", c.err)
-				}
-				t.Fatalf("%v was classified as ALIVE; then a crashed parent leaves the bridge listening "+
-					"on the owner's exposed port forever", c.err)
-			}
-		})
+		answer, asked, wrong = c.err, 0, ""
+
+		got := pollOnce(t, pid)
+
+		if asked == 0 {
+			t.Fatalf("%s: the watcher decided without asking the kernel at all", c.name)
+		}
+		if wrong != "" {
+			t.Fatalf("%s: the watcher asked %s; it must ask about the pid it was given, with signal 0",
+				c.name, wrong)
+		}
+		if got == c.alive {
+			continue
+		}
+		// Spelled out rather than %v/%v: the failure that will actually happen here is the rule being
+		// inverted, and the reader needs to be told which direction costs what.
+		if c.alive {
+			t.Errorf("%s: %v was classified as GONE; only ESRCH means gone, and reading any other "+
+				"answer that way makes the bridge quit at random on a machine where pids are recycled "+
+				"into other users' processes", c.name, c.err)
+			continue
+		}
+		t.Errorf("%s: %v was classified as ALIVE; then a crashed parent leaves the bridge listening on "+
+			"the owner's exposed port forever", c.name, c.err)
 	}
 }
 
@@ -386,14 +397,11 @@ func TestOnlyESRCHMeansGone(t *testing.T) {
 // Here the tick is buffered and delivered, and the context cancelled, BEFORE the loop is entered. Both
 // cases are genuinely ready when the select executes, so the arm is taken about half the time; with
 // the guard removed this fails roughly every other run under -count.
-//
-// **This test must not call t.Parallel()**: it replaces a package-level seam. See [parent.SetKill].
 func TestGoneDoesNotFireWhenCancellationAndATickAreBothReady(t *testing.T) {
 	// The parent is gone as far as the loop can tell, so the tick arm WOULD fire if it were taken
 	// without the guard. Faked rather than reaped, because this test is about the select and not
 	// about the kernel.
-	restore := parent.SetKill(func(int, syscall.Signal) error { return syscall.ESRCH })
-	defer restore()
+	parent.SetKill(t, func(int, syscall.Signal) error { return syscall.ESRCH })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tick := make(chan time.Time, 1)

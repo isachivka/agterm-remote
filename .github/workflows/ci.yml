@@ -81,7 +81,13 @@ jobs:
           if grep -q '^require' go.mod; then echo "third-party dependency added"; exit 1; fi
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test ./...
+      # -race, and it is not optional. Almost everything this bridge has been careful about is
+      # concurrent - the trust store's mutex, the identity mint that coordinates two starts through
+      # a hard link, the watchdog goroutine that outlives the call that made it - and none of it was
+      # verified here for the first several tasks, because the flag was missing and a green run
+      # looks identical either way. The suite must not be split into raced and unraced halves to
+      # save time: the package left out is exactly where the next race will live.
+      - run: go test ./... -race
 
   android:
     name: android
