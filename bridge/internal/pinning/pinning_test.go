@@ -142,6 +142,68 @@ func TestClientWithNoCertificateIsRejected(t *testing.T) {
 	}
 }
 
+// --- The anonymous branch, which exists for enrolment only ---------------------------------------
+
+// AnonymousServerConfig asks for no certificate, so a caller with none completes the handshake.
+//
+// This is the one configuration in this package that authenticates nobody, and it is asserted here
+// rather than only where it is used because it is worth being able to read what it does in the same
+// file as what it must not be confused with.
+func TestAnonymousServerConfigServesACallerWithNoCertificate(t *testing.T) {
+	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
+
+	anonymous := &tls.Config{
+		MinVersion:            tls.VersionTLS13,
+		InsecureSkipVerify:    true, //nolint:gosec // replaced by pinnedPeers, which is narrower
+		VerifyPeerCertificate: pinnedPeers([]*x509.Certificate{bridgeCert}),
+	}
+	clientErr, serverErr := handshake(t, AnonymousServerConfig(bridgeOwn), anonymous)
+
+	if clientErr != nil || serverErr != nil {
+		t.Fatalf("enrolment must be reachable without a certificate: client %v, server %v",
+			clientErr, serverErr)
+	}
+}
+
+// Nothing arrives that a later edit could be tempted to trust: the certificate is not requested, so
+// the connection state carries none even from a caller that has one.
+func TestAnonymousServerConfigCollectsNoClientCertificate(t *testing.T) {
+	_, bridgeOwn, _ := mint(t, "agterm-bridge")
+
+	cfg := AnonymousServerConfig(bridgeOwn)
+	if cfg.ClientAuth != tls.NoClientCert {
+		t.Errorf("ClientAuth must be NoClientCert, got %v", cfg.ClientAuth)
+	}
+	if cfg.VerifyPeerCertificate != nil {
+		t.Error("there is nothing yet to verify, so nothing must look like a verifier")
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion must be TLS 1.3, got %x", cfg.MinVersion)
+	}
+	if cfg.ClientCAs != nil {
+		t.Error("ClientCAs must be empty: there is no CA anywhere in this design")
+	}
+}
+
+// The client's half of the pinning survives on this branch. A phone that has not paired yet read the
+// bridge's certificate off the QR code, so it still refuses a laptop that is not the one it scanned -
+// what is anonymous here is the CALLER, in one direction, for one exchange.
+func TestAnonymousServerConfigIsStillPinnedFromTheClientSide(t *testing.T) {
+	_, imposterOwn, _ := mint(t, "not the owner's laptop")
+	_, _, bridgeCert := mint(t, "agterm-bridge")
+
+	anonymous := &tls.Config{
+		MinVersion:            tls.VersionTLS13,
+		InsecureSkipVerify:    true, //nolint:gosec // replaced by pinnedPeers, which is narrower
+		VerifyPeerCertificate: pinnedPeers([]*x509.Certificate{bridgeCert}),
+	}
+	clientErr, _ := handshake(t, AnonymousServerConfig(imposterOwn), anonymous)
+
+	if clientErr == nil {
+		t.Fatal("an unpaired phone must still refuse a laptop it did not scan")
+	}
+}
+
 // The phone pins the bridge too, so a substituted server is refused by the client.
 func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 	_, imposterOwn, _ := mint(t, "not the owner's laptop")
