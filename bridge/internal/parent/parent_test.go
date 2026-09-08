@@ -320,6 +320,11 @@ func pollOnce(t *testing.T, pid int) bool {
 func TestOnlyESRCHMeansGone(t *testing.T) {
 	const pid = 4242
 
+	// Plain locals rather than atomics, and that is safe for one reason worth stating: while the
+	// seam is installed nothing but pollOnce's watcher can call the fake, and every write here is
+	// separated from the read that follows it by a channel operation - the unbuffered `tick <-` send
+	// happens-before the fake runs, and `<-done` happens-after it. If anything else ever calls the
+	// fake concurrently, these have to become atomics; -race is the only thing that would say so.
 	var (
 		answer error
 		asked  int

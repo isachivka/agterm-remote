@@ -48,9 +48,17 @@ func SetKill(t *testing.T, fake killFunc) {
 	refuseParallel(t)
 
 	seamHolder.mu.Lock()
-	if seamHolder.by != "" {
-		held := seamHolder.by
+	if held := seamHolder.by; held != "" {
 		seamHolder.mu.Unlock()
+		// Two different tests, and one test twice, are different mistakes with different remedies.
+		// One message for both used to read "X replaced the seam while X still holds it", which
+		// sounds like a defect in this guard rather than in the caller.
+		if held == t.Name() {
+			panic(fmt.Sprintf("parent: %s installed the kill seam twice. SetKill holds it for the "+
+				"whole test and puts the real syscall back through t.Cleanup, so one call per test is "+
+				"all there is; to vary the kernel's answer, change what the fake RETURNS rather than "+
+				"replacing the fake.", t.Name()))
+		}
 		panic(fmt.Sprintf("parent: %s replaced the kill seam while %s still holds it. The seam is a "+
 			"package-level variable that every watcher goroutine reads, so exactly one test may hold "+
 			"it at a time and no test that uses it may call t.Parallel().", t.Name(), held))
@@ -68,19 +76,40 @@ func SetKill(t *testing.T, fake killFunc) {
 	})
 }
 
-// refuseParallel panics, with the seam's rule spelled out, if t has called t.Parallel.
+// refuseParallel fails t, with the seam's rule spelled out, if t has called t.Parallel.
+//
+// # It reports rather than re-panicking, and that is the whole difference to a contributor
+//
+// Re-raising the panic aborts the entire test binary, leads with a standard-library sentence about
+// t.Chdir, and buries the explanation under thirty lines of stack - and it would attribute ANY other
+// panic out of t.Setenv to a t.Parallel call that may not be there. t.Fatalf gives one line naming
+// the rule, quotes what was actually recovered instead of asserting a cause, and lets the rest of the
+// suite run.
+//
+// # Asking the question also answers it for the runtime
+//
+// t.Setenv is documented to panic once t.Parallel has been called, and it is the only way from here
+// to ask. It is not only a question: a successful call latches the runtime's own denyParallel, so a
+// later t.Parallel in the same test is refused by testing itself, with no help from this package.
+//
+// **denyParallel is not inherited, though.** A SUBTEST that calls t.Parallel inside a test holding
+// the seam is still permitted, and it runs while the seam is installed. Nothing here can see that;
+// the race detector is the only cover for it, which is one more reason CI now runs with -race.
+//
+// If a future Go stops panicking, this degrades to permitting what it used to refuse - the benign
+// direction, and still covered by -race.
 func refuseParallel(t *testing.T) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {
-			panic(fmt.Sprintf("parent: %s uses the kill seam and must not call t.Parallel(). The seam "+
-				"is a package-level variable that every other test's watcher goroutine reads, so a "+
-				"parallel test racing on it produces failures nobody can reproduce. Remove the "+
-				"t.Parallel() call. (asked via t.Setenv, which answered: %v)", t.Name(), r))
+			t.Helper()
+			t.Fatalf("this test uses the kill seam and must not call t.Parallel(): the seam is a "+
+				"package-level variable that every other test's watcher goroutine reads, so a parallel "+
+				"test racing on it produces failures nobody can reproduce. Remove the t.Parallel() "+
+				"call. (t.Setenv answered: %v)", r)
 		}
 	}()
-	// Setenv is documented to panic once t.Parallel has been called. Nothing reads this variable;
-	// the question is the whole point of the call.
+	// Nothing reads this variable; the question is the whole point of the call.
 	t.Setenv(seamEnv, t.Name())
 }
 
