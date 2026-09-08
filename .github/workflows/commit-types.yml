@@ -1,79 +1,89 @@
 name: Commit hygiene
 
-# Two rules that CI cannot see, because both are properties of the COMMITS in a pull request rather
-# than of the tree they produce:
+# Three rules that the build cannot see, because none of them is a property of the tree a pull
+# request produces:
 #
-#   1. A commit typed `feat:`/`fix:` that changes only documentation. release-please turns those
-#      subjects into published release notes, so such a commit announces something that did not
-#      ship. Squash-merging does not save us: the pull request title becomes the commit on `main`,
-#      but the branch's own subjects are what a reviewer reads and what a rebase keeps.
-#   2. A commit with no `Signed-off-by:` trailer. CONTRIBUTING.md makes the DCO a condition of
-#      contributing; without a check it holds only for people who read it.
+#   1. The PULL REQUEST TITLE must be a conventional-commit subject. This repository squash-merges,
+#      and `squash_merge_commit_title=PR_TITLE` pins the resulting subject to the title - so the
+#      title, not any branch commit, is what lands on `main` and what release-please parses into a
+#      version bump and release notes. It is the one string that survives the merge.
+#   2. No commit typed `feat:`/`fix:` may change only documentation. Kept per-commit: a reviewer
+#      reads those subjects, and a branch that is rebased rather than squashed keeps them.
+#   3. Every commit carries a `Signed-off-by:` trailer. CONTRIBUTING.md makes the DCO a condition of
+#      contributing, and this one is genuinely about the commits: it is the author's attestation
+#      about the change they wrote, which no property of the pull request can stand in for.
 #
-# Both are enforced before the merge on purpose. After it, the only lever left is rewriting
-# published history.
+# The rules live in `scripts/check-pr-title.sh`, `scripts/check-commit-types.sh` and
+# `scripts/check-signed-off.sh`, so a contributor can run them before a pull request exists:
 #
-# The rules themselves live in `scripts/check-commit-types.sh` and `scripts/check-signed-off.sh`,
-# so they are runnable locally on a branch before a pull request exists:
-#
+#     ./scripts/check-pr-title.sh   "feat(bridge): what this branch does"
 #     ./scripts/check-commit-types.sh origin/main..HEAD
 #     ./scripts/check-signed-off.sh   origin/main..HEAD
 #
-# Unlike the guards in `ci.yml`, these need history and a base ref, which is why they are a separate
-# workflow with its own `fetch-depth: 0` checkout rather than another step there. There is no path
-# filter: `ci.yml` has no `paths-ignore`, so there is no window for this to cover, and a
-# documentation-only pull request is precisely the one rule 1 exists to judge.
+# PULL REQUESTS ONLY, AND DELIBERATELY SO. This used to run on `push: main` as well. It cannot any
+# more: with `squash_merge_commit_message=PR_BODY`, the commit GitHub synthesises on `main` carries
+# the pull request body and none of the branch's trailers, so rule 3 would fail on `main` after
+# every single merge - not because anything was unsigned, but because the trailer the author did
+# write is discarded during the squash. Sign-off is verified here, on the commits that actually
+# carry it, before the merge. See the Task 4 report for the trade this reflects.
 on:
   pull_request:
-  push:
-    branches: [main]
+    # `edited` is load-bearing. The default type list is opened/synchronize/reopened, none of which
+    # fires when somebody corrects the TITLE - so without it, rule 1's verdict would be frozen at
+    # whatever the title was when the branch was last pushed, and a fixed title could never turn the
+    # check green. It also fires on body edits, which costs one cheap run.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   commits:
     name: commits
     runs-on: ubuntu-latest
     steps:
-      # Full history: the checks need the merge base to know which commits are being added.
+      # First, because every step below runs a script out of the tree. Full history: the per-commit
+      # checks need the merge base to know which commits are being added.
       - name: Check out with history
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # The range is computed once and reused by both checks. On a pull request it is the merge
-      # base to the head; on a push to main it is what the push added. The final fallback covers a
-      # first push and a manually dispatched run, where neither ref is usable.
+      # The title arrives through the environment, never interpolated into the shell command. A
+      # pull request title is attacker-controlled text - anyone may open a pull request here - and
+      # `${{ }}` inside a `run:` is substituted before bash ever sees it, which would turn a title
+      # containing shell syntax into shell this workflow executes.
+      - name: The title is a conventional-commit subject
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: ./scripts/check-pr-title.sh "$PR_TITLE"
+
+      # The range is computed once and reused by both per-commit checks.
       - name: Work out the range of added commits
         id: range
+        if: ${{ !cancelled() }}
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
-          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ -n "$BASE_REF" ]; then
-            git fetch --quiet origin "$BASE_REF"
-            range="origin/$BASE_REF..HEAD"
-          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            range="$BEFORE..HEAD"
-          else
-            echo "No usable commit range for this event - checking the tip commit only."
-            range="HEAD~1..HEAD"
-          fi
+          git fetch --quiet origin "$BASE_REF"
+          range="origin/$BASE_REF..HEAD"
           echo "range: $range"
           echo "range=$range" >> "$GITHUB_OUTPUT"
 
-      # Two steps, not one: a branch can fail both, and a single step would report only the first.
+      # Separate steps, and each runs even when an earlier one failed: a branch can break more than
+      # one rule, and a single step would report only the first, costing a round trip per rule.
       - name: 'No docs-only commit typed feat: or fix:'
-        run: ./scripts/check-commit-types.sh '${{ steps.range.outputs.range }}'
+        if: ${{ !cancelled() && steps.range.outputs.range != '' }}
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: ./scripts/check-commit-types.sh "$RANGE"
 
-      # Deliberately runs even when the step above failed, for the same reason. Guarded on the
-      # range being non-empty so that a failure to compute it reports once, there, rather than
-      # again here as a usage error from a script called with no argument.
       - name: Every commit is signed off
         if: ${{ !cancelled() && steps.range.outputs.range != '' }}
-        run: ./scripts/check-signed-off.sh '${{ steps.range.outputs.range }}'
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: ./scripts/check-signed-off.sh "$RANGE"
