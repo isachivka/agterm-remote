@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -89,8 +90,17 @@ func TestMatchesTheGoldenVectors(t *testing.T) {
 	if err := json.Unmarshal(raw, &vectors); err != nil {
 		t.Fatal(err)
 	}
-	if len(vectors) < 3 {
-		t.Fatalf("want at least three vectors, got %d", len(vectors))
+	// The names, not a count. A count lets the most valuable vector be deleted without anything going
+	// red - measured: with `len(vectors) >= 3`, dropping boundary-values leaves the suite green, and
+	// boundary-values is the one pinning the uint32 expiry ceiling that a second implementation is
+	// most likely to get wrong. Adding a vector means adding a line here, deliberately.
+	names := make([]string, 0, len(vectors))
+	for _, v := range vectors {
+		names = append(names, v.Name)
+	}
+	wantNames := []string{"short-host", "host-at-253-bytes", "non-ascii-host", "boundary-values"}
+	if !slices.Equal(names, wantNames) {
+		t.Fatalf("the vector set changed\n want %v\n got  %v\nIf a vector was added on purpose, add its name here too; if one went missing, put it back.", wantNames, names)
 	}
 	for _, v := range vectors {
 		var fp, tok [32]byte
@@ -127,6 +137,77 @@ func TestDecodesTheGoldenVectors(t *testing.T) {
 		if got != want {
 			t.Fatalf("%s: decoded payload differs from the vector\n want %+v\n got  %+v", v.Name, want, got)
 		}
+	}
+}
+
+// The other half of the contract, and the half that faces the camera.
+//
+// The accept vectors pin the encoder: given these inputs, produce this text. Nothing in them says
+// what a decoder must REFUSE, so a Kotlin decoder that interpreted a version it did not know, or read
+// past a length field, would pass every one of them and ship. These vectors say the other thing, and
+// they are exercised here as well as in Task 21 so the file is live from the day it lands rather than
+// inert until somebody remembers it.
+//
+// The `refusal` field names the KIND of refusal, not a message. Each side maps it onto whatever it
+// raises - Go checks the error text below, Kotlin will map it to its own exception types. What both
+// sides must agree on is that the text is refused at all.
+func TestRefusesTheGoldenRejectVectors(t *testing.T) {
+	raw, err := os.ReadFile("../../../wire/enroll-payload-reject-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Name    string `json:"name"`
+		Refusal string `json:"refusal"`
+		Text    string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &vectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every refusal this repository knows about, and the Go message that stands for it. A vector
+	// naming a refusal that is not here fails: a typo would otherwise be a vector asserting nothing.
+	refusals := map[string]string{
+		"not-standard-base64":      "not standard padded base64",
+		"empty-payload":            "empty payload",
+		"unsupported-version":      "unsupported payload version",
+		"too-short":                "shorter than the",
+		"host-length-over-ceiling": "over the 4096-byte ceiling",
+		"empty-host":               "host is empty",
+		"length-mismatch":          "but its header describes",
+		"host-not-utf8":            "not valid UTF-8",
+	}
+
+	names := make([]string, 0, len(vectors))
+	for _, v := range vectors {
+		names = append(names, v.Name)
+	}
+	wantNames := []string{
+		"wrong-version", "version-zero", "trailing-byte", "host-length-overruns-buffer",
+		"host-length-65535", "host-length-zero", "truncated-in-the-middle", "truncated-to-a-stub",
+		"url-safe-alphabet", "unpadded", "host-not-utf8", "empty-text",
+	}
+	if !slices.Equal(names, wantNames) {
+		t.Fatalf("the reject vector set changed\n want %v\n got  %v", wantNames, names)
+	}
+
+	for _, v := range vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			want, known := refusals[v.Refusal]
+			if !known {
+				t.Fatalf("refusal %q is not one this package knows about", v.Refusal)
+			}
+			got, err := enroll.DecodeText(v.Text)
+			if err == nil {
+				t.Fatalf("this text must be refused (%s), and was decoded as %+v", v.Refusal, got)
+			}
+			if got != (enroll.Payload{}) {
+				t.Fatalf("a refused payload must come back zero, got %+v", got)
+			}
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("refused for the wrong reason\n want a %s error containing %q\n got  %v", v.Refusal, want, err)
+			}
+		})
 	}
 }
 
@@ -239,6 +320,50 @@ func TestHostLengthCountsBytes(t *testing.T) {
 	}
 	if got.Host != host {
 		t.Fatalf("host survived encoding as %q", got.Host)
+	}
+}
+
+// The way every real caller builds an expiry - Task 10 mints its pairing window from time.Now() -
+// and the one shape in which Payload's == quietly stops holding.
+func TestANowBasedPayloadRoundTripsToEquality(t *testing.T) {
+	raw := enroll.Payload{
+		Host:        "example.test",
+		Port:        8443,
+		Fingerprint: [32]byte{1, 2, 3},
+		Token:       [32]byte{4, 5, 6},
+		Expiry:      time.Now().Add(5 * time.Minute),
+	}
+	text, err := enroll.EncodeToText(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := enroll.DecodeText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := raw.Canonical(); got != want {
+		t.Fatalf("a time.Now()-derived payload did not round trip:\n want %+v\n got  %+v", want, got)
+	}
+	// The precondition itself, pinned rather than described: the un-canonicalised value carries a
+	// monotonic reading and a sub-second fraction, so == fails even though the BYTES are identical.
+	// A future change that made Payload compare equal here would make Canonical pointless, and this
+	// is where somebody would find that out.
+	if got == raw {
+		t.Fatal("Canonical has become unnecessary - say so on Payload and delete it")
+	}
+	// Encode truncates, so the difference above is about the struct and never about the wire.
+	again, err := enroll.EncodeToText(raw.Canonical())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != text {
+		t.Fatalf("Canonical changed the encoded bytes:\n before %s\n after  %s", text, again)
+	}
+	// The other two shapes the doc comment names: a local-zone time and a sub-second one.
+	local := raw
+	local.Expiry = time.Unix(raw.Expiry.Unix(), 0)
+	if enc, err := enroll.EncodeToText(local); err != nil || enc != text {
+		t.Fatalf("the local-zone form must encode identically: %s, %v", enc, err)
 	}
 }
 
