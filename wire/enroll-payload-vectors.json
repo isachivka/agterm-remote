@@ -1,0 +1,42 @@
+[
+  {
+    "name": "short-host",
+    "note": "The ordinary case: a short name, the usual port, a mid-range expiry.",
+    "host": "example.test",
+    "port": 8443,
+    "fingerprint_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "token_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+    "expiry_unix": 1800000000,
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "host-at-253-bytes",
+    "note": "The longest legitimate DNS name: four labels, 253 bytes. Pins the uint16 length prefix against an implementation that assumed one byte would do.",
+    "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "port": 443,
+    "fingerprint_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "token_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+    "expiry_unix": 2000000000,
+    "text": "AQD9YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAG7QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en3c1lAA="
+  },
+  {
+    "name": "non-ascii-host",
+    "note": "A host with a multi-byte character. The length prefix counts BYTES, not characters: this host is 20 characters and 21 bytes.",
+    "host": "münchen.example.test",
+    "port": 9443,
+    "fingerprint_hex": "1114171a1d202326292c2f3235383b3e4144474a4d505356595c5f6265686b6e",
+    "token_hex": "22272c31363b40454a4f54595e63686d72777c81868b90959a9fa4a9aeb3b8bd",
+    "expiry_unix": 1900000000,
+    "text": "AQAVbcO8bmNoZW4uZXhhbXBsZS50ZXN0JOMRFBcaHSAjJiksLzI1ODs+QURHSk1QU1ZZXF9iZWhrbiInLDE2O0BFSk9UWV5jaG1yd3yBhouQlZqfpKmus7i9cT+zAA=="
+  },
+  {
+    "name": "boundary-values",
+    "note": "Every field at its ceiling: the highest port a uint16 holds, and the last second a uint32 expiry can name (2106-02-07T06:28:15Z).",
+    "host": "a",
+    "port": 65535,
+    "fingerprint_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "token_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "expiry_unix": 4294967295,
+    "text": "AQABYf////////////////////////////////////////////8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8="
+  }
+]
