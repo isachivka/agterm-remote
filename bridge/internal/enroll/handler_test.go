@@ -1,11 +1,16 @@
 package enroll_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -354,11 +359,18 @@ func TestASpentAttemptIsLoggedForTheOwner(t *testing.T) {
 		Verb: "enroll", Token: b64(make([]byte, 32)), Certificate: b64(phone.Raw)})
 
 	got := written.String()
-	if !strings.Contains(got, "refused") {
-		t.Fatalf("the owner must be told their code was refused, got %q", got)
-	}
 	if strings.Count(got, "\n") != 1 {
 		t.Fatalf("one attempt must produce one line, got %q", got)
+	}
+	// **It has to NAME the cause**, and the first version did not. ErrRefused hides the cause from
+	// Error() on purpose, so the line read "enrolment refused: enroll: enrolment refused" - the
+	// handler claimed to give the owner a diagnosis and gave them the wire's answer twice. causeText
+	// is the accessor that exists for this, and it is reachable from the log path only.
+	if !strings.Contains(got, "token") {
+		t.Fatalf("the owner is not told why their pairing failed: %q", got)
+	}
+	if strings.Count(got, "enrolment refused") > 1 {
+		t.Fatalf("the cause was not translated, only the wire's refusal repeated: %q", got)
 	}
 	// Never the caller's bytes. A fingerprint identifies the owner's phone and this log is a file.
 	if strings.Contains(got, pinning.Fingerprint(phone)) {
@@ -508,3 +520,240 @@ func TestASecondEnrolmentReplacesTheFirst(t *testing.T) {
 type writerFunc func(p []byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// **The bound the first version of this handler CLAIMED and did not have.**
+//
+// It logged every refusal that reached Window.Consume and asserted a bound of maxAttempts + 1 lines
+// per window, citing internal/listener's no-unbounded-write rule. Two of Consume's three causes burn
+// no attempt: "no window is open" and "the window expired". So the counter never moved, the bound
+// never applied, and one line per connection was available to anyone who could reach the port while
+// the owner's panel was shut.
+//
+// The measured shape of it, which is what this reproduces: hold connections open, let the window go
+// away, then flush them. Every one reaches the gate, every one is refused for a cause that costs it
+// nothing, and every one used to write a line. **200 connections produced 200 lines.** The only brake
+// was the listener's twelve-slot handshake semaphore, which is released before the branch.
+//
+// The fix is the one internal/listener already made for failed handshakes: count them, report an
+// aggregate per interval. So the assertion here is not "fewer lines", it is a CEILING that does not
+// move with the number of callers.
+func TestRefusalsThatCostNothingAreCountedNotLogged(t *testing.T) {
+	const callers = 200
+
+	for _, tc := range []struct {
+		name  string
+		state func(*enroll.Window)
+	}{
+		{"no window was ever open", func(*enroll.Window) {}},
+		{"the owner closed the panel", func(w *enroll.Window) { w.Open(time.Minute); w.Close() }},
+		{"five wrong tokens shut it", func(w *enroll.Window) {
+			w.Open(time.Minute)
+			for i := 0; i < 5; i++ {
+				_ = w.Consume(make([]byte, 32))
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window, store, own := handlerFixture(t)
+			tc.state(window)
+
+			var lines atomic.Int32
+			log.SetOutput(writerFunc(func(p []byte) (int, error) { lines.Add(1); return len(p), nil }))
+			t.Cleanup(func() { log.SetOutput(io.Discard) })
+
+			for i := 0; i < callers; i++ {
+				exchange(t, window, store, own, enroll.Request{
+					Verb: "enroll", Token: b64(make([]byte, 32))})
+			}
+
+			// One line per interval, not per caller. The interval is a minute and this loop takes
+			// milliseconds, so the honest ceiling here is one - and the point is that it does not
+			// grow with `callers`.
+			n := lines.Load()
+			// Recorded rather than merely asserted: the number this used to be was exactly `callers`,
+			// and a reader of this test should be able to see which side of that it is on.
+			t.Logf("%d callers refused by a window that was not open: %d log lines", callers, n)
+			if n > 1 {
+				t.Fatalf("%d callers wrote %d log lines; a refusal that spends no attempt must be "+
+					"counted rather than written, or reaching the port is a write against the "+
+					"owner's disk", callers, n)
+			}
+			// And the attempt counter is untouched, which is the other half of why these must not be
+			// logged: nothing the caller did cost them anything.
+		})
+	}
+}
+
+// **A certificate that parses but can never authenticate anybody must not be pinned.**
+//
+// This handler is the ONLY place in the design that can refuse one. Downstream everything keeps bytes
+// or compares them, so an unusable certificate is stored, the phone is told `ok:true`, it cannot
+// connect - and because pairing is Replace, the owner's working phone has already been evicted by the
+// one that cannot work. Both of the cases below were accepted by the first version.
+func TestACertificateThatCanNeverAuthenticateIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		der  func(*testing.T) []byte
+	}{
+		// Already outside its own validity window: pinnedPeers checks the dates on every handshake, so
+		// this one is refused there for the whole of its life. Pinning it promises something already
+		// false.
+		{"already expired", func(t *testing.T) []byte { return expiredCertificate(t) }},
+		// x509 leaves PublicKey nil for an algorithm it does not implement, and returns no error for
+		// it. There is nothing to prove possession of.
+		{"a public key nothing implements", func(t *testing.T) []byte { return unknownAlgorithm(t) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window, store, own := handlerFixture(t)
+			// The owner's real phone, already paired, which must survive.
+			_, paired := mint(t, "the owner's phone")
+			if err := store.Replace(trust.Peer{
+				Fingerprint:    pinning.Fingerprint(paired),
+				CertificateDER: paired.Raw,
+				Name:           "the owner's phone",
+				PairedAt:       time.Unix(1, 0),
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			code, _ := window.Open(time.Minute)
+			reply := exchange(t, window, store, own, enroll.Request{
+				Verb: "enroll", Token: b64(code[:]), Certificate: b64(tc.der(t))})
+
+			if reply.OK {
+				t.Fatal("a certificate that can never complete a handshake was accepted")
+			}
+			// And the eviction did not happen: Replace is what pairing calls, so a refusal here has to
+			// be a refusal BEFORE the store is touched or the owner loses their phone to a caller whose
+			// certificate does not work.
+			peers := store.Peers()
+			if len(peers) != 1 || peers[0].Name != "the owner's phone" {
+				t.Fatalf("the owner's phone was evicted by an unusable certificate: %+v", peers)
+			}
+		})
+	}
+}
+
+// The control: a certificate the trust model accepts for its own reasons is still accepted. The
+// extended-key-usage question belongs to the trust model rather than to this handler, and widening
+// these two checks into a general policy here is what this asserts has not happened.
+func TestAnUnusualButUsableCertificateStillPairs(t *testing.T) {
+	window, store, own := handlerFixture(t)
+	code, _ := window.Open(time.Minute)
+
+	der := caCertificate(t)
+	reply := exchange(t, window, store, own, enroll.Request{
+		Verb: "enroll", Token: b64(code[:]), Certificate: b64(der)})
+	if !reply.OK {
+		t.Fatalf("this handler refused a certificate on grounds that are the trust model's: %s", reply.Error)
+	}
+	if len(store.Peers()) != 1 {
+		t.Fatal("nothing was pinned")
+	}
+}
+
+// The name is echoed as STORED. keys.Label trims, so a phone that sent whitespace around its name
+// would otherwise display a name the owner's menu does not have.
+func TestTheReplyEchoesTheNameAsStored(t *testing.T) {
+	window, store, own := handlerFixture(t)
+	code, _ := window.Open(time.Minute)
+	_, phone := mint(t, "a phone")
+
+	reply := exchange(t, window, store, own, enroll.Request{
+		Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw), Name: "  the owner's phone  "})
+	if !reply.OK {
+		t.Fatalf("refused: %s", reply.Error)
+	}
+	if reply.Name != "the owner's phone" {
+		t.Fatalf("the reply says %q", reply.Name)
+	}
+	if store.Peers()[0].Name != reply.Name {
+		t.Fatalf("the reply and the menu disagree: %q against %q", reply.Name, store.Peers()[0].Name)
+	}
+}
+
+// expiredCertificate is a real self-signed certificate whose validity window has already passed.
+func expiredCertificate(t *testing.T) []byte {
+	t.Helper()
+	// Mint backdates NotBefore by a minute and sets NotAfter to now+validFor, so a short lifetime and
+	// a wait produce a genuinely lapsed certificate rather than a hand-built one.
+	id, err := pinning.Mint("a lapsed phone", 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := pinning.LoadPeer(id.CertPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	return cert.Raw
+}
+
+// unknownAlgorithm is a real certificate with the id-ecPublicKey OID replaced by one nobody
+// implements, so x509 parses it and leaves PublicKey nil.
+//
+// One byte, in place, so no length in the DER changes. The signature no longer matches what it covers,
+// which is irrelevant: nothing in this design verifies a self-signed certificate's signature, and
+// that is precisely why the parse succeeding is not evidence the certificate is usable.
+func unknownAlgorithm(t *testing.T) []byte {
+	t.Helper()
+	_, cert := mint(t, "a phone with an algorithm nobody has")
+	der := bytesClone(cert.Raw)
+
+	// 1.2.840.10045.2.1, id-ecPublicKey, as it appears inside the SubjectPublicKeyInfo.
+	oid := []byte{0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01}
+	at := indexOf(der, oid)
+	if at < 0 {
+		t.Fatal("the public-key algorithm OID is not where this test expects it")
+	}
+	// ...2.99, which is not assigned to anything Go implements.
+	der[at+len(oid)-1] = 0x63
+
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("the patched certificate no longer parses, so it tests the wrong refusal: %v", err)
+	}
+	if parsed.PublicKey != nil {
+		t.Fatal("the patched certificate still has a public key, so this tests nothing")
+	}
+	return der
+}
+
+// caCertificate is a certificate the pinning model would never have minted - a CA, with no client
+// extended key usage - and which is nonetheless usable: a real key, inside its dates.
+func caCertificate(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := x509.Certificate{
+		SerialNumber:          big.NewInt(7),
+		Subject:               pkix.Name{CommonName: "a phone that is also a CA"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+func bytesClone(b []byte) []byte {
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out
+}
+
+func indexOf(haystack, needle []byte) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if bytesEqual(haystack[i:i+len(needle)], needle) {
+			return i
+		}
+	}
+	return -1
+}

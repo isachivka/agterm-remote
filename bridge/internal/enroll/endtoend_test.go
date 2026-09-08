@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -321,5 +323,85 @@ func TestThePairedPhoneStillReachesTheSameVerb(t *testing.T) {
 	}
 	if !resp.OK || len(resp.Sessions) != 1 {
 		t.Fatalf("the paired phone was refused, so the boundary test proves nothing: %+v", resp)
+	}
+}
+
+// **The held-connection flush, on a real port: the exact shape that made the log bound false.**
+//
+// The unit test of this property drives the handler directly against a window that is already shut.
+// This one is the reviewer's own shape and is worth the sockets: connections that negotiate
+// `agterm/enroll-1` WHILE the window is open, held, and then flushed after the window has gone. Each
+// one has already passed the ALPN gate - the configuration was chosen at its handshake - so it reaches
+// enroll.Serve, reaches Window.Consume, and is refused for a cause that spends nothing.
+//
+// Before the fix this wrote one line per connection: 200 connections, 200 lines, one window, no
+// attempt spent, and the listener's twelve-slot semaphore released before the branch so nothing
+// bounded it. It is now counted.
+//
+// It also measures the memory side of the same trick, which the log fix does NOT address: held
+// connections each cost a goroutine and a read buffer for as long as the exchange deadline. Reported
+// rather than asserted - a heap assertion across a real TLS stack is a flake - and bounded by that
+// deadline rather than by anything here.
+func TestHeldEnrolmentConnectionsFlushedAfterTheWindowAreCountedNotLogged(t *testing.T) {
+	const held = 200
+
+	b := startBridge(t)
+	b.window.Open(time.Minute)
+
+	var before runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	// Every one of these completes a handshake on the anonymous branch while the window is open.
+	conns := make([]*tls.Conn, 0, held)
+	for i := 0; i < held; i++ {
+		conn, err := tls.Dial("tcp", b.addr, clientConfig(b.cert, nil, []string{enroll.ProtoEnroll}))
+		if err != nil {
+			t.Fatalf("holding connection %d: %v", i, err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		if got := conn.ConnectionState().NegotiatedProtocol; got != enroll.ProtoEnroll {
+			t.Fatalf("connection %d negotiated %q", i, got)
+		}
+		conns = append(conns, conn)
+	}
+
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	t.Logf("%d held anonymous enrolment connections: heap %+d KiB (%d B each)",
+		held, (int64(after.HeapAlloc)-int64(before.HeapAlloc))/1024,
+		(int64(after.HeapAlloc)-int64(before.HeapAlloc))/held)
+
+	// The window goes away with every one of them still open and still unspent.
+	b.window.Close()
+
+	var lines atomic.Int32
+	log.SetOutput(writerFunc(func(p []byte) (int, error) { lines.Add(1); return len(p), nil }))
+	t.Cleanup(func() { log.SetOutput(io.Discard) })
+
+	for i, conn := range conns {
+		if _, err := conn.Write([]byte(`{"verb":"enroll","token":"` +
+			base64.StdEncoding.EncodeToString(make([]byte, 32)) + `"}` + "\n")); err != nil {
+			t.Fatalf("flushing connection %d: %v", i, err)
+		}
+		var reply enroll.Reply
+		if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+			t.Fatalf("connection %d got no answer: %v", i, err)
+		}
+		if reply.OK {
+			t.Fatalf("connection %d enrolled with a wrong token against a closed window", i)
+		}
+	}
+
+	n := lines.Load()
+	t.Logf("%d held connections flushed after the window closed: %d log lines", held, n)
+	if n > 1 {
+		t.Fatalf("%d held connections wrote %d log lines against one window; that is an anonymous "+
+			"write primitive against the owner's disk, which is what internal/listener refuses to "+
+			"hand out", held, n)
+	}
+	if len(b.store.Peers()) != 0 {
+		t.Fatal("something was pinned")
 	}
 }
