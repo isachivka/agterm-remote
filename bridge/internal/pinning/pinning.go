@@ -246,6 +246,50 @@ func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.C
 	}
 }
 
+// AnonymousServerConfig is the listener configuration for the one exchange that happens BEFORE
+// there is a pinned client: enrolment.
+//
+// It serves own, asks for no client certificate, and verifies nothing about the caller — because at
+// this point in the design there is nothing yet to verify. The phone's certificate is what enrolment
+// EXISTS to deliver; requiring it here would be requiring the answer as the price of asking the
+// question.
+//
+// # This is not a weakened ServerConfig, and it must never become reachable from where that one is
+//
+// Everything ServerConfig refuses, this accepts, so the only thing keeping the two apart is that a
+// connection is on one or the other and cannot cross. That separation is internal/enroll's
+// ServerConfigFor's job and it is made in the TLS handshake by ALPN, before a byte of application data exists: a
+// connection served by this config negotiated `agterm/enroll-1`, which leads to the enrolment
+// handler and to nothing else. Expressed instead as a path inside one authenticated stream, the same
+// claim would rest on routing code — a far weaker thing to assert about a port deliberately exposed
+// to the internet.
+//
+// Two properties are what make an anonymous branch acceptable at all, and neither is here:
+//
+//   - The branch is only OFFERED while the owner has an enrolment window open, which is seconds of
+//     the bridge's life and requires a person at the Mac. See internal/enroll, ServerConfigFor.
+//   - What it leads to is guarded by a 32-byte single-use token compared in constant time. See
+//     [Window].
+//
+// So this config authenticates nobody, and it is honest about that rather than approximating it: no
+// ClientCAs, no InsecureSkipVerify to explain, no VerifyPeerCertificate that would look like a
+// check. ClientAuth is NoClientCert, so the certificate is not even requested — nothing arrives that
+// a later edit could be tempted to trust.
+//
+// The server half is still pinned from the OTHER side. The phone read this certificate off the QR
+// code, so an unpaired phone still knows which laptop it is talking to; what is anonymous here is
+// the caller, in one direction, for one exchange.
+func AnonymousServerConfig(own tls.Certificate) *tls.Config {
+	return &tls.Config{
+		Certificates: []tls.Certificate{own},
+		MinVersion:   tls.VersionTLS13,
+		// Not RequestClientCert. A requested-but-unverified certificate is a certificate sitting in
+		// the connection state with nothing having checked it, which is the shape a later reader
+		// mistakes for an identity. Nothing is asked for, so nothing is there.
+		ClientAuth: tls.NoClientCert,
+	}
+}
+
 // ClientConfig is the peer side of the same arrangement. The bridge does not use it; it exists so the
 // handshake can be proven end to end in a test, and as the reference the Android client is written
 // against.

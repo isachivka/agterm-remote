@@ -44,6 +44,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 	"github.com/isachivka/agterm-remote/bridge/internal/api"
 	"github.com/isachivka/agterm-remote/bridge/internal/control"
+	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 	"github.com/isachivka/agterm-remote/bridge/internal/frontdoor"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
@@ -128,13 +129,17 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// door is shut in the only sense that matters; it is not also locked against the person holding
 	// the key.
 	//
-	// **What the phone list is read into is a snapshot, and it is taken here.** ServerConfig is
-	// built once, below, from the certificates this store holds at THIS moment, and the tls.Config
-	// keeps that closure for the life of the process. So a phone that enrols while the bridge is
-	// running is written to disk and is not accepted until the bridge is restarted. That is a fact
-	// about this wiring rather than about the store, it is written down because a reader will
-	// otherwise assume the listener re-reads, and whatever adds enrolment has to close it - by
-	// rebuilding the config, or by giving the verifier the store instead of a slice.
+	// **The list is consulted PER CONNECTION, not snapshotted here.** This used to be a snapshot
+	// taken at startup, with a note saying that whatever added enrolment had to close it - because a
+	// phone that enrolled while the bridge was running was written to disk and then not accepted
+	// until a restart. enroll.ServerConfigFor closes it: it decides the branch in
+	// GetConfigForClient, so it asks this store for its certificates on the handshake that needs
+	// them, and a phone that enrolled a second ago connects.
+	//
+	// enroll.NewPinnedClients is what keeps that affordable. trust.Store.Certificates re-parses
+	// every stored DER on each call and logs a count when one fails, which is the wrong shape for a
+	// path that now runs per handshake; the cache parses once per version of the list and is keyed
+	// on the list's own bytes, so nothing has to remember to invalidate it.
 	peers, err := trust.Open(stateDir)
 	if err != nil {
 		return err
@@ -166,13 +171,21 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), stateDir)
 
+	// The enrolment window. Nothing opens it yet: the verb that does arrives with the pairing panel
+	// on the Mac side, and until then this bridge offers `agterm/api-1` and nothing else - which is
+	// exactly the behaviour it had before the split. A window is still constructed rather than left
+	// nil, because "closed" is a state this type has and nil is not one.
+	window := enroll.NewWindow(time.Now)
+
 	// false: this bridge may stand behind a TLS-terminating proxy, and behind one every
 	// connection's peer is the proxy rather than the caller. Per-source blocking over a single
 	// collapsed source is a global ceiling wearing a per-source costume - five failed handshakes
 	// and everybody is refused, the owner included. The concurrency bound in the listener does the
 	// real work either way. See internal/listener, where the argument exists precisely so this is
 	// said rather than defaulted.
-	srv := listener.New(pinning.ServerConfig(own, peers.Certificates()), handler, false)
+	srv := listener.New(
+		enroll.ServerConfigFor(own, enroll.NewPinnedClients(peers).Certificates, window),
+		handler, false)
 
 	tcp, err := net.Listen("tcp", listenAddr)
 	if err != nil {
