@@ -24,8 +24,12 @@ const maxAttempts = 5
 // it was must not reach the caller. It tells an unauthenticated stranger whether a window is open at
 // all and whether their guess had the right shape, and the shortest path to leaking it is the
 // handler that writes http.Error(w, err.Error(), 403) without thinking. So the message every refusal
-// carries is this one, and the causes below are unexported: the lazy handler leaks nothing because
-// there is nothing in its hand to leak.
+// carries is this one, and the causes below are unexported.
+//
+// That closes the ACCIDENTAL relay, which is the one that happens. It is not a wall: Unwrap() []error
+// is reachable through a structural type assertion, so a caller determined to learn the cause can,
+// and this package cannot stop it. The point is that no lazy path produces the leak - a handler has
+// to write code that means to.
 //
 // errors.Is(err, ErrRefused) is how a caller asks "was this a refusal rather than a bug", and the
 // causes remain distinguishable by errors.Is inside this package - see refused.Unwrap - which is
