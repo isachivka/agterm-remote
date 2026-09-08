@@ -507,11 +507,27 @@ func TestAnEmptyPeerListAcceptsNobody(t *testing.T) {
 // here, and this test would be the only thing that noticed.
 //
 // The expired certificate is deliberately not first, and a valid phone sits on either side of it.
+//
+// # **A LIFETIME UNDER TWO SECONDS DOES NOT WORK HERE, AND SHORTENING IT IS THE WAY THIS BREAKS**
+//
+// A certificate's NotAfter is carried in DER at one-second granularity, so whatever Mint is given
+// is TRUNCATED DOWN to the second when it is encoded. A lifetime of 500ms therefore produces a
+// certificate that is already expired at issue whenever the current time's sub-second part is
+// under a half - the encoded NotAfter lands in the past. It was written that way once, and it
+// failed 10 times in 12 runs, at the precondition below rather than at the assertion: the "valid
+// while valid" half never ran, and what a passing run proved was half of what the test claims.
+//
+// So the floor is one whole second of validity AFTER truncation, which needs a lifetime over one
+// second, and the sleep has to clear the same truncation from the other end. Two seconds and 2.2
+// seconds, matching TestAnExpiredPeerIsRefusedAsExpiredRatherThanAsAStranger above, which learnt
+// this first from a 50ms lifetime and whose comment saying so was not enough to stop it happening
+// again here. **The numbers below are a floor, not a preference. Raising them is free; lowering
+// either of them re-introduces a test that reports success for the wrong reason.**
 func TestAnExpiredPeerOnAMultiElementListIsRefusedAsExpired(t *testing.T) {
 	_, _, before := mint(t, "agterm-remote phone")
 	_, _, after := mint(t, "agterm-remote phone")
 
-	brief, err := Mint("briefly valid", 500*time.Millisecond)
+	brief, err := Mint("briefly valid", 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,12 +539,15 @@ func TestAnExpiredPeerOnAMultiElementListIsRefusedAsExpired(t *testing.T) {
 	verify := pinnedPeers([]*x509.Certificate{before, expired, after})
 
 	// While it is valid the same bytes are accepted from the middle of the list, so the refusal
-	// below is about the clock and not about the position.
+	// below is about the clock and not about the position. **This is a precondition, not a
+	// formality**: if it fails, the certificate was born expired and the rest of the test is
+	// measuring nothing - see the note above about the lifetime.
 	if err := verify([][]byte{expired.Raw}, nil); err != nil {
-		t.Fatalf("a valid peer in the middle of the list must be accepted: %v", err)
+		t.Fatalf("a valid peer in the middle of the list must be accepted, so the lifetime is too "+
+			"short to survive DER's one-second truncation: %v", err)
 	}
 
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(2200 * time.Millisecond)
 
 	err = verify([][]byte{expired.Raw}, nil)
 	if !errors.Is(err, ErrExpired) {
