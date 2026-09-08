@@ -1,12 +1,14 @@
 package trust_test
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -181,16 +183,177 @@ func TestRemoveAnUnknownPeerIsNotAnError(t *testing.T) {
 	}
 }
 
-// Peers hands out a copy. The TLS layer holds the result of a call across a handshake, and a caller
-// that could reach into the store's own slice could unpair a phone by accident.
+// Peers hands out a copy — of the list AND of the certificate bytes in it. The TLS layer holds the
+// result of a call across a handshake, and a caller that could reach into the store through either
+// could change which phone is trusted without calling a mutator. The DER half is the one that
+// matters and the one that was missing: an earlier version of this test asserted only the
+// fingerprint, which reads as coverage of the whole struct and is not.
 func TestPeersIsACopy(t *testing.T) {
+	der := selfSigned(t)
 	s, _ := trust.Open(t.TempDir())
-	_ = s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: []byte{1}})
+	if err := s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: der}); err != nil {
+		t.Fatal(err)
+	}
 
 	got := s.Peers()
 	got[0].Fingerprint = "tampered"
-	if s.Peers()[0].Fingerprint != "aa" {
+	got[0].CertificateDER[0] ^= 0xff
+
+	after := s.Peers()
+	if after[0].Fingerprint != "aa" {
 		t.Fatal("mutating the returned slice changed the store")
+	}
+	if !bytes.Equal(after[0].CertificateDER, der) {
+		t.Fatal("mutating the returned certificate bytes changed the store")
+	}
+	if len(s.Certificates()) != 1 {
+		t.Fatal("mutating the returned certificate bytes changed what the TLS layer is given")
+	}
+}
+
+// The other direction: the store must not keep the caller's slice. A pairing flow that reuses a
+// buffer, or that zeroes what it read, would otherwise be editing the trust store from outside.
+func TestTheStoreDoesNotAliasTheCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pair func(*trust.Store, trust.Peer) error
+	}{
+		{"Add", (*trust.Store).Add},
+		{"Replace", (*trust.Store).Replace},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			der := selfSigned(t)
+			caller := bytes.Clone(der)
+			s, _ := trust.Open(t.TempDir())
+			if err := tc.pair(s, trust.Peer{Fingerprint: "aa", CertificateDER: caller}); err != nil {
+				t.Fatal(err)
+			}
+
+			caller[0] ^= 0xff
+			if !bytes.Equal(s.Peers()[0].CertificateDER, der) {
+				t.Fatal("mutating the caller's slice changed the store")
+			}
+			if len(s.Certificates()) != 1 {
+				t.Fatal("mutating the caller's slice changed what the TLS layer is given")
+			}
+		})
+	}
+}
+
+// And what Certificates itself returns. A parsed certificate keeps a reference to the DER it was
+// parsed from, and that Raw field is what a pinning verifier compares against.
+func TestCertificatesDoNotAliasTheStore(t *testing.T) {
+	der := selfSigned(t)
+	s, _ := trust.Open(t.TempDir())
+	if err := s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: der}); err != nil {
+		t.Fatal(err)
+	}
+
+	s.Certificates()[0].Raw[0] ^= 0xff
+	if len(s.Certificates()) != 1 {
+		t.Fatal("mutating a returned certificate changed what the TLS layer is given")
+	}
+}
+
+// The rule the whole package rests on: what the store returns has been written. A mutator whose
+// write failed must leave the store exactly as it was — in memory, in what the TLS layer would
+// accept, and on disk — because a caller that was told its pairing failed will act on that, and a
+// bridge that trusts a certificate it could not persist is trusting something no restart brings
+// back.
+//
+// The absence of this test is why both halves of that shipped broken: Add left the new peer in
+// memory after failing to write it, and Replace dropped the owner's phone from memory while the
+// file still held it.
+func TestAFailedWriteChangesNothing(t *testing.T) {
+	paired := selfSigned(t)
+	other := selfSigned(t)
+	boom := errors.New("the disk said no")
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*trust.Store) error
+	}{
+		{"Add", func(s *trust.Store) error {
+			return s.Add(trust.Peer{Fingerprint: "bb", Name: "second", CertificateDER: other})
+		}},
+		{"Replace", func(s *trust.Store) error {
+			return s.Replace(trust.Peer{Fingerprint: "bb", Name: "second", CertificateDER: other})
+		}},
+		{"Remove", func(s *trust.Store) error { return s.Remove("aa") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := trust.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Replace(trust.Peer{Fingerprint: "aa", Name: "paired", CertificateDER: paired}); err != nil {
+				t.Fatal(err)
+			}
+			onDisk, err := os.ReadFile(filepath.Join(dir, "peers.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			trust.FailAllWrites(s, boom)
+			if err := tc.mutate(s); !errors.Is(err, boom) {
+				t.Fatalf("want the write error back, got %v", err)
+			}
+
+			got := s.Peers()
+			if len(got) != 1 || got[0].Fingerprint != "aa" || got[0].Name != "paired" {
+				t.Fatalf("the store moved after a failed write: %+v", got)
+			}
+			certs := s.Certificates()
+			if len(certs) != 1 || !bytes.Equal(certs[0].Raw, paired) {
+				t.Fatalf("the TLS layer would be given %d certificates after a failed write", len(certs))
+			}
+			again, err := os.ReadFile(filepath.Join(dir, "peers.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(again, onDisk) {
+				t.Fatalf("a failed write reached the file: %s", again)
+			}
+		})
+	}
+}
+
+// A store that recovers keeps working, and adopts the list the successful write actually wrote.
+func TestAWriteAfterAFailureStillLands(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := trust.Open(dir)
+	if err := s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: []byte{1}}); err != nil {
+		t.Fatal(err)
+	}
+
+	trust.FailAllWrites(s, errors.New("the disk said no"))
+	_ = s.Replace(trust.Peer{Fingerprint: "bb", CertificateDER: []byte{2}})
+	trust.RestoreWrites(s)
+
+	if err := s.Replace(trust.Peer{Fingerprint: "cc", CertificateDER: []byte{3}}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := trust.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.Peers()
+	if len(got) != 1 || got[0].Fingerprint != "cc" {
+		t.Fatalf("want only cc on disk, got %+v", got)
+	}
+}
+
+// `null` parses without error into a nil slice, which would open as a bridge nobody has paired.
+// Nothing here writes it and no truncation produces it, so this is a closed shape rather than a
+// closed hole — but a file that plainly says something must not be read as an absent one.
+func TestANullStoreIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "peers.json"), []byte("null\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trust.Open(dir); err == nil {
+		t.Fatal("want an error for a store holding null, got nil")
 	}
 }
 
