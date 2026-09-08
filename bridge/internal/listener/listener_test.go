@@ -423,8 +423,8 @@ func eventually(cond func() bool) bool {
 
 // The app's own laptop-reachability probe is a bare TCP connect: it asks whether a packet reaches the
 // laptop, and deliberately speaks no TLS. Counting that as a failed authentication would have the
-// phone lock itself out of the bridge with its own liveness check — REQ-0006 and REQ-0007 run the
-// reachability round on every foreground and on pull-to-refresh, so five in a minute is ordinary use.
+// phone lock itself out of the bridge with its own liveness check — the app runs the reachability
+// round on every foreground and on pull-to-refresh, so five in a minute is ordinary use.
 func TestABareTCPConnectIsNotCountedAsAFailedAuthentication(t *testing.T) {
 	h := start(t)
 

@@ -5,11 +5,11 @@
 // simplification. Under a CA the issuer's key mints unlimited valid clients, so "nobody can produce a
 // second valid certificate" would depend on a key staying secret. Here it is true by construction:
 // each side pins the exact bytes of one peer certificate, so there is nothing to sign and nothing to
-// be tricked into signing. REQ-0008 §5 records an earlier draft that did have a CA, and what it made
-// false.
+// be tricked into signing. An earlier draft of this design did have a CA, and the test that pins the
+// bytes is what records why it was dropped.
 //
-// Nothing in this package weakens certificate validation, the rule this project has held since
-// REQ-0003. Pinning REPLACES chain validation with a strictly narrower test: one specific
+// Nothing in this package weakens certificate validation.
+// Pinning REPLACES chain validation with a strictly narrower test: one specific
 // certificate, compared byte for byte. A permissive verifier widens what is accepted; this narrows it
 // to exactly one. The distinction matters because the mechanism below sets InsecureSkipVerify, which
 // looks identical to the thing that is forbidden and is the opposite of it — see pinnedPeer.
@@ -48,10 +48,10 @@ type Identity struct {
 //
 // Deliberately NOT a CA: BasicConstraintsValid with IsCA false, and no KeyUsageCertSign. A
 // certificate that cannot sign other certificates cannot become an issuer later by accident, which is
-// the property REQ-0008 §5 turns on. It also means this certificate can never be used in a ClientCAs
+// the property the whole trust model turns on. It also means this certificate can never be used in a ClientCAs
 // pool — see ServerConfig, where that is the correct outcome and not a limitation.
 //
-// validFor is expected to be long. PLAN-0008 open question 2 ruled it: an expiry on a pinned
+// validFor is expected to be long, and that was ruled deliberately: an expiry on a pinned
 // self-signed pair buys an attacker nothing, and guarantees a day the owner's phone stops working
 // while they are away from the only machine that can fix it.
 func Mint(commonName string, validFor time.Duration) (Identity, error) {
@@ -161,7 +161,7 @@ var ErrNotPinned = errors.New("peer certificate is not the pinned certificate")
 // What changed is who else is looking. These two mean different things to the OWNER, reading their own
 // laptop's log or holding the phone: a wrong certificate means the machine is not the one that was
 // paired, and an expired one means an identity needs re-minting. The app already had to tell them
-// apart — REQ-0009 iteration 2b rebuilt how its verdict travels precisely so that it could — and a
+// apart — the app rebuilt how its verdict travels precisely so that it could — and a
 // bridge that collapsed them would leave the same property asserted at one end and not the other.
 //
 // **The peer still cannot tell**, and that is a test rather than a claim.
@@ -174,12 +174,11 @@ var ErrExpired = errors.New("peer certificate has expired")
 // stating because they are the whole security argument:
 //
 //   - A certificate correctly signed by the pinned certificate's key still fails. That is the case a
-//     CA model would accept and this one must not, and it is the assertion PLAN-0008 iteration 3
-//     requires.
+//     CA model would accept and this one must not, and it is the assertion the package test makes.
 //   - A re-issued certificate with the same key fails too. Re-pinning is a deliberate act by the
 //     owner, never something that happens quietly.
 //
-// The validity window is checked explicitly. REQ-0005 measured that PKIX does not validate a trust
+// The validity window is checked explicitly. It was measured that PKIX does not validate a trust
 // anchor's own validity dates, so a pinned certificate — which IS its own anchor — would otherwise
 // never be checked for expiry at all.
 func pinnedPeer(want *x509.Certificate) func([][]byte, [][]*x509.Certificate) error {
@@ -205,13 +204,13 @@ func pinnedPeer(want *x509.Certificate) func([][]byte, [][]*x509.Certificate) er
 // deliberately empty. RequireAndVerify means "build a chain to something in ClientCAs", which is CA
 // semantics — and a certificate minted by Mint cannot appear in that pool at all, because it is not a
 // CA. Putting it there would mean marking the phone's certificate IsCA: a certificate permitted to
-// sign others, which is precisely what REQ-0008 §5 says must not exist. The verification that matters
+// sign others, which is precisely what this design says must not exist. The verification that matters
 // happens in VerifyPeerCertificate, which is stricter than any chain check: one certificate, exact
 // bytes.
 //
 // Rejection still happens during the handshake. A VerifyPeerCertificate error aborts it with a TLS
 // alert, so an unauthenticated caller gets a handshake failure and never reaches a request parser, a
-// handler, or a log line containing anything they chose. That is REQ-0008's fail-closed ruling, and
+// handler, or a log line containing anything they chose. That is the fail-closed rule, and
 // it is a property of where this runs rather than of anything a handler remembers to do.
 func ServerConfig(own tls.Certificate, pinnedClient *x509.Certificate) *tls.Config {
 	return &tls.Config{
@@ -223,8 +222,8 @@ func ServerConfig(own tls.Certificate, pinnedClient *x509.Certificate) *tls.Conf
 }
 
 // ClientConfig is the peer side of the same arrangement. The bridge does not use it; it exists so the
-// handshake can be proven end to end in a test, and as the reference for the Android client REQ-0009
-// has to write against.
+// handshake can be proven end to end in a test, and as the reference the Android client is written
+// against.
 //
 // InsecureSkipVerify is set, and this is the one place in this repo where that appears. It disables
 // Go's chain-and-hostname verification so that VerifyPeerCertificate can replace it with a strictly

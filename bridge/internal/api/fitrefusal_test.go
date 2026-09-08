@@ -8,14 +8,14 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// A fit that will not measure is not the link breaking — REQ-0037.
+// A fit that will not measure is not the link breaking.
 //
 // # What the owner saw
 //
 // On 2026-08-26 a calibration declined and his terminal, session list and input bar were replaced by a
 // full-screen English error reading *"both probe widths measured 86 columns; the calibration session
 // is not rendering the long line"* — a sentence addressed to us, lifted out of a log, with nothing in
-// it he could act on. **REQ-0017 abolished exactly that shape** for a complaint about pasted text, and
+// it he could act on. **That shape was abolished** for a complaint about pasted text, and
 // this path had grown it back.
 //
 // The marker is what decides which shape the phone draws: `RefusalContent` keeps the socket and the
@@ -57,7 +57,7 @@ func TestAFitRefusalNeverLooksLikeABrokenConnection(t *testing.T) {
 			}
 			if resp.Refusal != RefusalContent {
 				t.Fatalf("refusal marked %q; unmarked, the phone drops a healthy socket and replaces "+
-					"the terminal with a full-page error - REQ-0017, met again on the fit path",
+					"the terminal with a full-page error - the content-refusal rule, met again on the fit path",
 					resp.Refusal)
 			}
 		})

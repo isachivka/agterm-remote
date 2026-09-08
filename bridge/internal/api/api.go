@@ -5,11 +5,10 @@
 // when there were two and was never a property anybody was holding — the invariant is the closed set,
 // not its size, and a sentence that has to be edited every time the set grows is a sentence that ends
 // up lying. It grew by amendment each time, every one of them recorded: window geometry, typing, a
-// file drop, and on 2026-07-31 the four verbs of REQ-0011 that let the owner create and rename from
-// their phone.
+// file drop, and on 2026-07-31 the four verbs that let the owner create and rename from their phone.
 //
 // The caller never supplies an agterm command. It picks a verb from a closed set, and this package
-// constructs the agterm request itself from validated fields. That is what makes REQ-0008 ruling 3
+// constructs the agterm request itself from validated fields. That is what makes the closed set
 // structural rather than a filter someone can later widen — there is no code path in this binary that
 // builds `session.overlay.open`, so no input can produce one. The other sixty-odd control commands
 // are unreachable because nothing here names them.
@@ -56,7 +55,7 @@ type Request struct {
 	// bracketed paste markers so the far end reads it as a paste rather than as typing.
 	//
 	// **A field of its own, mutually exclusive with Text and Key, and not a boolean beside Text.**
-	// REQ-0017: a flag that changes how a field is validated is how two validations become one by
+	// A flag that changes how a field is validated is how two validations become one by
 	// accident - the same structural argument that keeps a session name and a label apart. Here it
 	// decides whether a newline is permitted, which is the difference between text landing in an
 	// editor and a command running.
@@ -83,7 +82,7 @@ type Request struct {
 	// **One field, read by BOTH the screen path and the type path through [paneFor].** That is the
 	// whole point of it. agterm defaults an absent pane differently for the two commands - a read gets
 	// the on-screen pane, a type gets primary - so on a split session the phone was showing one pane
-	// and typing into the other, silently, into the terminal the owner was not looking at. REQ-0032.
+	// and typing into the other, silently, into the terminal the owner was not looking at.
 	//
 	// Absent means "left", for both, which is what a session with no split has always meant. The two
 	// calls agreeing is not a convention anybody maintains; it is one function with one return value.
@@ -109,15 +108,14 @@ type Request struct {
 	// It picks the target the search aims at, and **it is part of the cache key** - see
 	// resize.fitKey, which is (display, box width, character width). This comment said the opposite
 	// until 2026-08-06, and it was wrong from the day the character width joined the key. Corrected
-	// rather than deleted because it was read during REQ-0016 while working out what the key was made
-	// of, and a comment that describes a key which is not the key costs the next reader the same hour.
+	// rather than deleted because it was read while working out what the key was made of, and a comment that describes a key which is not the key costs the next reader the same hour.
 	CharacterWidthMilliDp int `json:"character_width_milli_dp,omitempty"`
 	// MarginDp is recorded with the fit so a human can see why a key changed. Not part of any lookup.
 	MarginDp int `json:"margin_dp,omitempty"`
 	// Recalibrate forces a fresh measurement. **The only thing that does**, other than a box width or
 	// display never seen before.
 	Recalibrate bool `json:"recalibrate,omitempty"`
-	// CachedOnly asks the bridge to apply a fit it ALREADY HAS and to measure nothing — REQ-0040.
+	// CachedOnly asks the bridge to apply a fit it ALREADY HAS and to measure nothing.
 	//
 	// **The automatic re-apply sends this and the owner's press never does.** A calibration is a
 	// visible hunt across his window; one starting because he tapped a row in a list on his phone is a
@@ -149,7 +147,7 @@ type Response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	// Refusal says WHICH KIND of no this is, and exists because `ok:false` was one channel carrying
-	// two unrelated ones - REQ-0017.
+	// two unrelated ones.
 	//
 	// *"agterm is not running"* means the laptop cannot serve this and the phone's screen is
 	// genuinely gone. *"byte 75 is a newline"* means the laptop is fine and this one request will
@@ -236,12 +234,12 @@ type Response struct {
 	// cached apply reads nothing back from the pty, so calling it "measured" would invent an
 	// observation.
 	Calibrated bool `json:"calibrated,omitempty"`
-	// NeedsFit says the geometry the phone asked about has never been measured — REQ-0040.
+	// NeedsFit says the geometry the phone asked about has never been measured.
 	//
 	// **Only ever true in answer to `cached_only`**, and it is an ordinary reply rather than a refusal.
 	// The phone asked "apply it if you know it"; not knowing is a legitimate answer to that question,
 	// and dressing it as a failure would put it through the path that once replaced the owner's
-	// terminal with a full-page error — REQ-0037.
+	// terminal with a full-page error.
 	//
 	// **Not omitempty, and the reason is the rule at the top of this struct**: a field whose zero value
 	// is meaningful is never omitted. False here means *it applied*, which is a fact the phone acts on
@@ -304,7 +302,7 @@ type Session struct {
 	// is too old to say anything" without inspecting a version.
 	Status string `json:"status"`
 	// SplitPane is whether this session has a second pane the phone can address — **whether or not it
-	// is on screen.** REQ-0034.
+	// is on screen.**
 	//
 	// ### The key is still spelled `split`, and that is deliberate
 	//
@@ -386,13 +384,13 @@ const (
 	// see the allowlist in internal/agterm, which fails the build if this grows a third capability.
 	VerbResize = "resize"
 	// VerbType is the only verb that puts bytes on a pty. Authorised by the owner on 2026-07-29,
-	// reversing REQ-0008's original ruling that this bridge may never inject input.
+	// reversing this bridge's original ruling that it may never inject input.
 	VerbType = "type"
 	// VerbFile writes a file to the owner's filesystem, under a path the BRIDGE chooses. The third
 	// kind of write and the largest - see internal/dropoff. Requested by the owner on 2026-07-30.
 	VerbFile = "file"
 
-	// The four verbs of REQ-0011, added 2026-07-31 so the owner can create and rename from the phone.
+	// The four creating and renaming verbs, added 2026-07-31 so the owner can do both from the phone.
 	//
 	// **Dotted names, unlike the five above, and that is deliberate.** `create` and `rename` alone do
 	// not say what they act on, and this set has two of each. The name carries the noun rather than
@@ -406,12 +404,12 @@ const (
 	VerbWorkspaceRename = "workspace.rename"
 	VerbSessionRename   = "session.rename"
 
-	// **The two verbs of REQ-0012 that DESTROY the owner's work**, added 2026-07-31 at their request.
+	// **The two verbs that DESTROY the owner's work**, added 2026-07-31 at their request.
 	//
 	// Every verb above this line either reads, or writes something that can be undone by writing
 	// again. These cannot. A closed session and a deleted workspace do not come back, and a phone
-	// that has been taken can now reach both - which is written here, in REQ-0012 and in the
-	// allowlist, so nobody later reads this list and thinks they crept in.
+	// that has been taken can now reach both - which is written here and in the allowlist, so nobody
+	// later reads this list and thinks they crept in.
 	//
 	// The guard is the owner's gesture, not this package: the phone offers Delete only inside a modal
 	// that a long press opened. What this package guarantees is narrower and is all it can guarantee -
@@ -420,7 +418,7 @@ const (
 	VerbSessionClose    = "session.close"
 	VerbWorkspaceDelete = "workspace.delete"
 
-	// **The verb that starts a process on the owner's Mac** — REQ-0035, added 2026-08-25.
+	// **The verb that starts a process on the owner's Mac**, added 2026-08-25.
 	//
 	// It is not in the destructive block above and it is not in the harmless block below it, so it is
 	// stated here on its own: opening a pane that does not exist CREATES one, and a created pane runs
@@ -432,10 +430,10 @@ const (
 	//
 	// **No confirmation, and that is the owner's ruling rather than an omission.** He specified one
 	// tap doing the whole thing — *"если сессия есть мы её показываем, если её нет мы её создаём и
-	// потом показываем"* — after the mis-tap risk was put to him. REQ-0035.
+	// потом показываем"* — after the mis-tap risk was put to him.
 	VerbPaneOpen = "pane.open"
 
-	// VerbPaneShow shows one pane at the full width of the terminal area — REQ-0042.
+	// VerbPaneShow shows one pane at the full width of the terminal area.
 	//
 	// **A new verb rather than a pane on [VerbPaneOpen], and the reason is version skew.**
 	// `Request.Pane` already exists, so a bridge that predates this ACCEPTS a pane on a `pane.open`
@@ -444,7 +442,7 @@ const (
 	//
 	// An unknown verb is refused by name. That is loud, and it lands on the path that already knows
 	// how to carry a refusal without taking his terminal away — the same reasoning that put
-	// `cached_only` on its own field in REQ-0040.
+	// `cached_only` on its own field.
 	//
 	// **It creates nothing.** Where [VerbPaneOpen] may start a shell, this only ever rearranges panes
 	// that already exist, and refuses a session that has none.
@@ -499,7 +497,7 @@ func (h *Handler) Handle(ctx context.Context, req Request) Response {
 //
 // # Why this is a function and not two defaults
 //
-// REQ-0032. agterm resolves an absent pane differently per command - measured over the socket on
+// agterm resolves an absent pane differently per command - measured over the socket on
 // 2026-08-25 - so the bridge sending nothing meant a read went to the on-screen pane and a type went to
 // primary. On a split session that is the phone showing one pane and typing into the other, with no
 // error, into the terminal the owner was not looking at.
@@ -649,7 +647,7 @@ func (h *Handler) openPane(ctx context.Context, req Request) Response {
 	return Response{OK: true}
 }
 
-// showPane shows one pane at the full width of the terminal area — REQ-0042.
+// showPane shows one pane at the full width of the terminal area.
 //
 // # It refuses an unsplit session rather than succeeding at nothing
 //
@@ -662,7 +660,7 @@ func (h *Handler) openPane(ctx context.Context, req Request) Response {
 //
 // It matters more here than anywhere: agterm resolves a missing pane on `session.focus` to `other`, a
 // TOGGLE — so an absent value reaching the socket is whichever pane he is not looking at, half the
-// time. That is exactly the REQ-0032 defect, in a third place.
+// time. That is exactly the wrong-pane defect, in a third place.
 //
 // The fix is the one already in this file rather than a new one. [paneFor] is where a wire string
 // becomes an [agterm.Pane], absent means left there for every verb, and **a third default added here
@@ -737,7 +735,7 @@ func (h *Handler) sessions(ctx context.Context) Response {
 				// **Derived, where this used to be straight through.** agterm's own `split` field
 				// answers a different question — both panes VISIBLE — and the phone needs to know
 				// whether a second pane EXISTS. A pane collapsed on the Mac still reads perfectly
-				// from the phone, so the two states must not arrive here looking alike. REQ-0034.
+				// from the phone, so the two states must not arrive here looking alike.
 				SplitPane: s.HasSplitPane(),
 			})
 		}
@@ -926,8 +924,8 @@ func gone(kind, message string) string {
 //
 // # Why the FALLBACK is the load-bearing part, not the two translations
 //
-// PLAN-0008 predicted this exact case in July, drafted the sentence to show — *"agterm has not opened
-// this session"* — and it was never wired. In the meantime agterm's wording for it CHANGED, from
+// The design predicted this exact case in July, drafted the sentence to show — *"agterm has not
+// opened this session"* — and it was never wired. In the meantime agterm's wording for it CHANGED, from
 // `session not realized` to what is matched below. A month, one rewording.
 //
 // The two matches handle what we know today. **The default handles the next rewording**, which is the
@@ -939,7 +937,7 @@ func unreadable(message string) Response {
 		// The rewrite that already exists, on the path that never called it. Five verbs did.
 		return Response{OK: false, Error: gone("session", message)}
 	case strings.Contains(message, "surface buffer"):
-		// PLAN-0008's own words, finally used. `select` would fix it and mutates the owner's laptop,
+		// The sentence the design drafted in July, finally used. `select` would fix it and mutates the owner's laptop,
 		// so this says what is true and offers nothing that reaches over and changes their screen.
 		return Response{
 			OK:     false,
@@ -948,7 +946,7 @@ func unreadable(message string) Response {
 		}
 	case strings.Contains(message, "no split pane"):
 		// **The pane went away underneath the phone**, which is a thing that changed on the laptop and
-		// not a connection breaking - REQ-0027's shape. agterm names this one precisely, unlike the
+		// not a connection breaking. agterm names this one precisely, unlike the
 		// surface-buffer case above, so there is no guessing about which fault it is.
 		return Response{
 			OK:     false,
@@ -969,7 +967,7 @@ func unreadable(message string) Response {
 
 // describe turns a client error into something the phone can show.
 //
-// REQ-0008 §6: when the laptop is not answering the app says "your laptop is not answering" and does
+// When the laptop is not answering the app says "your laptop is not answering" and does
 // not invent a network diagnosis. That copy is only writable if this distinction survives to here.
 func describe(err error) string {
 	if errors.Is(err, agterm.ErrUnavailable) {
@@ -990,9 +988,9 @@ func fail(msg string) Response { return Response{OK: false, Error: msg} }
 //
 // Getting that test wrong in the generous direction is the dangerous one: a laptop-side failure
 // mislabelled as content leaves the phone showing a small notice while the connection is actually
-// dead, which is the opposite of the defect REQ-0017 fixes.
+// dead, which is the opposite of the defect this distinction fixes.
 //
-// # Widened once, deliberately, by REQ-0037
+// # Widened once, deliberately, for the fit path
 //
 // The fit path now uses it for an OPERATION the laptop declined — a calibration whose search could not
 // resolve the geometry. That is not "what was sent" in the narrow sense, and it belongs here anyway:

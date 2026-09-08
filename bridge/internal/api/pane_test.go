@@ -9,7 +9,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// The pane a request addresses — REQ-0032, and the silent defect it was written for.
+// The pane a request addresses, and the silent defect it was written for.
 //
 // # What was wrong
 //
@@ -177,7 +177,7 @@ func TestTheClientWillNotSendACallWithNoPane(t *testing.T) {
 }
 
 // **The pane vanished on the laptop.** agterm names this one precisely, so the phone can tell it from a
-// connection breaking - REQ-0027's distinction, and not the shape of `failed to read surface buffer`.
+// connection breaking, and not the shape of `failed to read surface buffer`.
 func TestAVanishedPaneIsSaidInOurOwnWords(t *testing.T) {
 	fake := agtermtest.Start(t, func(req agtermtest.Request) any {
 		if req.Cmd == "session.text" || req.Cmd == "session.type" {

@@ -16,7 +16,7 @@ import (
 //
 // # Why this list exists as a test rather than as a sentence
 //
-// REQ-0008 ruling 3 said the bridge constructs its own requests and forwards nothing, so the other
+// The rule is that the bridge constructs its own requests and forwards nothing, so the other
 // sixty-odd agterm commands are unreachable. That was true, and it was held up by nothing except the
 // code happening to be written that way. **It survived exactly until someone wanted a feature** — the
 // window-resize amendment of 2026-07-29 — at which point the only thing standing between "one narrow
@@ -43,12 +43,12 @@ import (
 // first until the owner authorised typing on 2026-07-29 and it became an entry; any command NOT in
 // the map still fails it, and replacing a literal with `"tr" + "ee"` still fails the second.
 var emittable = map[string]string{
-	"tree":         "REQ-0008 §2 verb one: list the sessions. Read-only.",
-	"session.text": "REQ-0008 §2 verb two: read one session's screen. Read-only.",
+	"tree":         "Verb one: list the sessions. Read-only.",
+	"session.text": "Verb two: read one session's screen. Read-only.",
 
 	// Read-only, and here because the resize path must remember what to put back. Nothing derives a
 	// column count from what it returns - see the note on agterm.Window.
-	"window.list": "REQ-0008 amendment 2026-07-29: read the geometry to restore. Read-only.",
+	"window.list": "Window geometry, 2026-07-29: read the geometry to restore. Read-only.",
 
 	// Read-only: which zmx daemon each pane claims, and where zmx and its sockets are. The styled
 	// screen path (2026-09-05) needs the daemon name to ask zmx for a pane's screen with its colours.
@@ -56,12 +56,12 @@ var emittable = map[string]string{
 	// the destructive siblings and are NOT here.
 	"zmx.list": "Styled screen, 2026-09-05: map a pane to its daemon. Read-only.",
 
-	// **THE FIRST WRITE.** Authorised by the REQ-0008 amendment of 2026-07-29, on the owner's
+	// **THE FIRST WRITE.** Authorised by the owner on 2026-07-29, at their own
 	// request, reaffirmed after the cost was put to them.
 	//
 	// A resize alters the grid a program draws into. It cannot deliver a keystroke, a control
 	// character or a command - it changes the terminal's SHAPE and never its CONTENTS.
-	"window.resize": "REQ-0008 amendment 2026-07-29: geometry only, and it carries nothing into the terminal.",
+	"window.resize": "Window geometry, 2026-07-29: geometry only, and it carries nothing into the terminal.",
 
 	// Same class as window.resize and permitted for one purpose: RESTORING the zoom a resize changed
 	// underneath us. Measured twice - 2026-07-29 and 2026-07-30 - that zoom flips when a window is
@@ -70,7 +70,7 @@ var emittable = map[string]string{
 	// how it was found: by reading the window back rather than trusting the restore.
 	//
 	// It is a TOGGLE, so the caller must read the current state and call it only when it differs.
-	"window.zoom": "REQ-0008 amendment 2026-07-30: geometry only, restoring zoom a resize changed.",
+	"window.zoom": "Window geometry, 2026-07-30: geometry only, restoring zoom a resize changed.",
 
 	// **THE CALIBRATION PAIR, 2026-07-30.** Two verbs so the width feature measures something the
 	// bridge OWNS rather than whatever text happens to be in the owner's working session.
@@ -100,12 +100,12 @@ var emittable = map[string]string{
 	// is no flag to suppress it. The owner accepted that cost for calibration - *"Это тоже окей не
 	// проблема"* - and for the phone it is arguably what they are asking for when they press +. It is
 	// recorded here and in the PR body so they hear it from us rather than from their screen jumping.
-	"session.new": "REQ-0008 amendment 2026-07-30, extended by REQ-0011 on 2026-07-31: calibration " +
+	"session.new": "Calibration, 2026-07-30, extended on 2026-07-31: calibration " +
 		"needs a session whose contents the bridge chose, AND the owner creates their own from the " +
 		"phone. Calibration's is closed in the same operation; the owner's is never closed by us. " +
 		"Both re-target: agterm focuses what it creates.",
 
-	// **THE CREATE PAIR, REQ-0011, 2026-07-31.** The owner asked for it in their own words: *"на
+	// **THE CREATE PAIR, 2026-07-31.** The owner asked for it in their own words: *"на
 	// странице сессии я хочу чтобы мы могли создавать новые сессии или новые workspace"*.
 	//
 	// Measured against the live socket rather than read off the CLI's argv: workspace.new returns an
@@ -118,10 +118,10 @@ var emittable = map[string]string{
 	// list. The consequence is deliberate: a workspace created by mistake is the owner's to remove on
 	// their laptop, and a bridge that could delete workspaces to tidy up after itself is a bridge that
 	// can delete workspaces.
-	"workspace.new": "REQ-0011 2026-07-31: the owner creates a workspace from the phone. Creates the " +
+	"workspace.new": "2026-07-31: the owner creates a workspace from the phone. Creates the " +
 		"state they asked for; measured not to re-target; destroys nothing.",
 
-	// **THE RENAMES, REQ-0011, 2026-07-31.** Their words: *"надо подумать как сделать чтобы мы могли
+	// **THE RENAMES, 2026-07-31.** Their words: *"надо подумать как сделать чтобы мы могли
 	// переименовывать воркспейс, и то же самое сессиями"*.
 	//
 	// Against the three questions: a label changes and nothing else. No work is destroyed, no session
@@ -135,12 +135,12 @@ var emittable = map[string]string{
 	//
 	// The name itself is checked by keys.Label at the boundary - non-empty after trimming, 64 runes, no
 	// control character - by the same predicate that guards typing. Nothing here inspects or builds it.
-	"session.rename": "REQ-0011 2026-07-31: the owner renames their own session. A label only; the id " +
+	"session.rename": "2026-07-31: the owner renames their own session. A label only; the id " +
 		"is validated as a UUID because an absent target would silently rename the active session.",
-	"workspace.rename": "REQ-0011 2026-07-31: the owner renames their own workspace. Same shape as " +
+	"workspace.rename": "2026-07-31: the owner renames their own workspace. Same shape as " +
 		"session.rename, same `active` fallback, same UUID validation.",
 
-	// **REWRITTEN 2026-07-31 by REQ-0012, and this is the entry to read hardest in the file.**
+	// **REWRITTEN 2026-07-31, and this is the entry to read hardest in the file.**
 	//
 	// It was the narrowest permission here: only an id this bridge received from its own session.new,
 	// in the same operation, held in a variable. PROVENANCE was the whole safety argument, and it is
@@ -165,7 +165,7 @@ var emittable = map[string]string{
 	//     modal that a long press opened, so closing takes two deliberate acts and neither is a
 	//     mis-tap. What the bridge guarantees is narrower and is all it can: a canonical UUID, so a
 	//     partial target cannot resolve to `active` and close whatever they are working in.
-	"session.close": "REQ-0008 amendment 2026-07-30, rewritten by REQ-0012 on 2026-07-31: TWO paths. " +
+	"session.close": "Calibration, 2026-07-30, rewritten on 2026-07-31: TWO paths. " +
 		"Calibration closes only what it made, same operation - unchanged. The owner's own press " +
 		"closes a full UUID off the wire, guarded by their long-press gesture and by UUID validation, " +
 		"never by provenance. The first capability here that destroys their work.",
@@ -185,15 +185,15 @@ var emittable = map[string]string{
 	// re-target. The reason it is permitted at all is that the owner asked for it by name and designed
 	// its guard themselves.
 	//
-	// **Never on this bridge's own initiative.** REQ-0012 Decision 10: when a workspace is created and
+	// **Never on this bridge's own initiative.** When a workspace is created and
 	// its first session fails, the workspace STAYS. Rolling it back would be the bridge destroying
 	// something nobody pressed a button for, which is a different and worse thing - the delete verb
 	// exists for the owner's hand, not ours.
-	"workspace.delete": "REQ-0012 2026-07-31: the owner deletes their own workspace, and MEASURED to " +
+	"workspace.delete": "2026-07-31: the owner deletes their own workspace, and MEASURED to " +
 		"take every session inside it with it, silently. Only a full UUID for a workspace they " +
 		"long-pressed; never on this bridge's initiative, and never to tidy up after a failure.",
 
-	// **THE SECOND VERB THAT STARTS A PROCESS, REQ-0035, 2026-08-25.** The owner's own words:
+	// **THE SECOND VERB THAT STARTS A PROCESS, 2026-08-25.** The owner's own words:
 	// *"если сессия есть мы её показываем, если её нет мы её создаём и потом показываем"*.
 	//
 	// Sent as `mode: "on"` and never any other way. `off` and `toggle` are agterm's and stay agterm's.
@@ -223,13 +223,13 @@ var emittable = map[string]string{
 	// idempotent — measured, a second `on` is a no-op — so a repeated mis-tap cannot make a second
 	// shell, and the pane it makes destroys nothing.
 	//
-	// # `off` joined `on` in REQ-0042, and it destroys nothing either
+	// # `off` joined `on` on 2026-08-29, and it destroys nothing either
 	//
 	// Hiding a split does not close a pane: `hasSplit` stays true, the hidden pane keeps running, and
 	// measured 2026-08-29 it is idempotent three times over. It is how a pane is shown at FULL WIDTH —
 	// see session.focus below, which it is always paired with. **`toggle` remains excluded**: a toggle
 	// sent over a link with a 2-second poll behind it is a coin flip about a state that may have moved.
-	"session.split": "REQ-0035 2026-08-25, amended REQ-0042 2026-08-29: the owner's single tap asks " +
+	"session.split": "2026-08-25, amended 2026-08-29: the owner's single tap asks " +
 		"for the right pane, and agterm creates one running a login shell when there is none. Sent as " +
 		"mode:on to create or reveal and mode:off to show one pane full width, both idempotent, never " +
 		"toggle; re-targets the focused surface INSIDE the session, measured not to move the window's " +
@@ -244,28 +244,28 @@ var emittable = map[string]string{
 	// between — the owner: *"панели ещё и ресайзить можно, как и сайдбар. те все эти сущности
 	// неизвестной ширины."*
 	//
-	// REQ-0042 removed the problem instead of the permission. The phone maximizes the pane it shows,
+	// The maximize removed the problem instead of the permission. The phone maximizes the pane it shows,
 	// so there is no divider between the window and his text and nothing to shape a probe to. **A
 	// permission that is deleted because its reason stopped existing is the only kind worth having.**
 	//
 	// What it rejected still stands and is inherited by session.focus below: moving HIS divider would
 	// also have closed the arithmetic and was refused as the phone rearranging his desk for our
-	// measurement. Hiding his sidebar is refused on the same ground and stays refused — REQ-0042
+	// measurement. Hiding his sidebar is refused on the same ground and stays refused
 	// keeps the sidebar precisely because it is his to set and ours only to read.
 	//
-	// **Its WIDTH is now ours to set as well — REQ-0043, 2026-09-05, and the distinction from hiding
+	// **Its WIDTH is now ours to set as well, 2026-09-05, and the distinction from hiding
 	// matters.** Hiding changes his layout; widening the sidebar while a fit is on keeps his layout and
 	// moves one edge of it, the same class of change as the window's own edge, and it is put back on
 	// off exactly as the window is. It was asked for in agterm discussion #511 because the window has a
 	// 640-point floor the sidebar does not, so a narrow sidebar left column counts the phone needed
 	// unreachable. Geometry only: it cannot deliver a keystroke, a control character or a command.
-	"sidebar.width": "REQ-0043 2026-09-05: the sidebar's width in points, on the fit's own window, " +
+	"sidebar.width": "2026-09-05: the sidebar's width in points, on the fit's own window, " +
 		"clamped by agterm to 160...560 and echoed after clamping. Set when the window is pinned at its " +
 		"floor and the phone needs fewer columns than that leaves, re-applied with a cached fit so " +
 		"the fit is measured and applied in the same layout, and restored with the window on off. " +
 		"Never hides or shows the sidebar; sidebar.collapse and sidebar.expand are deliberately absent.",
 
-	// **session.focus MOVES FOCUS ON THE OWNER'S MAC, and that is now ordinary — REQ-0042, 2026-08-29.**
+	// **session.focus MOVES FOCUS ON THE OWNER'S MAC, and that is now ordinary, 2026-08-29.**
 	//
 	// # The rule this replaces was never his
 	//
@@ -291,7 +291,7 @@ var emittable = map[string]string{
 	// and `target_pane` all answered `ok:true` and all three toggled, because an unrecognised argument
 	// name falls back to that default. **The reply cannot tell you the name was wrong.** `pane` is the
 	// name, established by sending the same value twice and watching it hold.
-	"session.focus": "REQ-0042 2026-08-29: shows the pane the phone is showing at the full width of " +
+	"session.focus": "2026-08-29: shows the pane the phone is showing at the full width of " +
 		"the terminal area, paired with session.split mode:off. Moves focus between the two panes of " +
 		"ONE of the owner's sessions, which he authorised - the no-focus rule was ours, not his. " +
 		"Creates nothing: it refuses a session with no split. Always sent with an explicit pane, " +
@@ -340,7 +340,7 @@ var emittable = map[string]string{
 	// bytes that reach the pty are themselves a closed set: internal/keys admits a named key from a
 	// map of literals, or text proven to hold no control character, checked by its own AST guard.
 	// Nothing in this package inspects or builds those bytes.
-	"session.type": "REQ-0008 amendment 2026-07-29: typing, authorised by the owner - " +
+	"session.type": "Typing, 2026-07-29: authorised by the owner - " +
 		"«ну и можно приступать к вводу». Bytes validated in internal/keys, never assembled here.",
 }
 
@@ -384,8 +384,8 @@ func TestOnlyTheAllowlistedAgtermCommandsCanBeEmitted(t *testing.T) {
 			where := fset.Position(kv.Pos()).String()
 			lit, ok := kv.Value.(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
-				// The command was computed rather than written down. This is the property REQ-0008
-				// ruling 3 is actually about: a value assembled at runtime can be assembled FROM
+				// The command was computed rather than written down. This is what the closed-set rule
+				// is actually about: a value assembled at runtime can be assembled FROM
 				// INPUT, and then the allowlist below is decoration.
 				dynamic = append(dynamic, where)
 				return true
@@ -414,9 +414,9 @@ func TestOnlyTheAllowlistedAgtermCommandsCanBeEmitted(t *testing.T) {
 	for command, wheres := range found {
 		if _, ok := emittable[command]; !ok {
 			t.Errorf("agterm command %q is emitted at %s but is not in the allowlist.\n"+
-				"If this is intended, add it to `emittable` with the ruling that authorises it, "+
+				"If this is intended, add it to `emittable` with the decision that authorises it, "+
 				"naming who decided and when.\n"+
-				"REQ-0008 originally permitted NO writes, then exactly one - window geometry - and "+
+				"This bridge originally permitted NO writes, then exactly one - window geometry - and "+
 				"named session.type as the thing that must never appear. The owner authorised typing "+
 				"on 2026-07-29, so that example is now a THIRD entry rather than a prohibition, and "+
 				"what it cost is recorded beside it.\n"+

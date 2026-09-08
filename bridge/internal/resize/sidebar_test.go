@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// REQ-0043. The window has a floor of 640 points and the sidebar does not, so when the window cannot
+// The window has a floor of 640 points and the sidebar does not, so when the window cannot
 // get narrower the sidebar gets wider. These tests hold the second knob to the same rules as the first:
 // it is recorded before it moves, applied with the fit it was measured in, and put back on off.
 
@@ -71,7 +71,8 @@ func TestAFailedSidebarRestoreKeepsTheRestorePoint(t *testing.T) {
 	}
 }
 
-// A restore point written before REQ-0043 has no sidebar in it, and nothing is sent for it.
+// A restore point written before the sidebar was recorded has no sidebar in it, and nothing is sent
+// for it.
 func TestARestorePointWithNoSidebarTouchesNoSidebar(t *testing.T) {
 	term, store, _ := fresh(t)
 	store.Pending = &Restore{WindowID: "w1", Width: 1728, Height: 1084}
@@ -189,7 +190,8 @@ func TestAHiddenSidebarBuysAMeasurement(t *testing.T) {
 // --- Calibration: the sidebar stage -------------------------------------------------------------------
 
 // 37 columns needs a 599-point window with the owner's chrome, and the window will not go below 640.
-// Before REQ-0043 this press ended in "calibration ended on 41 columns having asked for 37" every time.
+// Before the sidebar stage existed this press ended in "calibration ended on 41 columns having asked
+// for 37" every time.
 func TestAWindowPinnedAtItsFloorWidensTheSidebar(t *testing.T) {
 	term, store, dir := fresh(t)
 	term.floorPoints = 640

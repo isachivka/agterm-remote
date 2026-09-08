@@ -10,7 +10,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// Whether a session HAS a second pane — REQ-0034, and the trap that shipped in v0.18.0.
+// Whether a session HAS a second pane, and the trap that shipped in v0.18.0.
 //
 // # What was published, and what the phone needed
 //
@@ -26,7 +26,7 @@ import (
 //
 // # It is not the silent-wrong-pane defect, and the difference is the interesting part
 //
-// REQ-0032's bug sent the read and the keystroke to different panes. Nothing here disagrees with
+// The wrong-pane bug sent the read and the keystroke to different panes. Nothing here disagrees with
 // itself. What a collapsed split takes away is REACH: the phone's toggle is composed only when this
 // field is true, so a session opened while the split was collapsed offers no route to the second pane
 // at all — though the pane exists, is addressable, and reads perfectly.
@@ -35,7 +35,7 @@ import (
 // owner on the right pane with no way back. It cannot: the phone's session row is a snapshot taken
 // when the session is opened and does not change while the screen is up, so the control cannot
 // disappear underneath him. The defect is real and narrower. See entry 15 in
-// docs/qa/instruments-that-lied.md — a failure mode derived from reading two gates without asking
+// The instruments lied — a failure mode derived from reading two gates without asking
 // when the value they read can change.
 //
 // # Nothing tested this field before

@@ -1,26 +1,27 @@
 // Package frontdoor turns a proxied HTTP connection into the byte stream the mTLS listener expects.
 //
-// KeenDNS proxies rather than forwards: the router terminates its own TLS and connects to the laptop
-// over the LAN, so a client certificate cannot survive the trip. mTLS therefore runs INSIDE the
+// A TLS-terminating proxy proxies rather than forwards: it terminates its own TLS and connects to
+// the laptop over the LAN, so a client certificate cannot survive the trip. mTLS therefore runs INSIDE the
 // proxied stream, and this package is the only thing that knows a proxy exists.
 //
-//	phone → TLS to the router → proxied on-link → HTTP Upgrade → [this package]
+//	phone → TLS to the proxy → proxied on-link → HTTP Upgrade → [this package]
 //	                                                           → pinned mTLS → NDJSON
 //
 // # The listener is untouched, and that is structural
 //
 // This type implements net.Listener. Its Accept returns upgraded byte streams, so the existing
 // listener runs against it unchanged and never learns that a proxy, an HTTP request or a WebSocket
-// frame exists. Pinning is not weakened to fit the proxy; the router moves bytes it cannot read.
+// frame exists. Pinning is not weakened to fit the proxy; the proxy moves bytes it cannot read.
 //
 // # What this costs, stated narrowly
 //
-// REQ-0008 promised an anonymous caller gets a TLS handshake failure and nothing else. Completing an
-// upgrade means answering an unauthenticated request, so that is amended rather than left to rot.
+// The fail-closed rule was that an anonymous caller gets a TLS handshake failure and nothing else.
+// Completing an upgrade means answering an unauthenticated request, so that rule is amended here
+// rather than left to rot.
 //
-// The loss is smaller than "the endpoint is now discoverable": REQ-0005 measured that the router
-// answers 200 with its own panel for ANY unmapped subdomain on this domain, so a scanner already
-// learns something listens. What is actually given up is that an anonymous caller can now make the
+// The loss is smaller than "the endpoint is now discoverable": a TLS-terminating proxy of the kind
+// this runs behind was measured answering 200 with its own panel for ANY unmapped subdomain on the
+// same name, so a scanner already learns something listens. What is actually given up is that an anonymous caller can now make the
 // BRIDGE do bounded work rather than only the router. That is not an excuse — it is why the three
 // rules below are held by tests rather than by comments.
 //
@@ -253,8 +254,8 @@ func readUpgrade(r *bufio.Reader) (key string, ok bool) {
 	// are reserved for requests that are actually malformed, and they remain byte-identical.
 	//
 	// This widens what is ACCEPTED and not what is authenticated: the upgrade was never the boundary,
-	// the pinned mTLS inside it is, and REQ-0008 was already amended to say an anonymous caller can
-	// complete one.
+	// the pinned mTLS inside it is, and the fail-closed rule was already amended to say an anonymous
+	// caller can complete one.
 	//
 	// It was invisible to every test because the tests speak to this door with a client written in
 	// this repository, which offers nothing. The client that matters is OkHttp.

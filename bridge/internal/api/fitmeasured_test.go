@@ -11,7 +11,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
-// The fit the phone is told about, checked against what the pty actually shows — REQ-0030.
+// The fit the phone is told about, checked against what the pty actually shows.
 //
 // # The defect these were written against
 //

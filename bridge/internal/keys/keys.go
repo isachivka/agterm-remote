@@ -187,7 +187,7 @@ const (
 //
 // # Why this exists rather than letting Text take a newline
 //
-// REQ-0017. The owner pasted a message out of a chat app, and [Text] refused it at byte 75 — rightly,
+// The owner pasted a message out of a chat app, and [Text] refused it at byte 75 — rightly,
 // because a bare newline on a pty is a Return they did not press. Measured in a real zsh: two lines
 // sent raw ran the first one. The same two lines between these markers sat in the line editor in
 // reverse video and ran nothing, and in Claude Code they landed as two lines in the composer with

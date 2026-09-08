@@ -1,13 +1,13 @@
 // Command agtermbridge serves two read-only verbs over pinned mutual TLS.
 //
 // It cannot type into a session. The verb does not exist in this binary — not behind a flag, not
-// behind a build tag. REQ-0008 makes read-only-first a ruling rather than a preference, because with
+// behind a build tag. Read-only-first is a ruling rather than a preference, because with
 // the VPN ruled out this service stands on the open internet in front of sixteen Claude instances
 // running with permission checks disabled. A publicly reachable service that can only read is a bad
 // day; one that can type is a catastrophe.
 //
 // The port is not in this file, not in any default, and not anywhere in the repository. It comes from
-// a config file the owner keeps outside the tree. PLAN-0008 ruling 1: a port that is committed is a
+// a config file the owner keeps outside the tree. A port that is committed is a
 // port that stays after it is rotated.
 package main
 
@@ -47,17 +47,17 @@ type Config struct {
 	Log string `json:"log,omitempty"`
 
 	// LANCert and LANKey turn the ON-LINK hop into TLS. Both empty means plaintext on-link, which is
-	// what REQ-0008 assumed and what a router configured to proxy HTTP expects.
+	// what this bridge originally assumed and what a proxy configured for HTTP expects.
 	//
 	// # Why this exists, and what it is NOT
 	//
-	// KeenDNS proxies to the laptop, and the entry may be configured to speak HTTPS to its backend.
-	// When it is, the router opens TLS to this port; a plaintext listener sees a ClientHello, cannot
-	// answer it, and the router reports 502 to the phone. Measured, not inferred: the router's first
+	// A TLS-terminating proxy proxies to the laptop, and may be configured to speak HTTPS to its
+	// backend. When it is, the proxy opens TLS to this port; a plaintext listener sees a ClientHello,
+	// cannot answer it, and the proxy reports 502 to the phone. Measured, not inferred: the proxy's first
 	// 297 bytes on the wire began `16 03 01`, and a self-signed responder on the same port answered
 	// 200 through the same name.
 	//
-	// **This is opportunistic encryption of one LAN hop and it authenticates nothing.** The router
+	// **This is opportunistic encryption of one LAN hop and it authenticates nothing.** The proxy
 	// does not validate this certificate — it cannot, there is no name it could check it against —
 	// so anyone who can reach this port can complete the handshake. It buys confidentiality against
 	// a passive listener on the LAN and nothing else.
@@ -140,7 +140,8 @@ func run(dir string) error {
 	// The resize cache lives beside the bridge's own config, which is gitignored and 0700. It holds a
 	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), dir)
-	// false: KeenDNS proxies, so every connection's peer is the router and per-source blocking would
+	// false: a TLS-terminating proxy stands in front, so every connection's peer is the proxy and
+	// per-source blocking would
 	// collapse into a global ceiling any anonymous caller could trip for everyone.
 	srv := listener.New(pinning.ServerConfig(own, peer), handler, false)
 
@@ -160,7 +161,7 @@ func run(dir string) error {
 		if err != nil {
 			return fmt.Errorf("on-link certificate: %w", err)
 		}
-		// No client auth: the router has no certificate to present and authentication is not this
+		// No client auth: the proxy has no certificate to present and authentication is not this
 		// layer's job. Saying so here rather than leaving it to be inferred from an absent field.
 		tcp = tls.NewListener(tcp, &tls.Config{
 			Certificates: []tls.Certificate{pair},
@@ -169,8 +170,8 @@ func run(dir string) error {
 		log.Printf("on-link hop is TLS (opportunistic; authenticates nothing)")
 	}
 
-	// KeenDNS proxies rather than forwards: the router terminates its own TLS and connects over the
-	// LAN, so a client certificate cannot survive the trip and mTLS runs INSIDE the proxied stream.
+	// A TLS-terminating proxy proxies rather than forwards: it terminates its own TLS and connects over
+	// the LAN, so a client certificate cannot survive the trip and mTLS runs INSIDE the proxied stream.
 	//
 	// The front door is a net.Listener, so the listener below is unchanged and never learns that a
 	// proxy, an HTTP request or a WebSocket frame exists. Pinning is not weakened to fit the proxy.

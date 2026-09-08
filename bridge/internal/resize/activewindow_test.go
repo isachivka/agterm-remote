@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Which window the fit acts on — REQ-0039.
+// Which window the fit acts on.
 //
 // # The bug this file exists for
 //
@@ -53,8 +53,8 @@ func TestWithNothingMarkedActiveTheFirstUsableWindowIsStillChosen(t *testing.T) 
 	}
 }
 
-// **A window whose size we cannot confirm is skipped even when it claims to be active** — REQ-0018's
-// ruling, which this must not undo. That entry exists because a window reported `fullscreen: true` at
+// **A window whose size we cannot confirm is skipped even when it claims to be active**, which this
+// must not undo. The rule exists because a window reported `fullscreen: true` at
 // 802 points on a 1496-point display: a flag is not a geometry, and a resize path may not act on one.
 func TestAnActiveWindowWithNoUsableSizeIsNotChosen(t *testing.T) {
 	got, err := active([]Window{window("sizeless", true, 0), window("real", false, 1400)})

@@ -8,7 +8,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// The verb that opens a session's second pane — REQ-0035.
+// The verb that opens a session's second pane.
 //
 // # What the owner asked for
 //
@@ -121,7 +121,7 @@ func TestARefusedPaneOpenIsReportedAndNotSwallowed(t *testing.T) {
 }
 
 // **The verb spawns nothing on its own.** Nothing in this package opens a pane except a request that
-// names this verb — the same structural claim REQ-0008 ruling 3 makes about every other command, and
+// names this verb — the same structural claim the closed set makes about every other command, and
 // worth its own assertion here because this one starts a process.
 func TestNoOtherVerbOpensAPane(t *testing.T) {
 	for _, verb := range []string{

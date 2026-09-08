@@ -32,7 +32,7 @@ func tree() any {
 // --- The allowlist, structurally ------------------------------------------------------------------
 
 // The caller never supplies an agterm command. It names a verb from a closed set, and this package
-// builds the agterm request itself — REQ-0008 ruling 3 as a property rather than a filter.
+// builds the agterm request itself — the closed set as a property rather than as a filter.
 //
 // The inputs below are agterm commands this bridge does **not** implement, including the one that
 // runs a program of the caller's choosing and the one that selects a session behind the owner's back.
@@ -41,7 +41,7 @@ func tree() any {
 // # Why `session.close` was removed from this list on 2026-07-31, and why that is not a weakening
 //
 // It used to sit here, and it belonged here: it named an agterm command that this bridge had no verb
-// for, so sending it had to fall through to "unknown verb". REQ-0012 gave the bridge its own
+// for, so sending it had to fall through to "unknown verb". The destructive verbs gave the bridge its own
 // `session.close` verb, and the two names coincide — so sending it now emits `session.close`
 // **because the bridge implements it**, not because a caller's string reached agterm.
 //
@@ -248,7 +248,7 @@ func TestDigestCoversExactlyTheReturnedBytes(t *testing.T) {
 
 // --- failure -------------------------------------------------------------------------------------
 
-// REQ-0008 §6: when the laptop is not answering the app says so and does not invent a network
+// When the laptop is not answering the app says so and does not invent a network
 // diagnosis. That copy is only writable if this distinction survives to the response.
 func TestAgtermNotRunningIsReportedAsSuch(t *testing.T) {
 	h := New(agterm.New("/nonexistent/agterm.sock"), t.TempDir())
@@ -267,7 +267,7 @@ func TestAgtermNotRunningIsReportedAsSuch(t *testing.T) {
 // It read: *"agterm's own description should survive"*, and it was right about every verb except this
 // one. On 2026-08-12 the owner opened a session and their entire screen was
 // `failed to read surface buffer` over a button — agterm describing its internals, relayed to a
-// person, on an otherwise empty screen. See PLAN-0023.
+// person, on an otherwise empty screen.
 //
 // The words are ours now; agterm's survive in `detail`, which is where somebody debugging looks and
 // nobody reading their phone has to.

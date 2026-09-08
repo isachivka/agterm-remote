@@ -5,7 +5,7 @@ package resize
 //
 // # Why this exists
 //
-// REQ-0016. A stored fit promised 45 columns and the terminal rendered 59 because the owner dragged
+// A stored fit promised 45 columns and the terminal rendered 59 because the owner dragged
 // their sidebar 110 points narrower. Confirming that costs a calibration session, and **a session
 // steals the selection**: measured 2026-08-06, `session.new` moves the owner's Mac to the session it
 // creates and back again when it closes, so anything typed in that second lands in the probe. Paying
@@ -21,16 +21,17 @@ package resize
 // contradicts the entry may throw it away. A tree that could not be read, a tree that says nothing,
 // or numbers that have not moved are all SILENCE, and silence applies the fit exactly as before.
 //
-// # The file this replaced — REQ-0043
+// # The file this replaced
 //
 // Until agterm 0.26 the socket published no sidebar width, so this was read from agterm's own
 // per-window state file under Application Support: an undocumented private format with no
 // compatibility promise, and the only thing the bridge ever read that was not the socket. Discussion
 // #511 put the width on the socket, as `tree --window W`'s top-level `sidebarWidth`, and the file
 // coupling went with it. An agterm older than that reports no sidebar, which reads as not known, which
-// is silence - the position the owner was in before REQ-0016, and the worst case of the change.
+// is silence - the position the owner was in before any of this was recorded, and the worst case of
+// the change.
 //
-// # What is compared, and what is applied instead — REQ-0043
+// # What is compared, and what is applied instead
 //
 // The sidebar WIDTH is no longer a term the detector watches. The fit records it and [To] SETS it
 // before every apply, so it cannot have drifted; a value we just wrote is not evidence of anything.
@@ -65,8 +66,8 @@ func (l Laptop) known() bool { return l.SidebarWidthMilli > 0 && l.FontSize > 0 
 //   - the tree could not be read or says nothing, which is what an older agterm looks like from here;
 //   - the numbers are the same, which is the ordinary press and the whole reason this exists.
 //
-// In every one of those cases the press proceeds exactly as it did before REQ-0016: one resize, no
-// session, no jump.
+// In every one of those cases the press proceeds exactly as it did before the laptop was recorded at
+// all: one resize, no session, no jump.
 func laptopMoved(fit Fit, current Laptop) bool {
 	recorded := Laptop{SidebarWidthMilli: fit.SidebarWidthMilli, SidebarVisible: fit.SidebarVisible, FontSize: fit.FontSize}
 	if !recorded.known() || !current.known() {

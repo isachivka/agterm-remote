@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Apply what is known, and measure nothing — REQ-0040.
+// Apply what is known, and measure nothing.
 //
 // # Why the automatic path may not calibrate
 //

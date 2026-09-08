@@ -9,7 +9,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// REQ-0043. The adapter reads the laptop from the tree and sets the sidebar in points; the resize
+// The adapter reads the laptop from the tree and sets the sidebar in points; the resize
 // package sees milli-points and nothing of agterm.
 
 func TestTheAdapterReadsTheLaptopFromTheTreeOfTheFitsWindow(t *testing.T) {

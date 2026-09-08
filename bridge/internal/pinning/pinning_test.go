@@ -46,7 +46,7 @@ func mint(t *testing.T, name string) (Identity, tls.Certificate, *x509.Certifica
 // afterwards, as an alert. A rejected client therefore sees tls.Dial SUCCEED and fails on the first
 // read. Asserting on Dial alone would have made every server-side rejection test pass vacuously.
 //
-// This is a property of the protocol, not of this package, and REQ-0009 inherits it: on Android a
+// This is a property of the protocol, not of this package, and the phone inherits it: on Android a
 // refused certificate will look like "connected, then the connection dropped", never like "could not
 // connect".
 func handshake(t *testing.T, server, client *tls.Config) (clientErr, serverErr error) {
@@ -125,7 +125,7 @@ func TestUnpinnedClientIsRejected(t *testing.T) {
 	}
 }
 
-// No certificate at all: the anonymous caller from REQ-0008's fail-closed ruling.
+// No certificate at all: the anonymous caller the fail-closed rule is about.
 func TestClientWithNoCertificateIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
 	_, _, phoneCert := mint(t, "agterm-remote phone")
@@ -162,10 +162,10 @@ func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 
 // The load-bearing test of this milestone.
 //
-// REQ-0008 §5 originally had the laptop SIGN the phone's request, which is a CA model. Under a CA,
+// This design originally had the laptop SIGN the phone's request, which is a CA model. Under a CA,
 // anything the issuer's key signs is valid — so a second certificate minted from that key would be
-// accepted, and ruling 2's claim that "no issuer exists that can be tricked into minting a second
-// valid one" would have been false. This asserts the property that makes it true: a certificate
+// accepted, and the claim that "no issuer exists that can be tricked into minting a second valid
+// one" would have been false. This asserts the property that makes it true: a certificate
 // correctly signed by the pinned certificate's own key is still refused, because pinning compares
 // bytes and has no concept of an issuer at all.
 func TestCertificateSignedByThePinnedKeyIsStillRejected(t *testing.T) {
@@ -205,7 +205,7 @@ func TestReissuedCertificateWithTheSameKeyIsRejected(t *testing.T) {
 
 // What ClientCAs actually does, measured — because I got this wrong by reasoning about it.
 //
-// PLAN-0008 sketched RequireAndVerifyClientCert with the phone's certificate in ClientCAs, and I
+// An earlier sketch used RequireAndVerifyClientCert with the phone's certificate in ClientCAs, and I
 // claimed that could not work with a non-CA certificate. **It works.** Go accepts a self-signed leaf
 // that is itself in the root pool, without requiring IsCA. The claim was wrong and this test is what
 // corrected it.
@@ -296,7 +296,7 @@ func TestMintedCertificateIsNotAnIssuer(t *testing.T) {
 
 // --- Validity, fingerprints, and the shape of what gets carried ----------------------------------
 
-// REQ-0005 measured that PKIX does not validate a trust anchor's own validity dates. A pinned
+// It was measured that PKIX does not validate a trust anchor's own validity dates. A pinned
 // certificate IS its own anchor, so without the explicit check in pinnedPeer an expired one would be
 // accepted forever.
 func TestExpiredPinnedCertificateIsRejected(t *testing.T) {
@@ -350,8 +350,8 @@ func TestLoadPeerRefusesABundle(t *testing.T) {
 	}
 }
 
-// The provisioning leg carries a certificate, and REQ-0008 §5 claims it fits in a QR code. Measured
-// here rather than assumed, so the number in the document is one this repo can reproduce.
+// The provisioning leg carries a certificate, and enrolment claims it fits in a QR code. Measured
+// here rather than assumed, so the claim is one this repository can reproduce.
 func TestCertificateFitsInAQRCode(t *testing.T) {
 	const qrVersion40BinaryCapacityL = 2953
 
@@ -391,11 +391,11 @@ var _ = net.Dial
 //
 // The two failures need different words on the owner's phone — a wrong certificate means the machine
 // is not the one that was paired, an expired one means an identity needs re-minting — and the app was
-// rebuilt in REQ-0009 iteration 2b so its verdict could survive the trip. Asserting it only there
+// rebuilt so its verdict could survive the trip. Asserting it only there
 // would leave the same property held at one end of the wire and not the other.
 //
-// The certificate here lives for a moment on purpose. That is what `bridgecert mint --lifetime` exists
-// for, and it is why the expiry path is testable on the owner's phone at all rather than argued from
+// The certificate here lives for a moment on purpose. A short lifetime is mintable on demand, and it
+// is why the expiry path is testable on the owner's phone at all rather than argued from
 // the contract forever.
 func TestAnExpiredPeerIsRefusedAsExpiredRatherThanAsAStranger(t *testing.T) {
 	id, err := Mint("briefly valid", 2*time.Second)

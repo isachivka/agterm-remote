@@ -30,8 +30,8 @@ import (
 // is this struct, which is the whole cost.
 type terminal struct{ client *agterm.Client }
 
-// OpenSplitPane gives one of the OWNER'S sessions a second pane, on his tap — REQ-0035. It is no
-// longer pointed at the calibration session: REQ-0042 deleted the shaped probe, so nothing this bridge
+// OpenSplitPane gives one of the OWNER'S sessions a second pane, on his tap. It is no
+// longer pointed at the calibration session: the shaped probe was deleted, so nothing this bridge
 // creates is ever split.
 //
 // MaximizePane shows one pane at the full width of the terminal area, and is likewise his gesture.
@@ -48,7 +48,7 @@ func (t terminal) Windows(ctx context.Context) ([]resize.Window, error) {
 	for _, w := range windows {
 		out = append(out, resize.Window{
 			ID: w.ID,
-			// **Carried across at last** — REQ-0039. agterm has always sent this and this adapter
+			// **Carried across at last**. agterm has always sent this and this adapter
 			// always dropped it, which is how the resize path came to choose a window by list order.
 			Active:     w.Active,
 			Fullscreen: w.Fullscreen,
@@ -82,7 +82,7 @@ func (t terminal) ZoomWindow(ctx context.Context, id string) error {
 	return t.client.ZoomWindow(ctx, id)
 }
 
-// Laptop reads one window's sidebar and font from the tree — REQ-0043. This replaced a read of
+// Laptop reads one window's sidebar and font from the tree. This replaced a read of
 // agterm's private per-window state file, the only thing the bridge ever read that was not the
 // socket; discussion #511 put the sidebar on the socket and the file coupling went.
 //
@@ -134,7 +134,7 @@ func modeOf(counts map[int]int) int {
 func (t terminal) Text(ctx context.Context, sessionID string, lines int) (string, error) {
 	// **Primary, explicitly.** The calibration session is one this bridge created and never splits, so
 	// the pane is not a question here - but it is still named rather than defaulted, because an absent
-	// pane is exactly the thing REQ-0032 removed from this codebase.
+	// pane is exactly the thing the wrong-pane fix removed from this codebase.
 	return t.client.Text(ctx, sessionID, lines, agterm.PaneLeft)
 }
 
@@ -158,14 +158,14 @@ func (t terminal) Text(ctx context.Context, sessionID string, lines int) (string
 // arithmetic.
 // refuse logs the arithmetic and hands the phone a no that does not look like a broken connection.
 //
-// # Why this is a CONTENT refusal — REQ-0037
+// # Why this is a CONTENT refusal
 //
 // It returned `fail`, which the phone renders as a full-screen error replacing the terminal, the
 // session list and the input bar. On 2026-08-26 the owner got exactly that for a calibration that
 // declined: a page-filling English sentence about *probe widths*, addressed to us, out of a log, with
 // nothing in it he could act on.
 //
-// **REQ-0017 abolished that shape and this path had quietly re-grown it.** A fit that will not measure
+// **That shape was abolished and this path had quietly re-grown it.** A fit that will not measure
 // is not the link breaking: the bridge answered, the socket is healthy, and his session is fine. It
 // costs one line on the notes surface beside the other fit notes.
 //
@@ -220,7 +220,7 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		columns, req.BoxWidthDp, float64(req.CharacterWidthMilliDp)/1000,
 		map[bool]string{true: " (recalibrate)", false: ""}[req.Recalibrate])
 
-	// **What the fit is actually going to size, said out loud** — REQ-0036.
+	// **What the fit is actually going to size, said out loud**.
 	//
 	// The owner pressed this four times in fifty seconds on 2026-08-26, each press logging
 	// `calibrated, 45 columns now in effect`, and then switched the feature off. Every one of those
@@ -245,7 +245,7 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		ctx, term, h.store, h.stateDir, req.BoxWidthDp, req.MarginDp, req.CharacterWidthMilliDp,
 		columns, intent)
 	if errors.Is(err, resize.ErrNotCalibrated) {
-		// **An ordinary reply, not a refusal** — REQ-0040. The phone asked to apply a fit if one was
+		// **An ordinary reply, not a refusal**. The phone asked to apply a fit if one was
 		// known; not knowing is an answer to that question. It goes back as a fact the phone can act
 		// on by putting one line where the fit notes live, and the owner presses when he wants it.
 		log.Printf("width: nothing recorded for this geometry and the request asked not to measure")
@@ -256,7 +256,7 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// messages from internal/resize spell out "42 columns at 11.0dp is 462dp in a box that holds
 		// 440dp", and the LOG is who that is addressed to.
 		//
-		// **The phone gets a content refusal, not a failure** — REQ-0037. It used to get `fail`, which
+		// **The phone gets a content refusal, not a failure**. It used to get `fail`, which
 		// replaces his terminal with a full-page error carrying that same sentence about probe widths.
 		// He cannot act on any of it and his session had done nothing wrong.
 		log.Printf("width: REFUSED - %v", err)
@@ -323,7 +323,7 @@ func (h *Handler) paneShape(ctx context.Context, session string) string {
 				return fmt.Sprintf("this session has one pane %v, so the window is the terminal minus "+
 					"the sidebar. %s", roles, describeSplitGeometry(tree, s))
 			}
-			// **A second pane is no longer a problem; a second pane ON SCREEN is** — REQ-0042.
+			// **A second pane is no longer a problem; a second pane ON SCREEN is**.
 			//
 			// The owner named the two terms that stand between the window and his text: *"панели ещё и
 			// ресайзить можно, как и сайдбар. те все эти сущности неизвестной ширины."* The phone now
@@ -337,7 +337,7 @@ func (h *Handler) paneShape(ctx context.Context, session string) string {
 			// **agterm's own `isSplit`, not a count of visible surfaces.** Counting was written here
 			// first and was wrong: a scratch terminal is a surface, so a session with a HIDDEN split
 			// and an open scratch showed two visible surfaces and would have been reported as a failed
-			// maximize. The same conflation REQ-0034 had to undo one question over — asking how many
+			// maximize. The same conflation the split gate had to undo one question over — asking how many
 			// things are on screen is not asking whether the split is.
 			if s.Split {
 				return fmt.Sprintf(
@@ -353,8 +353,8 @@ func (h *Handler) paneShape(ctx context.Context, session string) string {
 	return "the session is not in the tree"
 }
 
-// describeSplitGeometry reports the sidebar, and whether the maximize took — REQ-0042, read from the
-// tree since REQ-0043.
+// describeSplitGeometry reports the sidebar, and whether the maximize took, read from the
+// tree since the sidebar became a knob.
 //
 // # What is left after the divider went
 //
@@ -387,7 +387,7 @@ func describeSplitGeometry(tree *agterm.Tree, s agterm.Session) string {
 	return sidebar
 }
 
-// intentOf turns the wire's two booleans into the closed set the resize package takes — REQ-0040.
+// intentOf turns the wire's two booleans into the closed set the resize package takes.
 //
 // # The pair that must not resolve
 //

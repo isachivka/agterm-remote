@@ -127,7 +127,7 @@ func TestEachCallUsesItsOwnConnection(t *testing.T) {
 	}
 }
 
-// REQ-0008 §6. A sleeping or absent laptop must be distinguishable from a command that failed, or the
+// A sleeping or absent laptop must be distinguishable from a command that failed, or the
 // app cannot say "your laptop is not answering" without inventing a diagnosis.
 func TestMissingSocketIsUnavailableNotAnError(t *testing.T) {
 	c := New("/nonexistent/agterm.sock")

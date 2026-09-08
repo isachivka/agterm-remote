@@ -8,7 +8,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// The verb that shows one pane at the full width of the terminal area — REQ-0042.
+// The verb that shows one pane at the full width of the terminal area.
 //
 // # What the owner asked for
 //
@@ -160,7 +160,7 @@ func TestShowingAPaneRefusesAnIdThatIsNotAUUID(t *testing.T) {
 }
 
 // An unknown pane is refused before anything is sent — [paneFor]'s rule, and this verb does not get one
-// of its own. A third default here is the REQ-0032 defect in a third place.
+// of its own. A third default here is the wrong-pane defect in a third place.
 func TestShowingAnUnknownPaneReachesNothing(t *testing.T) {
 	var seen []agtermtest.Request
 	h, _ := handler(t, func(req agtermtest.Request) any {
@@ -180,7 +180,7 @@ func TestShowingAnUnknownPaneReachesNothing(t *testing.T) {
 
 // **It is a separate verb from `pane.open`, and this is the test that says why.**
 //
-// `Request.Pane` already existed, so a bridge that predates REQ-0042 accepts a pane on a `pane.open`
+// `Request.Pane` already existed, so a bridge that predates `pane.show` accepts a pane on a `pane.open`
 // and ignores it — a phone asking to maximize the LEFT pane would get a split CREATED instead,
 // silently. Separating the verbs is what makes an old bridge refuse by name instead.
 //

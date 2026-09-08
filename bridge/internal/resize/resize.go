@@ -69,7 +69,7 @@ type Terminal interface {
 	NewSession(ctx context.Context, command, name string) (string, error)
 	CloseSession(ctx context.Context, id string) error
 
-	// Laptop reads one window's sidebar and font from the tree - REQ-0043. Never a session, never
+	// Laptop reads one window's sidebar and font from the tree. Never a session, never
 	// focus: it is what makes the ordinary press free.
 	Laptop(ctx context.Context, windowID string) (Laptop, error)
 	// SetSidebarWidth sets one window's sidebar width in milli-points and returns what agterm
@@ -82,7 +82,7 @@ type Terminal interface {
 // the search and the arithmetic can be tested against a fake with no agterm anywhere.
 type Window struct {
 	ID string
-	// Active is agterm's own flag for the window that is frontmost — REQ-0039.
+	// Active is agterm's own flag for the window that is frontmost.
 	//
 	// **It was decoded from the socket and thrown away before reaching here**, which is how [active]
 	// came to pick a window by list order. See that function for what it cost.
@@ -123,7 +123,7 @@ type Fit struct {
 	// **Evidence, not identity**: neither is part of [fitKey] and no decision reads them. A fit is
 	// found by the phone's numbers exactly as before.
 	//
-	// They exist because of REQ-0016. On 2026-08-06 a stored fit promised 45 columns and the terminal
+	// They exist because of one measured failure. On 2026-08-06 a stored fit promised 45 columns and the terminal
 	// rendered 59, and working out why took two live measurements and simultaneous equations against
 	// two historical entries in this file. The search already computes both numbers from its probes
 	// and used to throw them away; written down, the file can say it itself.
@@ -142,7 +142,7 @@ type Fit struct {
 	// from the tree - see laptopstate.go. Evidence like the two above, not identity: none is part of
 	// [fitKey].
 	//
-	// **The sidebar width is APPLIED with the fit, the other two are COMPARED** — REQ-0043. [To]
+	// **The sidebar width is APPLIED with the fit, the other two are COMPARED**. [To]
 	// sets the sidebar to this width before it narrows the window, so the fit is applied in the
 	// layout it was measured in; the font and the sidebar's visibility are not ours to set, so a
 	// difference in either buys a measurement, which is what keeps an ordinary press free: one tree
@@ -152,7 +152,7 @@ type Fit struct {
 	// both mean the press proceeds exactly as it always did, sidebar untouched.
 	SidebarWidthMilli int `json:"sidebar_width_milli"`
 	FontSize          int `json:"font_size"`
-	// SidebarVisible is whether the sidebar was showing when this was measured - REQ-0043. A width
+	// SidebarVisible is whether the sidebar was showing when this was measured. A width
 	// applied to a hidden sidebar costs the terminal nothing, so a fit measured with it showing does
 	// not hold with it hidden, and the detector compares this where it used to compare the width.
 	SidebarVisible bool `json:"sidebar_visible"`
@@ -180,7 +180,7 @@ type Fit struct {
 // and then apply a width computed for a different box. **Silently wrong is worse than nothing**, and
 // silently wrong is what burned this feature twice.
 //
-// # The shape segment left in REQ-0042, and it cost one calibration
+// # The shape segment was dropped when the phone started maximizing, and it cost one calibration
 //
 // A fourth segment named the split geometry a fit was measured in, because the fit's target was a
 // PANE'S SHARE of a window. The phone now maximizes the pane it shows, so there is no share: every
@@ -197,7 +197,7 @@ func fitKey(display, boxWidthDp, characterWidthMilliDp int) string {
 	return fmt.Sprintf("%d/%d/%d", display, boxWidthDp, characterWidthMilliDp)
 }
 
-// Intent is what a fit request is FOR — REQ-0040.
+// Intent is what a fit request is FOR.
 //
 // # Why a closed set and not two booleans
 //
@@ -229,8 +229,8 @@ const (
 // **An error here and NOT an error on the wire**, and the difference is deliberate. At this layer the
 // caller asked for something and did not get it, which is what an error is for. At the boundary it
 // becomes an ordinary reply saying *"press Fit"* — because dressing a legitimate answer as a failure is
-// how the fit refusal came to replace the owner's terminal with a full-page error, which REQ-0037 had
-// to undo.
+// how the fit refusal came to replace the owner's terminal with a full-page error, which had to be
+// undone.
 var ErrNotCalibrated = errors.New("no fit is recorded for this geometry")
 
 // Restore is what the window looked like before anything was resized.
@@ -246,7 +246,7 @@ type Restore struct {
 	Y          int    `json:"y"`
 	Width      int    `json:"width"`
 	Height     int    `json:"height"`
-	// SidebarWidthMilli is the sidebar the owner had, in thousandths of a point - REQ-0043. Zero for
+	// SidebarWidthMilli is the sidebar the owner had, in thousandths of a point. Zero for
 	// a record written before the fit could move the sidebar, or by an agterm that does not report
 	// it; nothing is sent for a zero.
 	SidebarWidthMilli int `json:"sidebar_width_milli,omitempty"`
@@ -322,7 +322,7 @@ func MeasureColumns(screen string) int {
 // fine. This path returns either a number the terminal actually reported or an error naming what it
 // saw instead, and those are the only two outcomes.
 //
-// # It waits for the number to SETTLE, not merely to appear — REQ-0037
+// # It waits for the number to SETTLE, not merely to appear
 //
 // **A stale number is a valid number, and taking the first one seen accepted it.** Measured 2026-08-26,
 // in a window created and closed for the purpose: for about 0.3s after a resize the probe goes on
@@ -336,8 +336,8 @@ func MeasureColumns(screen string) int {
 // the read that followed it could land in that window and come back with the old figure. Nothing
 // rejected it, because there is nothing wrong with it except when it was true.
 //
-// REQ-0036 is what made this bite: splitting the probe and moving its divider immediately before the
-// first measurement is a re-layout, and the first read after it returned the pane width from before
+// The shaped probe is what made this bite: splitting the probe and moving its divider immediately
+// before the first measurement is a re-layout, and the first read after it returned the pane width from before
 // the split. On the owner's machine that produced the same figure for both probe widths and the
 // calibration refused, blaming a long line that was rendering perfectly.
 //
@@ -505,7 +505,7 @@ func Calibrate(ctx context.Context, t Terminal, dir string, w Window, boxWidthDp
 	var fit Fit
 	err := withCalibrationSession(ctx, t, dir, func(sessionID string) error {
 		// settledAt records what the window ACTUALLY became for each probe. It was discarded before
-		// REQ-0037, which is why the refusal below could blame the long line for a window that never
+		// discarding it is why the refusal below could blame the long line for a window that never
 		// moved - measured: asking for 600 points yields 640, because there is a floor.
 		settledAt := map[int]int{}
 		measure := func(points int) (int, error) {
@@ -539,7 +539,7 @@ func Calibrate(ctx context.Context, t Terminal, dir string, w Window, boxWidthDp
 			return err
 		}
 		if wideCols == narrowCols {
-			// **Say which of the two things went wrong** - REQ-0037. This one sentence covered a
+			// **Say which of the two things went wrong**. This one sentence covered a
 			// window that could not move and a probe that was not reporting, and it named neither.
 			// The owner got it on 2026-08-26 for a probe that was rendering perfectly.
 			if settledAt[wide] == settledAt[narrow] {
@@ -551,7 +551,7 @@ func Calibrate(ctx context.Context, t Terminal, dir string, w Window, boxWidthDp
 				"columns either way; the calibration session is not reporting its width",
 				settledAt[wide], settledAt[narrow], wideCols)
 		}
-		// **From the widths the window SETTLED at, not the ones it was asked for** — REQ-0043. The
+		// **From the widths the window SETTLED at, not the ones it was asked for**. The
 		// 600-point probe settles at 640 on a real Mac, and a line through the asked widths put the
 		// cell 5% too wide; every step after inherited the error, including how far to widen the
 		// sidebar. The columns were measured at the settled widths, so the line goes through them.
@@ -650,7 +650,7 @@ func Calibrate(ctx context.Context, t Terminal, dir string, w Window, boxWidthDp
 		// **A cache that nothing invalidates automatically turns a partial result into a permanent
 		// one**, so the only safe moment to persist is after the answer is known to be whole. Giving
 		// up is an error and writes nothing; the next press calibrates again, which costs a second.
-		// **THE SIDEBAR STAGE — REQ-0043.** The window is at its floor and still too wide for the
+		// **THE SIDEBAR STAGE.** The window is at its floor and still too wide for the
 		// phone: a fit that was refused, identically, every time before this. The terminal area is
 		// the window minus the sidebar, and the sidebar has no floor the fit can hit - only a 560-point
 		// ceiling - so when the window cannot get narrower the sidebar gets wider.
@@ -764,7 +764,7 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 		store.Fits = map[string]Fit{}
 	}
 	key := fitKey(w.Display, boxWidthDp, characterWidthMilliDp)
-	// **The automatic re-apply stops here when nothing is recorded** — REQ-0040.
+	// **The automatic re-apply stops here when nothing is recorded**.
 	//
 	// Above this line the machine has been READ and not touched: a window list, and a key made of
 	// numbers. So an [IntentApplyIfKnown] that declines leaves the laptop exactly as it was found —
@@ -792,7 +792,7 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 	// a property nobody could point at - true by the shape of an `if`, and one refactor from being
 	// silently untrue.
 	if store.Pending == nil {
-		// The sidebar as well, since the fit may now move it - REQ-0043. Read from the tree; an
+		// The sidebar as well, since the fit may now move it. Read from the tree; an
 		// agterm that reports none leaves a zero, and a zero is never sent back.
 		sidebar := 0
 		if laptop, err := t.Laptop(ctx, w.ID); err == nil {
@@ -806,7 +806,7 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 		store.persist()
 	}
 
-	// **The window as it stands, before anything touches it** — REQ-0036.
+	// **The window as it stands, before anything touches it**.
 	//
 	// The record used to jump from "asked 45 columns" to "45 columns now in effect" with no geometry
 	// between them, so a press that resized nothing and a press that moved the window 300 points wrote
@@ -820,7 +820,7 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 		map[bool]string{true: "known", false: "MISSING - this press will calibrate"}[hasFit(store, key)])
 
 	if fit, known := store.Fits[key]; known && intent != IntentRecalibrate {
-		// **The sidebar first, at the width the fit was measured with** — REQ-0043. A fit is a
+		// **The sidebar first, at the width the fit was measured with**. A fit is a
 		// window width AND a sidebar width; the column count is what the two produce together. The
 		// sidebar used to be a term the detector watched for drift and a probe confirmed; it is now
 		// simply set, and cannot drift. Before the window narrows, so the window is never narrow
@@ -851,13 +851,13 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 			return 0, false, err
 		}
 		// **What actually moved.** A press that changes nothing is the interesting case and it was
-		// indistinguishable from every other press in the record — REQ-0036.
+		// indistinguishable from every other press in the record.
 		log.Printf("width: resized the window from %d to %d points (%+d) for a cached fit of %d columns",
 			w.Width, fit.Points, fit.Points-w.Width, fit.Columns)
 
 		// **AND THEN IT IS CHECKED - but only when something suggests it is worth checking.**
 		//
-		// REQ-0016: on 2026-08-06 the owner narrowed their sidebar, the same 802-point window handed
+		// On 2026-08-06 the owner narrowed their sidebar, the same 802-point window handed
 		// 110 more points to the terminal, and an entry promising 45 columns started delivering 59 -
 		// 577dp of line in a 440dp box, on every press, for ever. The key is made of phone-side facts
 		// and the value it guards is a laptop-side answer; nothing in it could notice.
@@ -954,7 +954,7 @@ func To(ctx context.Context, t Terminal, store *Store, dir string, boxWidthDp, m
 		return 0, false, err
 	}
 	store.Fits[key] = fit
-	// The search's answer, and what it cost the window. REQ-0036.
+	// The search's answer, and what it cost the window.
 	log.Printf("width: calibration settled on %d points for %d columns; the window began at %d points (%+d)",
 		fit.Points, fit.Columns, w.Width, fit.Points-w.Width)
 	applied := fit
@@ -1030,7 +1030,7 @@ func RestoreWindow(ctx context.Context, t Terminal, store *Store) error {
 	// Width only, so a restore puts back exactly what a fit changed and nothing else. The recorded
 	// height stays in the file as a description of what the window WAS - it is never applied, because
 	// we never moved it.
-	// **THE HEIGHT IS THE OWNER'S AT ALL TIMES, so it is read now and never replayed.** REQ-0018.
+	// **THE HEIGHT IS THE OWNER'S AT ALL TIMES, so it is read now and never replayed.**
 	//
 	// This used to send `r.Height`, the height captured when the fit was switched on, and the
 	// paragraph here argued for it: the record is the only thing that remembers the window they had.
@@ -1087,7 +1087,7 @@ func RestoreWindow(ctx context.Context, t Terminal, store *Store) error {
 		return err
 	}
 
-	// **And the sidebar, after the window** — REQ-0043. The record carries the width the owner had
+	// **And the sidebar, after the window**. The record carries the width the owner had
 	// when nothing is known to have moved it; a zero is a record that predates the fit moving it, or
 	// an agterm that never reported one, and nothing is sent for it. Window first, so a sidebar that
 	// cannot be put back leaves a wide window with a wide sidebar rather than a narrow window with a
@@ -1249,7 +1249,7 @@ const (
 // rule as internal/keys, which names the byte it saw rather than reporting that input was rejected.
 //
 // `sidebarMaxed` says the sidebar stage ran and hit its ceiling, so the sentence can say that no
-// layout on this Mac is narrower - REQ-0043 - rather than leaving a reader to wonder why the sidebar
+// layout on this Mac is narrower rather than leaving a reader to wonder why the sidebar
 // was not tried.
 func refuseAnImpossibleFit(measured, target, boxWidthDp, characterWidthMilliDp int, sidebarMaxed bool) error {
 	if measured > target {
@@ -1272,7 +1272,7 @@ func refuseAnImpossibleFit(measured, target, boxWidthDp, characterWidthMilliDp i
 // active picks the window to act on, **by geometry we can verify and not by a flag we cannot.**
 //
 // This used to read `w.Fullscreen || w.Width > 0`, so a window claiming fullscreen was chosen even
-// when its width said nothing. REQ-0018: that flag has been caught reporting something which is not
+// when its width said nothing. That flag has been caught reporting something which is not
 // native fullscreen - the owner's window read `fullscreen: true` at 802 points on a 1496-point
 // display, and again at 1496 on a 2560-wide one. Whatever it describes, it is not a window filling a
 // screen, and a resize path that trusts it can select a window whose size it could not confirm.
@@ -1284,7 +1284,7 @@ func refuseAnImpossibleFit(measured, target, boxWidthDp, characterWidthMilliDp i
 // **The flag is still recorded** in the restore point, where a person reading the file can see what
 // the window said it was. Nothing branches on it.
 //
-// # It did not pick the active window, and its name said it did — REQ-0039
+// # It did not pick the active window, and its name said it did
 //
 // Until 2026-08-26 this returned **the first window agterm listed with a usable size**. Nothing in it
 // selected by activeness; the name asserted a property the body never implemented, and the doc above
@@ -1341,7 +1341,7 @@ const (
 	// columns of slack still cannot reach the target, the fit really is out of reach and the refusal
 	// below is the honest answer - with the window put back.
 	overshootSteps = 3
-	// sidebarSteps bounds the sidebar stage of a calibration - REQ-0043 - for the same reason: each
+	// sidebarSteps bounds the sidebar stage of a calibration for the same reason: each
 	// step moves an edge the owner can see. The first step takes the whole surplus, so a second and
 	// third exist only for rounding, and a fit three columns past that is out of reach.
 	sidebarSteps = 3
@@ -1461,7 +1461,7 @@ func withCalibrationSession(ctx context.Context, t Terminal, dir string, body fu
 		forgetStray(dir)
 	}()
 
-	// **The probe is never split** — REQ-0042. A session with one pane IS that pane, at the full width
+	// **The probe is never split**. A session with one pane IS that pane, at the full width
 	// of the terminal area, and that is the only geometry the phone ever puts his session into. There
 	// is nothing left to shape the probe to.
 	return body(created)

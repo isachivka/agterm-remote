@@ -8,7 +8,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// What the fit log may and may not contain — REQ-0036.
+// What the fit log may and may not contain.
 //
 // # Why there is a log at all
 //
@@ -27,7 +27,7 @@ import (
 // is unmistakable rather than something a reader has to notice.
 func noisySession(surfaces ...map[string]any) any { return sessionShowing(false, surfaces...) }
 
-// sessionShowing is noisySession with agterm's own `split` flag set — REQ-0042.
+// sessionShowing is noisySession with agterm's own `split` flag set.
 //
 // **Both panes SHOWN is a different question from both panes EXISTING**, and the log answers it from
 // this flag rather than by counting visible surfaces. The two fixtures are kept apart so a test has to
@@ -107,9 +107,9 @@ func TestTheFitLogSaysWhetherThereIsASecondPane(t *testing.T) {
 }
 
 // A pane that exists but is collapsed is still a second pane, and the log says which — the two states
-// give very different column counts and REQ-0034 established that they are different states.
+// give very different column counts, and they are different states.
 //
-// **REQ-0042 reversed which of them is the alarming one.** Both panes on screen is now the failure;
+// **The maximize reversed which of them is the alarming one.** Both panes on screen is now the failure;
 // one on screen is the phone getting what it asked for. The distinction is the same distinction and
 // this still asserts it in both directions, which is the point of keeping the test rather than
 // rewriting it around the new wording.
@@ -128,11 +128,11 @@ func TestTheFitLogTellsCollapsedFromOnScreen(t *testing.T) {
 	}
 }
 
-// **A scratch terminal is not a second pane**, the same distinction REQ-0034 turns on, held here so the
+// **A scratch terminal is not a second pane**, the same distinction the split gate turns on, held here so the
 // log cannot start reporting a split that is not there.
 //
 // It asserts what the line DOES say as well as what it does not. Checking only for the absence of a
-// phrase would have turned into a test that cannot fail the moment REQ-0042 changed the phrase — which
+// phrase would have turned into a test that cannot fail the moment the phrase changed — which
 // is what happened when this file was first edited for it.
 func TestTheFitLogDoesNotCallAScratchTerminalASecondPane(t *testing.T) {
 	line := shapeOf(t, noisySession(surface("left", true), surface("scratch", false)), sessionA)
@@ -168,7 +168,7 @@ func TestTheFitLogAlwaysSaysSomething(t *testing.T) {
 	})
 }
 
-// --- the maximize, REQ-0042 ------------------------------------------------------------------------
+// --- the maximize ----------------------------------------------------------------------------------
 
 // **Two panes ON SCREEN is now the finding, and one hidden pane is not.**
 //
@@ -204,7 +204,7 @@ func TestTwoPanesOnScreenSayTheMaximizeDidNotTake(t *testing.T) {
 // one visible pane — would have been logged as a maximize that did not take, on a machine where the
 // maximize worked perfectly.
 //
-// It is the REQ-0034 conflation one question over: how many things are on screen is not whether the
+// It is the same conflation one question over: how many things are on screen is not whether the
 // SPLIT is on screen. agterm answers the second directly with `isSplit` and the log now asks it.
 func TestAnOpenScratchIsNotAFailedMaximize(t *testing.T) {
 	line := shapeOf(
@@ -233,7 +233,7 @@ func TestTheMaximizeLineNamesNothingOfHis(t *testing.T) {
 	}
 }
 
-// --- which window the fit acts on, REQ-0039 --------------------------------------------------------
+// --- which window the fit acts on -----------------------------------------------------------------
 
 // **THE FIELD THAT WAS DROPPED ON THE FLOOR.** agterm has always reported which window is active and
 // `agterm.Window` has always decoded it; this adapter is where it stopped, so `resize.active` could

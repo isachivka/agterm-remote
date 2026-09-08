@@ -155,7 +155,7 @@ func TestEveryKeySequenceIsALiteral(t *testing.T) {
 	}
 }
 
-// **The paste markers are written down, not built.** REQ-0017.
+// **The paste markers are written down, not built.**
 //
 // Same argument as the key sequences above, and the reason it needs its own walk: these are consts
 // rather than map entries, so the guard on the map would never look at them. A marker assembled at

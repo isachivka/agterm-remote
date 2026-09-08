@@ -10,7 +10,7 @@ import (
 //
 // **The only verb in this bridge that puts bytes on a pty.** `resize` changes the shape of a window
 // and can carry nothing into it; this runs whatever the owner typed. Authorised by the owner on
-// 2026-07-29, reversing REQ-0008's original ruling — see the allowlist entry, which records it as
+// 2026-07-29, reversing this bridge's original ruling — see the allowlist entry, which records it as
 // their decision rather than as an inevitability.
 //
 // # What the caller may say, and what it may not
@@ -32,7 +32,7 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 		return refuseContent(err.Error())
 	}
 	// **Exactly one of the three.** Counted rather than nested, so adding a fourth cannot leave a
-	// combination nobody rejected - REQ-0017, where `paste` joined `text` and `key`.
+	// combination nobody rejected, where `paste` joined `text` and `key`.
 	given := 0
 	for _, field := range []string{req.Text, req.Key, req.Paste} {
 		if field != "" {
@@ -59,7 +59,7 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 		// The message names what was wrong and, for a key, what exists instead. The caller is
 		// authenticated and is our own app; a description helps it and reveals nothing.
 		//
-		// **Marked as being about the CONTENT**, REQ-0017: nothing is wrong with the laptop, and this
+		// **Marked as being about the CONTENT**: nothing is wrong with the laptop, and this
 		// request would fail identically on a perfectly healthy one. It is the difference between the
 		// phone leaving the owner where they are with their text intact and the phone tearing the
 		// screen down as though the connection had died - which is what it used to do to somebody who
@@ -69,7 +69,7 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 
 	// **The same resolver the screen path uses.** Not a pane read from somewhere else, not a default
 	// applied here: one function, one answer, so what the owner is looking at and what he types into
-	// cannot come apart. REQ-0032, and the defect it was written for.
+	// cannot come apart, which is the defect it was written for.
 	pane, err := paneFor(req)
 	if err != nil {
 		return refuseContent(err.Error())

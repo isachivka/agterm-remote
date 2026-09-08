@@ -27,8 +27,8 @@ import (
 )
 
 // DefaultSocketPath is where agterm binds unless AGTERM_CONTROL_SOCKET or AGTERM_STATE_DIR say
-// otherwise. The socket is mode 0600 and owned by the logged-in user, which is why PLAN-0008 open
-// question 3 is forced rather than preferred: a service account cannot read it.
+// otherwise. The socket is mode 0600 and owned by the logged-in user, which is why running as the
+// logged-in user is forced rather than preferred: a service account cannot read it.
 func DefaultSocketPath() string {
 	if p := os.Getenv("AGTERM_CONTROL_SOCKET"); p != "" {
 		return p
@@ -56,7 +56,7 @@ const maxResponseBytes = 8 << 20
 
 // ErrUnavailable means agterm did not answer: not running, socket stale, or the app wedged.
 //
-// Distinguished from a command error on purpose. REQ-0008 §6: when the laptop is not answering the
+// Distinguished from a command error on purpose: when the laptop is not answering the
 // app says so and does not invent a network diagnosis. That copy is only possible if this layer keeps
 // "agterm said no" and "agterm said nothing" apart.
 var ErrUnavailable = errors.New("agterm is not answering")
@@ -125,7 +125,7 @@ type args struct {
 	// was wrong**; only sending the same value twice can.
 	Pane string `json:"pane,omitempty"`
 	// Window geometry, in points. Only `window.resize` sends these, and only the resize path
-	// constructs them - REQ-0008's amendment permits exactly one write and this is it.
+	// constructs them - the bridge is permitted exactly one write of this kind and this is it.
 	Width  int `json:"width,omitempty"`
 	Height int `json:"height,omitempty"`
 	// Text is the keystroke bytes for `session.type`, and it is the only field in this struct whose
@@ -161,7 +161,7 @@ type args struct {
 	// re-targeting - and it would require the bridge to invent a name, the one thing the owner ruled
 	// out. An id cannot collide with anything.
 	Workspace string `json:"workspace,omitempty"`
-	// Window scopes `tree` and `sidebar.width` to one window - REQ-0043. **In args, not in target**:
+	// Window scopes `tree` and `sidebar.width` to one window. **In args, not in target**:
 	// read off agtermctl itself on 2026-09-05, `--window W` becomes `"args":{"window":"W"}`. Omitted,
 	// both commands act on the frontmost window, which is not necessarily the fit's window.
 	Window string `json:"window,omitempty"`
@@ -358,8 +358,7 @@ type Session struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Title string `json:"title"`
-	// Surfaces is the session's panes, and it is the one field the narrowing above was widened for —
-	// REQ-0032, corrected by REQ-0034.
+	// Surfaces is the session's panes, and it is the one field the narrowing above was widened for.
 	//
 	// **Not an oversight being corrected.** Dropping surfaces, splits, overlays, watermarks and
 	// geometry was a deliberate rule: publish what a feature needs and nothing that merely happens to
@@ -378,9 +377,9 @@ type Session struct {
 	// whose second pane is merely collapsed on the Mac — and the phone can read a collapsed pane
 	// perfectly, so those two states must not look alike. See [Session.HasSplitPane].
 	Surfaces []Surface `json:"surfaces"`
-	// Split is agterm's own `isSplit`: **both panes are SHOWN**. REQ-0034 removed this field because
-	// it was the wrong thing to DECIDE on; REQ-0038 puts it back because it is the right thing to
-	// REPORT, and the two are not in tension.
+	// Split is agterm's own `isSplit`: **both panes are SHOWN**. This field was once removed because
+	// it was the wrong thing to DECIDE on, and is back because it is the right thing to REPORT. The
+	// two are not in tension.
 	//
 	// ### The distinction the whole diagnosis turns on
 	//
@@ -391,11 +390,11 @@ type Session struct {
 	//
 	// [Session.HasSplitPane] answers the second. This answers the first. A probe whose window is
 	// driven down to the 640-point floor may keep its second pane while ceasing to draw it, and every
-	// number logged before REQ-0038 was blind to the difference — which is why two calibration
-	// failures on the owner's machine could not be told apart.
+	// number logged while this field was absent was blind to the difference — which is why two
+	// calibration failures on the owner's machine could not be told apart.
 	//
 	// **Nothing decides on this.** It is read for the calibration log and for nothing else, and the
-	// gate that REQ-0034 moved off it stays where REQ-0034 put it.
+	// gate that was moved off it stays off it.
 	Split  bool `json:"split"`
 	Active bool `json:"active"`
 	// Status is what agterm's agent hooks last said about this session, and it is **absent when the
@@ -437,11 +436,11 @@ type Surface struct {
 	// which way the divider runs.
 	Kind string `json:"kind"`
 	// Visible is whether this pane is currently ON SCREEN, and it is read for the fit LOG alone —
-	// REQ-0036. No decision anywhere depends on it.
+	// No decision anywhere depends on it.
 	//
 	// **Existence and visibility are different questions and this is the one that is not asked.**
 	// [Session.HasSplitPane] deliberately ignores it: a pane collapsed on the Mac still reads
-	// perfectly from the phone, which is the whole of REQ-0034. What this adds is the ability for the
+	// perfectly from the phone, which is the whole of that distinction. What this adds is the ability for the
 	// log to say which of the two states the owner was in when a fit went wrong, because "one pane" and
 	// "two panes, one hidden" produce very different column counts and looked identical in the record.
 	Visible bool `json:"visible"`
@@ -495,7 +494,7 @@ func (c *Client) TreeOf(ctx context.Context, windowID string) (*Tree, error) {
 
 // SetSidebarWidth sets one window's sidebar width in points and returns the width agterm applied.
 //
-// # Geometry, like window.resize, and for the same reason it is permitted — REQ-0043
+// # Geometry, like window.resize, and for the same reason it is permitted
 //
 // A window cannot go below 640 points, so with a narrow sidebar the fit could not reach a small column
 // count at all (discussion #511: 47 columns was the narrowest, and the phone wanted 45). The terminal
@@ -592,8 +591,7 @@ func (c *Client) Windows(ctx context.Context) ([]Window, error) {
 
 // ResizeWindow sets a window's frame, in points.
 //
-// **This is the one write this binary performs**, authorised by the REQ-0008 amendment of
-// 2026-07-29. It changes the SHAPE of the owner's terminal and can carry nothing into it: no
+// **This is the one write this binary performs**, authorised by the owner on 2026-07-29. It changes the SHAPE of the owner's terminal and can carry nothing into it: no
 // keystroke, no control character, no command. The command name is a literal here and is never
 // assembled from anything a caller sent - the caller supplies a column count, and this package turns
 // that into points.
@@ -601,8 +599,8 @@ func (c *Client) Windows(ctx context.Context) ([]Window, error) {
 //
 // **This is the second write this binary performs, and it is a different KIND from the first.**
 // window.resize changes the shape of a container and can carry nothing into it. This puts bytes on a
-// pty, which is to say it runs commands on the owner's laptop. REQ-0008's original ruling named
-// session.type as the example of what must never appear here; the owner reversed that on 2026-07-29
+// pty, which is to say it runs commands on the owner's laptop. The original ruling for this bridge
+// named session.type as the example of what must never appear here; the owner reversed that on 2026-07-29
 // and the allowlist entry records it as their decision rather than as an inevitability.
 //
 // `text` is bytes, already validated by internal/keys. Nothing here inspects or transforms them: a
@@ -715,7 +713,7 @@ func (c *Client) CloseSession(ctx context.Context, id string) error {
 // sent over a link with a 2-second poll behind it is a coin flip about a state that may have changed
 // since it was read.
 //
-// `off` joined `on` in REQ-0042, and the sentence it replaced said hiding a pane was something
+// `off` joined `on` later, and the sentence it replaced said hiding a pane was something
 // "nothing the phone does should" do. That was never the owner's rule — see the requirement — and
 // hiding one is now how a pane is shown at full width.
 const (
@@ -739,7 +737,7 @@ const (
 //
 // So the caller does not choose between creating and revealing, and cannot: the two are
 // indistinguishable in the reply, which carries only the session id either way. What the caller can
-// know beforehand is [Session.HasSplitPane], which is exactly the distinction REQ-0034 made reportable.
+// know beforehand is [Session.HasSplitPane], which is exactly the distinction this client reports.
 //
 // # `mode` is sent explicitly and that is not decoration
 //
@@ -751,7 +749,7 @@ func (c *Client) OpenSplitPane(ctx context.Context, id string) error {
 	return err
 }
 
-// MaximizePane shows one pane at the full width of the terminal area — REQ-0042.
+// MaximizePane shows one pane at the full width of the terminal area.
 //
 // # Two calls, and the order is the whole of it
 //
@@ -807,7 +805,7 @@ func (c *Client) MaximizePane(ctx context.Context, id string, pane Pane) error {
 // instead of predicting one.
 //
 // Only ever a full UUID for a workspace the owner long-pressed. Never a prefix, never `active`, and
-// never a workspace this bridge decided to tidy up - see REQ-0012 Decision 10: a half-created
+// never a workspace this bridge decided to tidy up. A half-created
 // workspace is left for the owner to remove, because the delete verb exists for their hand, not ours.
 func (c *Client) DeleteWorkspace(ctx context.Context, id string) error {
 	_, err := c.call(ctx, request{Cmd: "workspace.delete", Target: id})

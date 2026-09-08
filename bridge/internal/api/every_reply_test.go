@@ -19,8 +19,8 @@ func TestEveryReplyCarriesTheWidthSetting(t *testing.T) {
 	// never learn the state either.
 	h := New(agterm.New(t.TempDir()+"/absent.sock"), t.TempDir())
 
-	// The list is every verb the package defines, and it grows with them — the four of REQ-0011 are
-	// here for the same reason the first five are: the defect this guards was one verb that forgot.
+	// The list is every verb the package defines, and it grows with them — the four creating and
+	// renaming verbs are here for the same reason the first five are: the defect this guards was one verb that forgot.
 	for _, verb := range []string{
 		VerbSessions, VerbScreen, VerbResize, VerbType, VerbFile,
 		VerbWorkspaceCreate, VerbSessionCreate, VerbWorkspaceRename, VerbSessionRename,

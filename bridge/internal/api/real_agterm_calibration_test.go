@@ -54,7 +54,7 @@ func TestRealAgtermCalibration(t *testing.T) {
 	treeBefore, _ := client.Tree(ctx)
 	countBefore := countSessions(treeBefore)
 
-	// REQ-0043: the sidebar is a knob now, so it is recorded and put back exactly as the window is.
+	// The sidebar is a knob now, so it is recorded and put back exactly as the window is.
 	// The no-op first: sending the width back must echo it and move nothing, which is the positive
 	// control on the wire shape before anything is trusted to move.
 	laptop, err := term.Laptop(ctx, before.ID)

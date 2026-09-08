@@ -9,7 +9,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 )
 
-// The four verbs of REQ-0011, and the property that matters most about three of them: **a request that
+// The four creating and renaming verbs, and the property that matters most about three of them: **a request that
 // should be refused never reaches agterm at all.**
 //
 // The fake records every request it is sent, so "the bridge did not call it" is asserted directly
@@ -217,7 +217,7 @@ func TestCreatingAWorkspaceSendsNoName(t *testing.T) {
 	}
 }
 
-// **The destructive verbs, REQ-0012.** A close or a delete aimed at anything that is not a canonical
+// **The destructive verbs.** A close or a delete aimed at anything that is not a canonical
 // UUID never reaches agterm — because `active` is a target agterm resolves, and the owner is sitting
 // on it. This is the one validation in this package where being wrong costs work that does not come
 // back.

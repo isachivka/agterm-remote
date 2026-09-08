@@ -10,7 +10,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 )
 
-// The boundary between the wire's two booleans and the closed set behind it — REQ-0040.
+// The boundary between the wire's two booleans and the closed set behind it.
 //
 // # Approved rather than assumed
 //
@@ -56,7 +56,7 @@ func TestTheThreeIntentsComeFromTheTwoFlags(t *testing.T) {
 //
 // The phone asked "apply it if you know it". Not knowing is a legitimate reply to that question, and
 // dressing it as a refusal would put it through the path that once replaced the owner's terminal with
-// a full-page error about probe widths — REQ-0037, which this must not undo one requirement later.
+// a full-page error about probe widths, which this must not undo one requirement later.
 func TestAnUnknownGeometryIsAnOrdinaryReply(t *testing.T) {
 	h, _ := handler(t, func(agtermtest.Request) any {
 		return agtermtest.OK(map[string]any{"windows": []any{

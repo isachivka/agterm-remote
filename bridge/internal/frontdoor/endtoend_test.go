@@ -216,7 +216,7 @@ func TestAnUnpinnedPhoneIsStillRefusedThroughTheWebSocket(t *testing.T) {
 
 // **The regression test for the collapsed-source lockout.**
 //
-// KeenDNS proxies, so every connection's peer is the router. A per-source counter over one collapsed
+// A TLS-terminating proxy proxies, so every connection's peer is the proxy. A per-source counter over one collapsed
 // source is a global ceiling wearing a per-source costume: five failed handshakes and every caller is
 // refused, the owner included, for the rest of the window — free to cause, now that the upgrade is
 // free.

@@ -17,7 +17,7 @@ type fakeTerminal struct {
 	slope, intercept float64
 	window           Window
 	applied          []int
-	// split and ratiosSet record what the probe was SHAPED into - REQ-0036. Recorded rather than
+	// split and ratiosSet record what the probe was SHAPED into. Recorded rather than
 	// ignored because "the calibration measured the right geometry" is the whole of that requirement,
 	// and a fake that accepted the calls silently would let a probe that never split still pass.
 	// staleReads is how many reads after each resize answer with the count from BEFORE it, and
@@ -27,11 +27,11 @@ type fakeTerminal struct {
 	staleValue int
 	split      []string
 	// collapseBelow is the window width under which a split stops being SHOWN while still existing —
-	// REQ-0038. splitStateErr makes the diagnostic itself fail, which must never fail a calibration.
+	// splitStateErr makes the diagnostic itself fail, which must never fail a calibration.
 	collapseBelow int
 	splitStateErr error
 	// otherWindows are listed BEFORE f.window, so a chooser that takes the first one gets the wrong
-	// answer and a chooser that reads `Active` gets the right one — REQ-0039. resizedIDs is which
+	// answer and a chooser that reads `Active` gets the right one. resizedIDs is which
 	// window each resize was aimed at, which the fake used to discard: a fake that ignores the id is
 	// one in which resizing the wrong window is unobservable.
 	otherWindows []Window
@@ -76,7 +76,7 @@ type fakeTerminal struct {
 	failText    bool
 	zoomToggles int
 
-	// The sidebar, in milli-points - REQ-0043. `sidebarOrigin` is the sidebar the intercept above was
+	// The sidebar, in milli-points. `sidebarOrigin` is the sidebar the intercept above was
 	// measured with, so widening the sidebar by N points costs the terminal exactly N points, as it
 	// does on the Mac. `sidebarVisible` and `fontSize` are what the tree reports beside it.
 	sidebarMilli, sidebarOrigin int
@@ -88,7 +88,7 @@ type fakeTerminal struct {
 	failSidebar   bool
 	failLaptop    bool
 	// floorPoints is the narrowest the window will go, however narrow it is asked to be. agterm's is
-	// 640; zero means no floor, which is how every test written before REQ-0043 sees it.
+	// 640; zero means no floor, which is how every test written before the floor mattered sees it.
 	floorPoints int
 	// events is the order things happened in, for the tests that care which came first.
 	events []string
@@ -125,7 +125,7 @@ func (f *fakeTerminal) laptop(sidebarMilli, fontSize int) {
 }
 
 func (f *fakeTerminal) Windows(context.Context) ([]Window, error) {
-	// **A list, because the owner's machine has one window and the bug needed two** — REQ-0039. A fake
+	// **A list, because the owner's machine has one window and the bug needed two**. A fake
 	// that can only ever report one window is a fake in which choosing the wrong one is unobservable,
 	// which is how `active` shipped picking by list order.
 	if len(f.otherWindows) > 0 {
@@ -145,7 +145,7 @@ func (f *fakeTerminal) ResizeWindow(_ context.Context, id string, width, height 
 		width = f.floorPoints
 	}
 	// **Arm the staleness BEFORE the width moves**, so staleValue is genuinely the count from the
-	// window as it was - which is what the real pty goes on printing for ~0.3s. REQ-0037.
+	// window as it was - which is what the real pty goes on printing for ~0.3s.
 	f.staleLeft = f.staleReads
 	f.window.Width = width
 	// **Records the height it was handed, so a test can assert we never CHANGE it.** agterm requires a
@@ -173,7 +173,7 @@ func (f *fakeTerminal) Text(context.Context, string, int) (string, error) {
 		return "", errors.New("the laptop did not answer")
 	}
 	// **Staleness, because the real pty has it and a fake without it cannot catch the bug** —
-	// REQ-0037. Measured on the machine: for ~0.3s after a resize the probe goes on printing the
+	// Measured on the machine: for ~0.3s after a resize the probe goes on printing the
 	// PREVIOUS count, and a stale number is a perfectly valid number.
 	//
 	// `staleReads` is how many reads after each resize still answer with the old figure. Zero is the
@@ -396,7 +396,7 @@ func TestTheSameBoxWidthNeverRecalibrates(t *testing.T) {
 	}
 
 	for _, what := range []string{"reconnect", "new session", "rotation", "font change", "restart"} {
-		// `applied` too, since REQ-0016: this loop now asserts on the RESIZES, and a list that
+		// `applied` too, now that a cached apply verifies: this loop asserts on the RESIZES, and a list that
 		// accumulates across iterations would report the first calibration's probes for ever.
 		term.created, term.closed, term.resizes = nil, nil, 0
 		term.applied = nil
@@ -406,7 +406,7 @@ func TestTheSameBoxWidthNeverRecalibrates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", what, err)
 		}
-		// **One resize, to the stored width.** Since REQ-0016 a cached apply also VERIFIES, which
+		// **One resize, to the stored width.** A cached apply also VERIFIES, which
 		// costs one session and one read - so the discriminator between an apply and a search is no
 		// longer "did it make a session" but "did it search". A search applies its probe widths and
 		// then a walk; an apply touches the window exactly once.
@@ -444,7 +444,8 @@ func TestTheFitRecordsTheMarginItWasMeasuredUnder(t *testing.T) {
 
 // **The ordinary press is one resize and NOTHING else - no session, no probe, no jump.**
 //
-// This is the guarantee REQ-0016 nearly traded away and then bought back. Confirming a fit costs a
+// This is the guarantee that verifying a cached fit nearly traded away and then bought back.
+// Confirming a fit costs a
 // calibration session, and `session.new` FOCUSES what it creates: measured on the owner's Mac, the
 // selection moves to the probe and returns when it closes, so anything typed in that second lands in
 // it. Paying that on every press was refused.
@@ -478,7 +479,7 @@ func TestAStoredFitIsAppliedVerbatim(t *testing.T) {
 
 // **A fit the terminal contradicts is DELETED, and the press that found it corrects itself.**
 //
-// This is REQ-0016 as one test. The stored entry says 37 columns at 626 points; this fake really
+// This is the 2026-08-06 failure as one test. The stored entry says 37 columns at 626 points; this fake really
 // renders 39 there, which is the shape of what happened on the owner's machine on 2026-08-06 - a
 // sidebar dragged narrower, 110 points handed to the terminal, and an entry promising 45 delivering
 // 59 on every press for ever.
@@ -487,7 +488,7 @@ func TestAContradictedFitIsDeletedAndRecalibrated(t *testing.T) {
 	key := fitKey(0, boxDp, charMilli)
 	// The font has moved since this was measured - 12 then, 13 now - so the detector escalates and
 	// the measurement gets its chance to disagree. It used to be the sidebar that moved here; since
-	// REQ-0043 the sidebar is APPLIED with the fit and cannot have drifted underneath it.
+	// the sidebar became a knob it is APPLIED with the fit and cannot have drifted underneath it.
 	store.Fits[key] = Fit{
 		Display: 0, BoxWidthDp: boxDp, MarginDp: marginDp, Points: 626, Columns: 37,
 		SidebarWidthMilli: 309_480, SidebarVisible: true, FontSize: 12,
@@ -611,7 +612,7 @@ func TestAnUnreadableLaptopStateEscalatesNothing(t *testing.T) {
 }
 
 // An agterm older than 0.26 reports no sidebar and no font: the laptop is not KNOWN, and not knowing
-// is silence, exactly as a missing state file was before REQ-0043.
+// is silence, exactly as a missing state file was before the sidebar came over the socket.
 func TestAMissingLaptopStateEscalatesNothing(t *testing.T) {
 	term, store, dir := fresh(t)
 	key := fitKey(0, boxDp, charMilli)
@@ -657,7 +658,7 @@ func TestChromeMovedExplainsOnlyWhatItCanMeasure(t *testing.T) {
 	}
 }
 
-// **THE HEIGHT IS THE OWNER'S, AND THE RESTORE MUST NOT PUT BACK A REMEMBERED ONE.** REQ-0018.
+// **THE HEIGHT IS THE OWNER'S, AND THE RESTORE MUST NOT PUT BACK A REMEMBERED ONE.**
 //
 // Their report, 2026-08-09: *"фит-режим телефона изменил высоту экрана… половина экрана по высоте
 // простаивает"*. Every resize on the search path already sends the height read immediately before it
@@ -695,7 +696,7 @@ func TestTheRestorePutsBackTheWidthAndLeavesTheHeightAlone(t *testing.T) {
 	}
 }
 
-// **A window is chosen by geometry we can verify, never by the fullscreen flag.** REQ-0018.
+// **A window is chosen by geometry we can verify, never by the fullscreen flag.**
 //
 // That flag has been caught describing something other than native fullscreen: the owner's window
 // read `fullscreen: true` at 802 points on a 1496-point display. A selection rule that trusted it

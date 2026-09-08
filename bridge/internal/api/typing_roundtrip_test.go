@@ -55,7 +55,7 @@ func TestTypedTextReachesAgtermAsTheSameUTF8(t *testing.T) {
 	}
 }
 
-// **A pasted message arrives wrapped, and the same bytes typed do not.** REQ-0017.
+// **A pasted message arrives wrapped, and the same bytes typed do not.**
 //
 // The envelope is the whole difference between the owner's Telegram message landing in their editor
 // and its lines running as commands, so this asserts what goes on the socket rather than that the
@@ -105,7 +105,7 @@ func TestAPasteReachesAgtermWrappedAndTypingDoesNot(t *testing.T) {
 	}
 }
 
-// **A refusal about the TEXT says so, and one about the laptop does not.** REQ-0017.
+// **A refusal about the TEXT says so, and one about the laptop does not.**
 //
 // The owner pasted a Telegram message with line breaks in it and the phone replaced their whole
 // screen with a full-page error, because `ok:false` was one channel carrying two unrelated kinds of
