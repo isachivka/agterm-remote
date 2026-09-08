@@ -248,21 +248,91 @@ func TestANonPositiveIntervalIsNotFatal(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 }
 
-// **The errno rule, with every answer the kernel can give, and no dependence on who is running the
-// tests.**
+// classify drives the REAL watcher loop once, with the kernel answering err, and reports whether the
+// loop decided the parent was alive.
 //
-// This is the invariant the package turns on, and until this test existed it was reachable only
-// through a real `kill(1, 0)` - whose answer is EPERM for an ordinary user and nil for root. So the
-// arm that matters most disappeared in exactly the environments that are easiest not to notice: a
-// root container, a `sudo go test`. Here the classification is called directly, so every arm runs
-// everywhere.
+// **No timeout and no sleep, and the two outcomes are told apart by which channel operation becomes
+// possible.** The tick channel is unbuffered, so the first send returns only once the loop has taken
+// it and is classifying. After that exactly one of two things can happen: the loop decided "gone",
+// called gone and returned - in which case nothing will ever receive again and only `fired` can be
+// ready - or it decided "alive" and came back to the select, in which case the second send is the
+// only one that can proceed. They are mutually exclusive and one of them always happens, so the
+// select below is a decision rather than a race.
+func classify(t *testing.T, pid int, err error) bool {
+	t.Helper()
+
+	var (
+		asked   atomic.Int64
+		wrongIn atomic.Value
+	)
+	restore := parent.SetKill(func(got int, sig syscall.Signal) error {
+		asked.Add(1)
+		// The call site is under test too: it must ask about the pid it was given, with signal 0.
+		if got != pid || sig != 0 {
+			wrongIn.Store(fmt.Sprintf("kill(%d, %d)", got, sig))
+		}
+		return err
+	})
+	defer restore()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tick := make(chan time.Time)
+	fired := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		parent.WatchOnTicks(ctx, pid, tick, func() { fired <- struct{}{} })
+	}()
+
+	tick <- time.Now()
+
+	var isAlive bool
+	select {
+	case <-fired:
+		isAlive = false
+	case tick <- time.Now():
+		isAlive = true
+	}
+
+	// **The watcher has to be off the seam before the seam is put back**, and the race detector
+	// found this the first time it was written without it: in the alive case the loop is parked at
+	// its select, still holding a reference to the faked kill, while the deferred restore writes it.
+	// Cancelling releases it; in the gone case it returned before the select above resolved.
+	cancel()
+	<-done
+
+	if n := asked.Load(); n == 0 {
+		t.Fatal("the watcher decided without asking the kernel at all")
+	}
+	if bad, ok := wrongIn.Load().(string); ok {
+		t.Fatalf("the watcher asked %s; it must ask about the pid it was given, with signal 0", bad)
+	}
+	return isAlive
+}
+
+// **The errno rule, with every answer the kernel can give, driven through the code that actually
+// runs, and with no dependence on who is running the tests.**
+//
+// This is the invariant the package turns on, and it used to be reachable only through a real
+// `kill(1, 0)` - whose answer is EPERM for an ordinary user and nil for root - so the arm that
+// matters most disappeared in exactly the environments easiest not to notice.
+//
+// **The seam is the syscall, not the rule, and that is the whole point of this shape.** An earlier
+// version exported the classifier and tested it directly. It pinned the rule and pinned nothing to
+// the caller: `alive` could be rewritten to compare the error against nil and this table would still
+// have passed, leaving only the pid-1 test to catch it - the one test that skips under root. Faking
+// the kernel instead means the assertion runs through [parent.Watch]'s own loop and its own `alive`.
 //
 // The unrecognised errno is not filler. It fixes the DIRECTION this package fails in: an answer it
 // does not understand must read as alive, because guessing "gone" from an unfamiliar error is a
 // bridge that shuts itself down over a syscall quirk, and guessing "alive" is a bridge that stays up
 // one extra poll.
+//
+// **This test must not call t.Parallel()**: it replaces a package-level seam. See [parent.SetKill].
 func TestOnlyESRCHMeansGone(t *testing.T) {
-	t.Parallel()
+	const pid = 4242
 
 	for _, c := range []struct {
 		name  string
@@ -273,12 +343,17 @@ func TestOnlyESRCHMeansGone(t *testing.T) {
 		{"ESRCH: no process has that pid", syscall.ESRCH, false},
 		{"EPERM: the process exists and belongs to somebody else", syscall.EPERM, true},
 		{"an errno this package does not know", syscall.EINVAL, true},
+		// The only row that pins errors.Is rather than ==. A `==` comparison against syscall.ESRCH
+		// passes every other row here and fails this one.
 		{"a wrapped ESRCH is still ESRCH", fmt.Errorf("kill: %w", syscall.ESRCH), false},
+		// The two below distinguish nothing that plain EPERM and EINVAL do not - a rule that gets
+		// those right gets these right. They are kept as documentation of the intended reading, not
+		// as coverage, and should not be counted as pinning anything.
 		{"a wrapped EPERM is still alive", fmt.Errorf("kill: %w", syscall.EPERM), true},
 		{"an error carrying no errno at all", errors.New("something else went wrong"), true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := parent.AliveFrom(c.err); got != c.alive {
+			if got := classify(t, pid, c.err); got != c.alive {
 				// Spelled out rather than %v/%v: the failure that will actually happen here is the
 				// rule being inverted, and the reader needs to be told which direction costs what.
 				if c.alive {
@@ -293,28 +368,45 @@ func TestOnlyESRCHMeansGone(t *testing.T) {
 	}
 }
 
-// **A cancellation that coincides with the parent's death must not announce the parent's death.**
+// **A cancellation and a tick that are ready at the same instant must not produce "parent process is
+// gone".**
 //
-// Both channels in the watcher's select can be ready at the same instant, and select picks at random
-// between ready cases - so a SIGTERM arriving as the parent dies could log "parent process is gone;
-// exiting" about a shutdown the owner asked for. Nothing breaks (stop is idempotent), but the line is
-// untrue and it is exactly the line somebody will be reading when they are debugging a shutdown.
+// The select in the loop has two cases and picks at random between the ones that are ready, so a
+// SIGTERM arriving as the parent dies could otherwise log a death about a shutdown the owner asked
+// for. Nothing breaks - stop() is idempotent - but the line is untrue, and it is exactly the line
+// somebody is reading while they debug a shutdown.
 //
-// The parent here is already gone before the watcher starts, so every tick would fire; the context is
-// cancelled at once. With the ctx re-check this can never call gone. Without it the outcome is a coin
-// toss on the first tick, which is why this is worth running with -count.
-func TestGoneDoesNotFireOnAnAlreadyCancelledContext(t *testing.T) {
-	t.Parallel()
+// **The first version of this test proved nothing and this one is why the tick channel is a
+// parameter.** It cancelled the context and waited for a real ticker: cancellation won by a
+// millisecond every time, so the tick arm was never taken at all - deleting the guard under test left
+// it passing 340 runs out of 340, and forcing the body to fire unconditionally ALSO left it passing,
+// which is how it was found out. A test that cannot fail is worse than no test, because it advertises
+// coverage that is not there.
+//
+// Here the tick is buffered and delivered, and the context cancelled, BEFORE the loop is entered. Both
+// cases are genuinely ready when the select executes, so the arm is taken about half the time; with
+// the guard removed this fails roughly every other run under -count.
+//
+// **This test must not call t.Parallel()**: it replaces a package-level seam. See [parent.SetKill].
+func TestGoneDoesNotFireWhenCancellationAndATickAreBothReady(t *testing.T) {
+	// The parent is gone as far as the loop can tell, so the tick arm WOULD fire if it were taken
+	// without the guard. Faked rather than reaped, because this test is about the select and not
+	// about the kernel.
+	restore := parent.SetKill(func(int, syscall.Signal) error { return syscall.ESRCH })
+	defer restore()
 
-	fired := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-	parent.Watch(ctx, reapedPID(t), every, func() { close(fired) })
+	tick := make(chan time.Time, 1)
+	tick <- time.Now()
 	cancel()
 
-	select {
-	case <-fired:
+	fired := false
+	// Synchronous: both arms of the select return, so this cannot hang, and there is nothing to wait
+	// for afterwards.
+	parent.WatchOnTicks(ctx, 4242, tick, func() { fired = true })
+
+	if fired {
 		t.Fatal("gone fired on a context that was already cancelled, so a shutdown would be reported " +
 			"as the parent having disappeared")
-	case <-time.After(window):
 	}
 }

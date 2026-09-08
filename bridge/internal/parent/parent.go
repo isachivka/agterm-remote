@@ -96,44 +96,73 @@ func Watch(ctx context.Context, pid int, every time.Duration, gone func()) {
 		every = DefaultEvery
 	}
 
+	tick := time.NewTicker(every)
+	// **Read here, in the caller's goroutine, and not from inside the loop.** The watcher outlives
+	// the call that started it, so a package variable read from in there is read at a time nobody
+	// chose - which is a data race against a test replacing the seam, and, more to the point, means
+	// the behaviour of a running watcher could change underneath it. Captured once, what this
+	// watcher does is fixed at the moment it was asked for.
+	probe := kill
 	go func() {
-		tick := time.NewTicker(every)
 		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				if !alive(pid) {
-					// **Both cases can be ready at once, and select then picks at random.** A
-					// shutdown that coincides with the parent's death would otherwise announce
-					// "parent process is gone; exiting" on a context that was already cancelled by
-					// a SIGTERM - harmless, because stop() is idempotent, and untrue, which is
-					// worse: somebody debugging a shutdown reads that line as evidence.
-					if ctx.Err() != nil {
-						return
-					}
-					gone()
-					return
-				}
-			}
-		}
+		watch(ctx, pid, probe, tick.C, gone)
 	}()
 }
 
-// alive reports whether pid still names a process. Signal 0 performs the permission checks and
-// delivers nothing.
-func alive(pid int) bool {
-	return aliveFrom(syscall.Kill(pid, 0))
+// watch is the loop, with the ticks supplied rather than made here.
+//
+// The channel is a parameter for one reason: **the race in the select below cannot be provoked by a
+// test that owns only a clock.** A test can cancel the context and wait for a real ticker, but by the
+// time the tick arrives the cancellation has long since been the only ready case, so the select is
+// deterministic and the interesting arm is never taken. Handed the channel, a test can make BOTH
+// cases ready before the loop runs, which is the only way to observe the thing the guard below
+// exists for. Watch passes a real ticker and nothing else calls this.
+func watch(ctx context.Context, pid int, probe killFunc, tick <-chan time.Time, gone func()) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			if !alive(probe, pid) {
+				// **Both cases can be ready at once, and select then picks at random.** A shutdown
+				// that coincides with the parent's death would otherwise announce "parent process
+				// is gone; exiting" on a context that was already cancelled by a SIGTERM - harmless,
+				// because stop() is idempotent, and untrue, which is worse: somebody debugging a
+				// shutdown reads that line as evidence.
+				if ctx.Err() != nil {
+					return
+				}
+				gone()
+				return
+			}
+		}
+	}
 }
 
-// aliveFrom is the rule, split from the syscall that feeds it so that it can be tested with every
-// answer the kernel can give rather than only with the answer this machine's euid happens to earn.
+// killFunc is the shape of [syscall.Kill]: ask about a pid, get an errno or nil.
+type killFunc func(pid int, sig syscall.Signal) error
+
+// kill is [syscall.Kill], indirected so that a test can answer for the kernel.
 //
-// ESRCH is the only answer that means the process is gone. nil means it exists and is signallable;
-// EPERM means it exists and belongs to somebody else; anything else is an answer this package does
-// not understand, and it will not shut the bridge down on the strength of one. See the package
-// comment for why the direction of that last clause is the one that matters.
-func aliveFrom(err error) bool {
-	return !errors.Is(err, syscall.ESRCH)
+// **The seam is here, at the syscall, and not one level up at the rule.** Putting it at the rule -
+// exporting the classifier and testing it directly - looks equivalent and is not: it leaves nothing
+// tying the rule to the code that runs. `alive` could be rewritten to compare the error against nil
+// itself, and a table test over the extracted classifier would keep passing while the bridge quit on
+// every EPERM. The only test that would catch it is the one that sends a real signal to pid 1, and
+// that test skips under root - so on a root runner the package would go green over a broken
+// classifier. Faking the syscall instead means one test pins the rule AND its call site, on every
+// machine, whoever is running it.
+//
+// The cost is one indirect call every two seconds.
+var kill killFunc = syscall.Kill
+
+// alive reports whether pid still names a process.
+//
+// Signal 0 performs the permission checks and delivers nothing. ESRCH is the only answer that means
+// the process is gone: nil means it exists and this user may signal it, EPERM means it exists and
+// belongs to somebody else, and anything else is an answer this package does not understand and will
+// not shut the bridge down on the strength of. See the package comment for why the direction of that
+// last clause is the one that matters.
+func alive(probe killFunc, pid int) bool {
+	return !errors.Is(probe(pid, 0), syscall.ESRCH)
 }
