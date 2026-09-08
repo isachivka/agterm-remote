@@ -25,9 +25,6 @@ func TestEveryReplyCarriesTheWidthSetting(t *testing.T) {
 		VerbSessions, VerbScreen, VerbResize, VerbType, VerbFile,
 		VerbWorkspaceCreate, VerbSessionCreate, VerbWorkspaceRename, VerbSessionRename,
 		VerbSessionClose, VerbWorkspaceDelete,
-		// REQ-0045. No reader is installed on this handler, so this is the refusal path - and the
-		// refusal must carry the setting like any other reply.
-		VerbLimits,
 		"nonsense",
 	} {
 		resp := h.Handle(context.Background(), Request{Verb: verb})

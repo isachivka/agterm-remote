@@ -23,12 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 	"github.com/isachivka/agterm-remote/bridge/internal/keys"
-	"github.com/isachivka/agterm-remote/bridge/internal/limits"
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 	"github.com/isachivka/agterm-remote/bridge/internal/styled"
 )
@@ -134,13 +131,6 @@ type Request struct {
 	//
 	// Set with Recalibrate it is refused rather than resolved. See [intentOf].
 	CachedOnly bool `json:"cached_only,omitempty"`
-	// Fresh asks VerbLimits to bypass its cache — REQ-0045, the long press on the phone.
-	//
-	// **The phone sends this key only when it is true.** [Decode] disallows unknown fields, so a
-	// routine poll carrying `"fresh": false` would be refused by an older bridge with `malformed
-	// request` — a sentence about the request's shape rather than about the verb. Without the key an
-	// older bridge says the ordinary `unknown verb`; the phone reads both as *update the bridge*.
-	Fresh bool `json:"fresh,omitempty"`
 }
 
 // Response is what goes back. Fields are omitted rather than zeroed so a response says only what it
@@ -262,10 +252,6 @@ type Response struct {
 	NeedsFit bool `json:"needs_fit"`
 	// Path is where the bridge put a sent file. The phone puts it in the draft; it does not run it.
 	Path string `json:"path,omitempty"`
-	// Limits is the answer to VerbLimits and nothing else — REQ-0045. Absent on every other verb,
-	// which is not a third state anybody distinguishes, so omitempty keeps the rule at the top. What
-	// is inside it has its own rule: `remaining_pct` is never omitted, see limits.Window.
-	Limits *Limits `json:"limits,omitempty"`
 }
 
 // Workspace is one heading in the phone's list. Id and name only — the phone groups by the id and
@@ -377,23 +363,11 @@ type Handler struct {
 	// so access to it is serialized. See serialize.go, which explains why removing this while
 	// looking at a single-caller trace would be a mistake.
 	locks
-	// The limits cache — REQ-0045. Under a mutex of its own: `locks` serialises the resize store,
-	// which the limits verb never reads, and a long press should not queue behind a calibration.
-	// See limits.go for what each field is.
-	limitsMu    sync.Mutex
-	limitsFetch func(ctx context.Context) (claude, codex limits.Report)
-	limitsHeld  *Limits
-	limitsAt    time.Time
-	limitsNow   func() time.Time
 }
 
 // New builds a handler. stateDir is where the resize calibration cache lives; empty disables resize.
-//
-// No limits reader is installed here: [Handler.UseLimits] does that, and main is its only production
-// caller. A test that builds a handler and walks every verb therefore gets a refusal from `limits`
-// rather than two HTTP requests to the providers.
 func New(client *agterm.Client, stateDir string) *Handler {
-	h := &Handler{client: client, stateDir: stateDir, history: styled.History, limitsNow: time.Now}
+	h := &Handler{client: client, stateDir: stateDir, history: styled.History}
 	if stateDir != "" {
 		h.store = resize.LoadStore(stateDir)
 	}
@@ -475,15 +449,6 @@ const (
 	// **It creates nothing.** Where [VerbPaneOpen] may start a shell, this only ever rearranges panes
 	// that already exist, and refuses a session that has none.
 	VerbPaneShow = "pane.show"
-
-	// VerbLimits says how much of each subscription is left — REQ-0045, added 2026-09-06.
-	//
-	// **The first verb that never touches agterm.** It reads two credentials that are not the
-	// bridge's own — Claude Code's OAuth token from the Keychain and Codex's from ~/.codex — for the
-	// duration of one HTTP request each, and publishes percentages, reset times and an error category
-	// from a closed vocabulary. The rule about the tokens is in internal/limits; the cache is in
-	// limits.go beside this file. Nothing is created, typed, or moved on the Mac.
-	VerbLimits = "limits"
 )
 
 // Handle dispatches one request.
@@ -592,8 +557,6 @@ func (h *Handler) dispatch(ctx context.Context, req Request) Response {
 		return h.openPane(ctx, req)
 	case VerbPaneShow:
 		return h.showPane(ctx, req)
-	case VerbLimits:
-		return h.limits(ctx, req)
 	default:
 		return fail("unknown verb")
 	}

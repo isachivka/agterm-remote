@@ -9,10 +9,6 @@
 // The port is not in this file, not in any default, and not anywhere in the repository. It comes from
 // a config file the owner keeps outside the tree. PLAN-0008 ruling 1: a port that is committed is a
 // port that stays after it is rotated.
-//
-// REQ-0045 added a verb that reads two subscription budgets — Claude Code's and Codex's — with the
-// credentials those CLIs keep on this Mac, and reaches agterm for nothing. The tokens stay on the Mac;
-// see internal/limits.
 package main
 
 import (
@@ -33,7 +29,6 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/api"
 	"github.com/isachivka/agterm-remote/bridge/internal/control"
 	"github.com/isachivka/agterm-remote/bridge/internal/frontdoor"
-	"github.com/isachivka/agterm-remote/bridge/internal/limits"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
@@ -145,9 +140,6 @@ func run(dir string) error {
 	// The resize cache lives beside the bridge's own config, which is gitignored and 0700. It holds a
 	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), dir)
-	// REQ-0045. The one verb that reads credentials which are not the bridge's own, installed here
-	// and nowhere else, so a handler built anywhere else - every test - cannot reach a provider.
-	handler.UseLimits(limits.New().All)
 	// false: KeenDNS proxies, so every connection's peer is the router and per-source blocking would
 	// collapse into a global ceiling any anonymous caller could trip for everyone.
 	srv := listener.New(pinning.ServerConfig(own, peer), handler, false)
