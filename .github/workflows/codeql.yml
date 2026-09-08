@@ -22,8 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.probe.outputs.go }}
-      # Underscore, not a hyphen: `outputs.java-kotlin` parses as a subtraction in a
-      # GitHub expression, and the result is never the string 'true'.
+      # Underscore rather than a hyphen, purely as a house style. A hyphen would work:
+      # `needs.detect.outputs.java-kotlin` is a legal property dereference in a GitHub
+      # expression - the same shape as the documented `steps.cache.outputs.cache-hit` - and
+      # nothing about it parses as a subtraction.
       java_kotlin: ${{ steps.probe.outputs.java_kotlin }}
     steps:
       - uses: actions/checkout@v7

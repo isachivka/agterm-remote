@@ -1,0 +1,79 @@
+name: Commit hygiene
+
+# Two rules that CI cannot see, because both are properties of the COMMITS in a pull request rather
+# than of the tree they produce:
+#
+#   1. A commit typed `feat:`/`fix:` that changes only documentation. release-please turns those
+#      subjects into published release notes, so such a commit announces something that did not
+#      ship. Squash-merging does not save us: the pull request title becomes the commit on `main`,
+#      but the branch's own subjects are what a reviewer reads and what a rebase keeps.
+#   2. A commit with no `Signed-off-by:` trailer. CONTRIBUTING.md makes the DCO a condition of
+#      contributing; without a check it holds only for people who read it.
+#
+# Both are enforced before the merge on purpose. After it, the only lever left is rewriting
+# published history.
+#
+# The rules themselves live in `scripts/check-commit-types.sh` and `scripts/check-signed-off.sh`,
+# so they are runnable locally on a branch before a pull request exists:
+#
+#     ./scripts/check-commit-types.sh origin/main..HEAD
+#     ./scripts/check-signed-off.sh   origin/main..HEAD
+#
+# Unlike the guards in `ci.yml`, these need history and a base ref, which is why they are a separate
+# workflow with its own `fetch-depth: 0` checkout rather than another step there. There is no path
+# filter: `ci.yml` has no `paths-ignore`, so there is no window for this to cover, and a
+# documentation-only pull request is precisely the one rule 1 exists to judge.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  commits:
+    name: commits
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the checks need the merge base to know which commits are being added.
+      - name: Check out with history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The range is computed once and reused by both checks. On a pull request it is the merge
+      # base to the head; on a push to main it is what the push added. The final fallback covers a
+      # first push and a manually dispatched run, where neither ref is usable.
+      - name: Work out the range of added commits
+        id: range
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            git fetch --quiet origin "$BASE_REF"
+            range="origin/$BASE_REF..HEAD"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            echo "No usable commit range for this event - checking the tip commit only."
+            range="HEAD~1..HEAD"
+          fi
+          echo "range: $range"
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      # Two steps, not one: a branch can fail both, and a single step would report only the first.
+      - name: 'No docs-only commit typed feat: or fix:'
+        run: ./scripts/check-commit-types.sh '${{ steps.range.outputs.range }}'
+
+      # Deliberately runs even when the step above failed, for the same reason. Guarded on the
+      # range being non-empty so that a failure to compute it reports once, there, rather than
+      # again here as a usage error from a script called with no argument.
+      - name: Every commit is signed off
+        if: ${{ !cancelled() && steps.range.outputs.range != '' }}
+        run: ./scripts/check-signed-off.sh '${{ steps.range.outputs.range }}'
