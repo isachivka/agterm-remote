@@ -59,6 +59,7 @@ jobs:
       - run: ./scripts/check-no-credentials.sh
       - run: ./scripts/check-no-private-keys.sh
       - run: ./scripts/check-no-addresses.sh
+      - run: ./scripts/check-constant-time-tokens.sh
 
   bridge:
     name: bridge
