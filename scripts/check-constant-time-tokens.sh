@@ -42,9 +42,10 @@
 #     not want to import bytes. Go compiles it to memequal, which returns on the first differing
 #     byte like every other one of these. It is the single most likely way this rule gets broken and
 #     it walked past the first version of this guard.
-#   - Full-line comments are skipped, so the prose explaining this very rule does not trip it. The
-#     cost is that a trailing comment on a code line is still read as code: keep the reasoning on its
-#     own line.
+#   - Comments are cut off before anything is matched, so neither the prose explaining this rule nor
+#     a trailing comment mentioning a token trips it. A comparison never lives inside a comment, so
+#     nothing is lost by ignoring them, and a check that objects to a comment sitting next to a
+#     comparison is a check somebody deletes.
 #
 # WHAT IT MUST NOT DO, which took as much care as the matching
 #
@@ -104,11 +105,18 @@ pattern="(${calls})|(${ops})|(${strcmp})"
 # The single scan. Defined once and called from BOTH the self-test below and the real scan, so the
 # probe cannot succeed through a path the scan does not use.
 #
-#   1. find the shapes,   2. drop full-line comments,   3. keep only lines about a token.
+#   1. cut comments off, keeping the line count so the numbers reported stay true,
+#   2. find the shapes,
+#   3. keep only lines carrying the token VALUE - $tok, the same bounded pattern the operator branch
+#      uses, and NOT a case-insensitive search for the word.
+#
+# Step 3 is where this guard nearly died. While it grepped for the word, `bytes.Equal(a, b)` next to
+# a `w.tokenCount` or a comment mentioning tokens was a failure, and a required check that objects to
+# a comment is a check that gets deleted - which costs more than it ever protected.
 scan() {
-  grep -InE -e "$pattern" "$1" 2>/dev/null \
-    | grep -vE '^[0-9]+:[[:space:]]*//' \
-    | grep -iE 'token'
+  sed 's://.*::' "$1" 2>/dev/null \
+    | grep -InE -e "$pattern" \
+    | grep -E "$tok"
 }
 
 # --- The self-test ---------------------------------------------------------------------------------
@@ -137,6 +145,9 @@ must_match=(
   # later one. Both compile, both pass the whole enroll suite, both are early-exit.
   '	if string(w.token[:]) != string(token) {'
   '	if string(token) == string(w.token[:]) {'
+  # Code before a comment is still code.
+  '	if w.token == candidate { // still the wrong comparison'
+  '	if bytes.Equal(w.token[:], token) { // simplified, was subtle'
 )
 must_not_match=(
   '	if subtle.ConstantTimeCompare(w.token[:], token) != 1 {'
@@ -159,6 +170,16 @@ must_not_match=(
   '	if w.tokenCount == 0 {'
   '	if hdr.TokenType != "bearer" {'
   '	if tokenLen != 32 {'
+  #
+  # And the `calls` shape, which had NO negatives at all until it was widened and every one of these
+  # started failing the build. A pattern that is widened or narrowed owes a case in the shape it
+  # changed; negatives for a different shape do not cover it.
+  '	if bytes.Equal(a, b) { // a trailing comment about the token'
+  '	if bytes.Equal(a, b) && w.tokenCount == 0 {'
+  '	if bytes.Equal(sig, want) && tokenLen == 32 {'
+  '	if reflect.DeepEqual(a, b) && w.tokenExpiry.IsZero() {'
+  '	// tokenised'
+  '	tokenAge := 0'
 )
 
 for line in "${must_match[@]}"; do
