@@ -28,6 +28,20 @@ import (
 // It is deliberately not a vet analyzer. Twenty lines of go/parser need no plugin, no analysis
 // harness and no place in the build to run from; a custom analyzer would be a tool this repository
 // then has to own.
+//
+// # What it does not claim
+//
+// It asserts the call is PRESENT, not that it is the only comparison and not that it decides
+// anything. `if false { _ = subtle.ConstantTimeCompare(w.token[:], token) }` beside a helper that
+// compares a renamed copy leaves this test passing, the text guard reporting OK and the suite green,
+// with a variable-time comparison in production. That takes a deliberate dead block, which is
+// outside what either mechanism claims to stop - neither is a defence against somebody who means it,
+// and this note is here so nobody discovers that boundary by trusting the green tick.
+//
+// The scanned != 1 check below also fails loudly for the wrong reason if a second type in this
+// package ever grows a Consume method: the message will say "expected exactly one" when the real
+// answer is "teach this test which one". A loud wrong reason is the right failure mode here, but it
+// is a wrong reason.
 func TestConsumeComparesWithConstantTime(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
