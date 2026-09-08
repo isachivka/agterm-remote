@@ -348,10 +348,26 @@ func loadIdentity(certPath, keyPath string) (own tls.Certificate, found bool, er
 		return own, true, nil
 	case errors.Is(certErr, fs.ErrNotExist) && errors.Is(keyErr, fs.ErrNotExist):
 		return tls.Certificate{}, false, nil
-	case errors.Is(certErr, fs.ErrNotExist) || errors.Is(keyErr, fs.ErrNotExist):
+	case errors.Is(keyErr, fs.ErrNotExist):
+		// The CERTIFICATE survived. This is the dangerous direction: that certificate may be the one
+		// a phone pinned, and there is no way from here to tell whether any phone did. Deleting it
+		// and starting over is what unpairs them, so the message says so and offers nothing else.
 		return tls.Certificate{}, false, fmt.Errorf(
-			"bridge identity: %s and %s must both exist or neither; minting over half of a pair "+
-				"would unpair every phone that pinned the certificate: %w", certFile, keyFile, errHalfPair)
+			"bridge identity: %s is there and %s is not; a new identity cannot be minted over a "+
+				"surviving certificate, because deleting that certificate unpairs every phone that "+
+				"pinned it. Restore the key, or unpair and re-pair deliberately: %w",
+			certFile, keyFile, errHalfPair)
+	case errors.Is(certErr, fs.ErrNotExist):
+		// The KEY survived, and this is the state a mint that crashed between installing the key and
+		// installing the certificate routinely leaves. **No certificate was ever published, so
+		// nothing pinned it and nothing is unpaired by deleting the key** - which is the whole
+		// recovery. Saying "this would unpair every phone" here, as one shared message used to,
+		// pointed the owner away from the only safe move in the common case.
+		return tls.Certificate{}, false, fmt.Errorf(
+			"bridge identity: %s is there and %s is not, which is what a mint interrupted partway "+
+				"leaves behind; no certificate was published, so deleting %s unpairs nobody and the "+
+				"next start mints a fresh pair: %w",
+			keyFile, certFile, keyFile, errHalfPair)
 	default:
 		return tls.Certificate{}, false, fmt.Errorf("bridge identity: %w", errors.Join(certErr, keyErr))
 	}
@@ -421,9 +437,12 @@ func installFile(dir, path string, content []byte) error {
 
 // writeTemp writes content to a new file in dir at 0600 and returns its name.
 //
-// The mode is set explicitly rather than left to CreateTemp, whose 0600 is still subject to the
-// process umask. Set before any content is written, so the file is never briefly readable with the
-// key in it.
+// The chmod does not close a window. CreateTemp already asks for 0600 and a umask can only REMOVE
+// bits, so nothing here is ever more permissive than that, even for an instant - the earlier note
+// claiming this stopped the file being briefly readable was wrong about what a umask does. What it
+// actually does is put back the bits a restrictive umask stripped: under `umask 0377` the file
+// arrives 0400, and this process could then neither write the key into it nor, on a later start,
+// read it back. The mode is the one this file is meant to have, asserted rather than inherited.
 func writeTemp(dir, prefix string, content []byte) (string, error) {
 	f, err := os.CreateTemp(dir, prefix+".tmp-*")
 	if err != nil {

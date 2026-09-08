@@ -111,13 +111,41 @@ func TestASecondStartReusesTheIdentity(t *testing.T) {
 // the consequence: somebody looking at a state directory with one file in it will otherwise delete
 // the survivor, which is exactly the action that unpairs their phone.
 func TestAHalfPairIsRefusedInEitherDirection(t *testing.T) {
-	for _, remove := range []string{certFile, keyFile} {
-		t.Run("without "+remove, func(t *testing.T) {
+	// **The two directions get different advice, and the test is what holds them apart.**
+	//
+	// One shared message used to say, of both, that deleting the survivor would unpair every phone.
+	// That is true of a surviving CERTIFICATE and false of a surviving KEY - a mint interrupted
+	// between installing the key and installing the certificate leaves a key that nothing ever
+	// pinned, and deleting it is precisely the recovery. Since that is the state a crash routinely
+	// leaves, the wrong half of the advice was the one the owner was most likely to read.
+	//
+	// So each case asserts the sentence it must carry AND the sentence it must not, because a
+	// message that is merely different is not necessarily right, and the failure that matters here
+	// is the two swapping over.
+	for _, c := range []struct {
+		remove    string
+		says      string
+		neverSays string
+	}{
+		{
+			remove: keyFile,
+			// The certificate survives: it may be the one a phone pinned, and nothing here can tell.
+			says:      "unpairs every phone that pinned it",
+			neverSays: "unpairs nobody",
+		},
+		{
+			remove: certFile,
+			// The key survives: no certificate was ever published, so nothing pinned it.
+			says:      "unpairs nobody",
+			neverSays: "unpairs every phone",
+		},
+	} {
+		t.Run("without "+c.remove, func(t *testing.T) {
 			dir := t.TempDir()
 			if _, err := identity(dir); err != nil {
 				t.Fatalf("first start: %v", err)
 			}
-			if err := os.Remove(filepath.Join(dir, remove)); err != nil {
+			if err := os.Remove(filepath.Join(dir, c.remove)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -125,16 +153,20 @@ func TestAHalfPairIsRefusedInEitherDirection(t *testing.T) {
 			if err == nil {
 				t.Fatal("a half pair was accepted; the missing half would be minted over the surviving one")
 			}
-			if !strings.Contains(err.Error(), "must both exist or neither") {
-				t.Errorf("the refusal does not say what is wrong: %v", err)
+			if !strings.Contains(err.Error(), c.remove) {
+				t.Errorf("the refusal does not name the file that is missing: %v", err)
 			}
-			if !strings.Contains(err.Error(), "unpair") {
-				t.Errorf("the refusal does not say what deleting the survivor costs: %v", err)
+			if !strings.Contains(err.Error(), c.says) {
+				t.Errorf("the refusal does not say %q, so it does not tell the owner what deleting "+
+					"the survivor costs: %v", c.says, err)
+			}
+			if strings.Contains(err.Error(), c.neverSays) {
+				t.Errorf("the refusal says %q, which is the advice for the OTHER direction: %v", c.neverSays, err)
 			}
 
 			// And it did not quietly mint the missing half while refusing.
-			if _, err := os.Stat(filepath.Join(dir, remove)); !errors.Is(err, fs.ErrNotExist) {
-				t.Errorf("%s was recreated by a call that reported failure", remove)
+			if _, err := os.Stat(filepath.Join(dir, c.remove)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("%s was recreated by a call that reported failure", c.remove)
 			}
 		})
 	}
@@ -205,9 +237,11 @@ func TestConcurrentFirstStartsAgreeOnOneUsableIdentity(t *testing.T) {
 			}
 		}
 
-		// And what is on disk is the pair they agreed on, not one file from each mint. This is the
-		// assertion that fails against the old write: X509KeyPair is what compares the
-		// certificate's public key with the private key's own.
+		// And what is on disk is the pair they agreed on, not one file from each mint. Against the
+		// old write the check above fatals first - four independent mints have four serials - so
+		// this one is the backstop for the narrower case where the starts DO agree on a certificate
+		// and the key underneath it came from somebody else. X509KeyPair, inside loadIdentity, is
+		// what compares the certificate's public key with the private key's own.
 		own, found, err := loadIdentity(filepath.Join(dir, certFile), filepath.Join(dir, keyFile))
 		if err != nil || !found {
 			t.Fatalf("round %d: the state directory does not hold a loadable identity: found=%v err=%v", round, found, err)
