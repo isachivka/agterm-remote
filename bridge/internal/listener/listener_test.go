@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
@@ -69,7 +70,14 @@ func start(t *testing.T) *harness {
 	}
 
 	rec := &recorder{}
-	srv := New(pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}), rec, true)
+	// The API protocol on both ends, because the accept path now DISPATCHES on what was negotiated and
+	// refuses anything that is neither of the two. That is not scaffolding for the tests: it is the
+	// configuration main.go builds, where enroll.ServerConfigFor always names exactly one protocol.
+	// nil enrolment - this listener serves none, so a connection that negotiated `agterm/enroll-1`
+	// would be closed rather than served, which is the fail-closed direction and is asserted below.
+	cfg := pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert})
+	cfg.NextProtos = []string{enroll.ProtoAPI}
+	srv := New(cfg, rec, nil, true)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -294,7 +302,7 @@ func mintPeer(t *testing.T, name string) (pinning.Identity, tls.Certificate, *x5
 
 func dialPinned(t *testing.T, h *harness) *tls.Conn {
 	t.Helper()
-	conn, err := tls.Dial("tcp", h.addr, pinning.ClientConfig(h.phoneOwn, h.bridgeCert))
+	conn, err := tls.Dial("tcp", h.addr, apiClient(h.phoneOwn, h.bridgeCert))
 	if err != nil {
 		t.Fatalf("the pinned phone must reach the bridge: %v", err)
 	}
@@ -312,6 +320,14 @@ func roundTrip(t *testing.T, conn net.Conn, request string) api.Response {
 		t.Fatalf("read response: %v", err)
 	}
 	return resp
+}
+
+// apiClient is the phone's side, offering the API protocol - which the dispatch now requires of
+// anything that means to reach a verb.
+func apiClient(own tls.Certificate, bridgeCert *x509.Certificate) *tls.Config {
+	cfg := pinning.ClientConfig(own, bridgeCert)
+	cfg.NextProtos = []string{enroll.ProtoAPI}
+	return cfg
 }
 
 type countingWriter struct{ lines atomic.Int32 }
@@ -581,7 +597,7 @@ func TestARefusedCallerCannotTellExpiryFromBeingAStranger(t *testing.T) {
 // whatTheCallerSees returns the client-visible failure, which is all a refused peer ever gets.
 func whatTheCallerSees(t *testing.T, h *harness, own tls.Certificate) string {
 	t.Helper()
-	conn, err := tls.Dial("tcp", h.addr, pinning.ClientConfig(own, h.bridgeCert))
+	conn, err := tls.Dial("tcp", h.addr, apiClient(own, h.bridgeCert))
 	if err != nil {
 		return err.Error()
 	}
@@ -596,4 +612,132 @@ func whatTheCallerSees(t *testing.T, h *harness, own tls.Certificate) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// --- The dispatch: fail closed ---------------------------------------------------------------------
+
+// **A negotiated protocol that is neither of the two is closed rather than served.**
+//
+// The accept path used to hand every completed handshake to the API handler whatever it had
+// negotiated, which is how a certificate-less enrolment connection could reach the whole API. The fix
+// is a switch, and the interesting arm of a switch is its default: this caller PASSED the pinned
+// verifier - it is the owner's own phone - and is still refused, because it asked for a protocol that
+// leads nowhere.
+//
+// That strictness is deliberate and is the reason this test exists rather than a note saying the case
+// cannot arise. Serving the default would be safe today, since the only configuration that reaches it
+// requires the pinned certificate; it would stop being safe the first time a third protocol is
+// offered, and by then nobody would be looking at this switch.
+func TestANegotiatedProtocolThatLeadsNowhereIsClosed(t *testing.T) {
+	h := startWith(t, []string{"h2"}, nil)
+
+	conn, err := tls.Dial("tcp", h.addr, protoClient(h.phoneOwn, h.bridgeCert, "h2"))
+	if err == nil {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if state := conn.ConnectionState(); state.NegotiatedProtocol != "h2" {
+			t.Fatalf("the test did not negotiate its own protocol, got %q", state.NegotiatedProtocol)
+		}
+		_, _ = conn.Write([]byte(`{"verb":"sessions"}` + "\n"))
+		_, readErr := conn.Read(make([]byte, 1))
+		conn.Close()
+		if readErr == nil {
+			t.Fatal("a protocol that leads nowhere was served")
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := h.rec.calls.Load(); got != 0 {
+		t.Fatalf("a protocol that leads nowhere reached the handler %d time(s)", got)
+	}
+}
+
+// A listener built with no enrolment handler closes the enrolment branch instead of falling back to
+// the API one. nil is the safe value, and this is what makes that a property rather than a claim in a
+// doc comment - the front door's tests and any future caller without a pairing flow rely on it.
+func TestAListenerWithNoEnrolmentHandlerServesNoEnrolment(t *testing.T) {
+	h := startWith(t, []string{enroll.ProtoEnroll}, nil)
+
+	conn, err := tls.Dial("tcp", h.addr, protoClient(h.phoneOwn, h.bridgeCert, enroll.ProtoEnroll))
+	if err == nil {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		_, _ = conn.Write([]byte(`{"verb":"enroll"}` + "\n"))
+		_, readErr := conn.Read(make([]byte, 1))
+		conn.Close()
+		if readErr == nil {
+			t.Fatal("an enrolment connection was answered by a listener that serves no enrolment")
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := h.rec.calls.Load(); got != 0 {
+		t.Fatalf("an enrolment connection reached the API handler %d time(s)", got)
+	}
+}
+
+// And the arm that must work: an enrolment handler IS reached, and it gets the connection rather than
+// a copy of anything. Without this the two tests above would pass on a dispatch that closed
+// everything.
+func TestTheEnrolmentBranchReachesItsHandler(t *testing.T) {
+	got := make(chan string, 1)
+	h := startWith(t, []string{enroll.ProtoEnroll}, func(conn net.Conn) {
+		defer conn.Close()
+		line, err := readLine(conn, 1024)
+		if err != nil {
+			return
+		}
+		got <- string(line)
+		_, _ = conn.Write([]byte("{\"ok\":false}\n"))
+	})
+
+	conn, err := tls.Dial("tcp", h.addr, protoClient(h.phoneOwn, h.bridgeCert, enroll.ProtoEnroll))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte(`{"verb":"enroll"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case line := <-got:
+		if line != `{"verb":"enroll"}` {
+			t.Fatalf("the enrolment handler was handed %q", line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the enrolment branch never reached its handler")
+	}
+	if h.rec.calls.Load() != 0 {
+		t.Fatal("the enrolment connection also reached the API handler")
+	}
+}
+
+// startWith is start with the server's protocol list and the enrolment handler chosen by the caller,
+// which is what the dispatch tests need and nothing else does.
+func startWith(t *testing.T, protos []string, enrolment Enrolment) *harness {
+	t.Helper()
+	log.SetOutput(io.Discard)
+
+	_, bridgeOwn, bridgeCert := mintPeer(t, "bridge")
+	_, phoneOwn, phoneCert := mintPeer(t, "phone")
+
+	rec := &recorder{}
+	cfg := pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert})
+	cfg.NextProtos = protos
+	srv := New(cfg, rec, enrolment, true)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = srv.Serve(ctx, ln) }()
+	t.Cleanup(func() { cancel(); ln.Close() })
+
+	return &harness{addr: ln.Addr().String(), srv: srv, rec: rec,
+		phoneOwn: phoneOwn, bridgeCert: bridgeCert, phoneCert: phoneCert}
+}
+
+func protoClient(own tls.Certificate, bridgeCert *x509.Certificate, proto string) *tls.Config {
+	cfg := pinning.ClientConfig(own, bridgeCert)
+	cfg.NextProtos = []string{proto}
+	return cfg
 }

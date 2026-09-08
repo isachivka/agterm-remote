@@ -206,9 +206,6 @@ func TestPeersIsACopy(t *testing.T) {
 	if !bytes.Equal(after[0].CertificateDER, der) {
 		t.Fatal("mutating the returned certificate bytes changed the store")
 	}
-	if len(s.Certificates()) != 1 {
-		t.Fatal("mutating the returned certificate bytes changed what the TLS layer is given")
-	}
 }
 
 // The other direction: the store must not keep the caller's slice. A pairing flow that reuses a
@@ -233,25 +230,7 @@ func TestTheStoreDoesNotAliasTheCaller(t *testing.T) {
 			if !bytes.Equal(s.Peers()[0].CertificateDER, der) {
 				t.Fatal("mutating the caller's slice changed the store")
 			}
-			if len(s.Certificates()) != 1 {
-				t.Fatal("mutating the caller's slice changed what the TLS layer is given")
-			}
 		})
-	}
-}
-
-// And what Certificates itself returns. A parsed certificate keeps a reference to the DER it was
-// parsed from, and that Raw field is what a pinning verifier compares against.
-func TestCertificatesDoNotAliasTheStore(t *testing.T) {
-	der := selfSigned(t)
-	s, _ := trust.Open(t.TempDir())
-	if err := s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: der}); err != nil {
-		t.Fatal(err)
-	}
-
-	s.Certificates()[0].Raw[0] ^= 0xff
-	if len(s.Certificates()) != 1 {
-		t.Fatal("mutating a returned certificate changed what the TLS layer is given")
 	}
 }
 
@@ -304,9 +283,8 @@ func TestAFailedWriteChangesNothing(t *testing.T) {
 			if len(got) != 1 || got[0].Fingerprint != "aa" || got[0].Name != "paired" {
 				t.Fatalf("the store moved after a failed write: %+v", got)
 			}
-			certs := s.Certificates()
-			if len(certs) != 1 || !bytes.Equal(certs[0].Raw, paired) {
-				t.Fatalf("the TLS layer would be given %d certificates after a failed write", len(certs))
+			if !bytes.Equal(got[0].CertificateDER, paired) {
+				t.Fatal("the certificate the store would authenticate against moved after a failed write")
 			}
 			again, err := os.ReadFile(filepath.Join(dir, "peers.json"))
 			if err != nil {
@@ -357,38 +335,25 @@ func TestANullStoreIsAnError(t *testing.T) {
 	}
 }
 
-func TestCertificatesReturnsThePairedCertificate(t *testing.T) {
+// The certificate comes back exactly as it went in. This store keeps bytes and parses nothing - the
+// drop-what-does-not-parse rule lives in its one caller, enroll.PinnedClients, and is tested there -
+// so what it owes the TLS layer is that the DER round-trips through the file unchanged.
+func TestTheStoredCertificateRoundTripsThroughTheFile(t *testing.T) {
 	der := selfSigned(t)
-	s, _ := trust.Open(t.TempDir())
+	dir := t.TempDir()
+	s, _ := trust.Open(dir)
 	_ = s.Replace(trust.Peer{Fingerprint: "aa", CertificateDER: der})
 
-	certs := s.Certificates()
-	if len(certs) != 1 {
-		t.Fatalf("want 1 certificate, got %d", len(certs))
+	again, err := trust.Open(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if string(certs[0].Raw) != string(der) {
-		t.Fatal("certificate does not round-trip through the store")
+	peers := again.Peers()
+	if len(peers) != 1 || !bytes.Equal(peers[0].CertificateDER, der) {
+		t.Fatal("the certificate does not round-trip through the store")
 	}
-}
-
-// The one rule the TLS layer depends on: nothing that failed to parse is ever handed back as
-// something to trust. A stored certificate can stop parsing under a newer Go, and the answer is to
-// drop it, not to hand the listener a nil or refuse to start.
-func TestCertificatesDropsWhatWillNotParse(t *testing.T) {
-	der := selfSigned(t)
-	s, _ := trust.Open(t.TempDir())
-	_ = s.Add(trust.Peer{Fingerprint: "good", CertificateDER: der})
-	_ = s.Add(trust.Peer{Fingerprint: "junk", CertificateDER: []byte{1, 2, 3}})
-	_ = s.Add(trust.Peer{Fingerprint: "empty", CertificateDER: nil})
-
-	certs := s.Certificates()
-	if len(certs) != 1 {
-		t.Fatalf("want only the parseable certificate, got %d", len(certs))
-	}
-	for _, c := range certs {
-		if c == nil {
-			t.Fatal("a nil certificate reached the caller")
-		}
+	if _, err := x509.ParseCertificate(peers[0].CertificateDER); err != nil {
+		t.Fatalf("what came back off disk is not the certificate that went in: %v", err)
 	}
 }
 
@@ -485,15 +450,16 @@ func TestAReaderNeverSeesAPartialFile(t *testing.T) {
 				t.Errorf("a reader saw an unreadable store: %v", err)
 				return
 			}
-			if got := reader.Peers(); len(got) != 1 {
+			got := reader.Peers()
+			if len(got) != 1 {
 				t.Errorf("a reader saw %d peers, want 1", len(got))
 				return
 			}
-			// Reading through the store's own accessor is not enough on its own: the mutex could
-			// be doing the work. Certificates re-parses what came off disk, so a truncated file
-			// would show up as a certificate that no longer parses.
-			if len(reader.Certificates()) != 1 {
-				t.Error("a reader saw a certificate that no longer parses")
+			// Reading the fingerprint is not enough on its own: the mutex could be doing the work.
+			// Parsing what came off disk is what a truncated file would fail, which is the whole
+			// point of reading a real certificate here rather than three bytes.
+			if _, err := x509.ParseCertificate(got[0].CertificateDER); err != nil {
+				t.Errorf("a reader saw a certificate that no longer parses: %v", err)
 				return
 			}
 		}

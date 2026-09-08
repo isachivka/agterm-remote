@@ -257,9 +257,12 @@ func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.C
 		// they do it by bypassing the verifier rather than by weakening it - which is why no amount
 		// of care inside pinnedPeers could have caught it.
 		//
-		// What this costs is one full handshake per reconnection instead of an abbreviated one. That
-		// is a round trip on a network the phone is already paying round trips on, against a trust
-		// decision the owner expects to take effect when they make it.
+		// What this costs is one full handshake per reconnection instead of an abbreviated one, and
+		// that cost is NOT a round trip: a Go TLS 1.3 full handshake and a PSK resumption are both
+		// 1-RTT, because Go only accepts early data over QUIC. What is given up is a signature, a
+		// verification and a kilobyte or two of certificate on the wire - CPU and bytes, neither of
+		// which scales with the latency the phone is actually paying - against a trust decision the
+		// owner expects to take effect when they make it.
 		SessionTicketsDisabled: true,
 		VerifyPeerCertificate:  pinnedPeers(pinnedClients),
 	}
@@ -282,10 +285,12 @@ func ServerConfig(own tls.Certificate, pinnedClients []*x509.Certificate) *tls.C
 // a path inside one authenticated stream, the same claim would rest on routing code — a far weaker
 // thing to assert about a port deliberately exposed to the internet.
 //
-// **What such a connection then reaches is not yet wired**, and this config must not become
-// reachable until it is. The listener currently hands every completed handshake to the API handler;
-// the dispatch on the negotiated protocol is Task 12. Nothing calls enroll.Window.Open today, so
-// nothing is ever served by this config — see the note by enroll.ProtoAPI, which states the gate.
+// **What such a connection reaches is the enrolment handler and nothing else.** That was once the
+// missing half of this note - the listener handed every completed handshake to the API handler, so a
+// connection served by this config would have reached the API with no client certificate, and the only
+// thing preventing it was that nothing called enroll.Window.Open. It is now the switch in
+// internal/listener's accept path, which dispatches on the negotiated protocol and closes anything
+// that is neither branch.
 //
 // Two properties are what make an anonymous branch acceptable at all, and neither is here:
 //

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/api"
+	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
@@ -32,6 +33,16 @@ type recorder struct{ calls int }
 func (r *recorder) Handle(context.Context, api.Request) api.Response {
 	r.calls++
 	return api.Response{OK: true}
+}
+
+// apiClient is the phone's side, offering the API protocol - which the listener's dispatch requires
+// of anything meaning to reach a verb. The proxy in between is transparent to ALPN: the TLS session
+// runs INSIDE the WebSocket stream, so the protocol is negotiated end to end exactly as it is on a
+// direct connection.
+func apiClient(own tls.Certificate, bridgeCert *x509.Certificate) *tls.Config {
+	cfg := pinning.ClientConfig(own, bridgeCert)
+	cfg.NextProtos = []string{enroll.ProtoAPI}
+	return cfg
 }
 
 func stack(t *testing.T) (addr string, bridgeCert, phoneCert *x509.Certificate, phoneOwn tls.Certificate) {
@@ -57,7 +68,13 @@ func stack(t *testing.T) (addr string, bridgeCert, phoneCert *x509.Certificate, 
 	}
 	front := Listen(tcp)
 	// false: every connection arrives from the router, so the peer address is not the caller's.
-	srv := listener.New(pinning.ServerConfig(bridgeOwn, []*x509.Certificate{pc}), &recorder{}, false)
+	// The API protocol named on the server, and nil enrolment: this listener has no pairing flow, so a
+	// connection that negotiated `agterm/enroll-1` is closed rather than served. The accept path
+	// dispatches on the negotiated protocol now, so a config that named none would have every caller
+	// refused - see internal/listener.
+	cfg := pinning.ServerConfig(bridgeOwn, []*x509.Certificate{pc})
+	cfg.NextProtos = []string{enroll.ProtoAPI}
+	srv := listener.New(cfg, &recorder{}, nil, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = srv.Serve(ctx, front) }()
@@ -174,7 +191,7 @@ func (w *wsClient) Read(p []byte) (int, error) {
 func TestThePinnedPhoneReachesTheBridgeThroughTheWebSocket(t *testing.T) {
 	addr, bridgeCert, _, phoneOwn := stack(t)
 
-	tlsConn := tls.Client(dialWS(t, addr), pinning.ClientConfig(phoneOwn, bridgeCert))
+	tlsConn := tls.Client(dialWS(t, addr), apiClient(phoneOwn, bridgeCert))
 	_ = tlsConn.SetDeadline(time.Now().Add(10 * time.Second))
 	if err := tlsConn.Handshake(); err != nil {
 		t.Fatalf("mTLS must complete inside the WebSocket: %v", err)
@@ -204,7 +221,7 @@ func TestAnUnpinnedPhoneIsStillRefusedThroughTheWebSocket(t *testing.T) {
 	}
 
 	// The upgrade succeeds - that is the point. Everything after it must not.
-	tlsConn := tls.Client(dialWS(t, addr), pinning.ClientConfig(strangerOwn, bridgeCert))
+	tlsConn := tls.Client(dialWS(t, addr), apiClient(strangerOwn, bridgeCert))
 	_ = tlsConn.SetDeadline(time.Now().Add(10 * time.Second))
 	_ = tlsConn.Handshake()
 	_, _ = tlsConn.Write([]byte(`{"verb":"sessions"}` + "\n"))
@@ -234,7 +251,7 @@ func TestFailedHandshakesFromTheProxyDoNotLockOutTheOwner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := tls.Client(dialWS(t, addr), pinning.ClientConfig(strangerOwn, bridgeCert))
+		c := tls.Client(dialWS(t, addr), apiClient(strangerOwn, bridgeCert))
 		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 		_ = c.Handshake()
 		_, _ = c.Read(make([]byte, 1))
@@ -242,7 +259,7 @@ func TestFailedHandshakesFromTheProxyDoNotLockOutTheOwner(t *testing.T) {
 	}
 
 	// The owner, immediately afterwards, must still be served.
-	tlsConn := tls.Client(dialWS(t, addr), pinning.ClientConfig(phoneOwn, bridgeCert))
+	tlsConn := tls.Client(dialWS(t, addr), apiClient(phoneOwn, bridgeCert))
 	_ = tlsConn.SetDeadline(time.Now().Add(10 * time.Second))
 	if err := tlsConn.Handshake(); err != nil {
 		t.Fatalf("the owner was locked out by other callers' failures: %v", err)
