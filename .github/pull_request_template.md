@@ -15,7 +15,8 @@ Commands you ran and what they said; a device or macOS version if it matters.
 
 ## Checklist
 
-- [ ] Every commit is signed off (`git commit -s`) — see [CONTRIBUTING.md](../CONTRIBUTING.md)
+- [ ] Every commit is signed off (`git commit -s`) — see
+      [CONTRIBUTING.md](https://github.com/isachivka/agterm-remote/blob/main/CONTRIBUTING.md)
 - [ ] The title follows conventional commits (`feat|fix|docs|chore|refactor|test|ci|build`)
 - [ ] Nothing personal in the diff: no addresses, hostnames, IP addresses, tokens, private keys or
       home-directory paths

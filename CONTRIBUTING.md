@@ -16,7 +16,8 @@ Thanks for looking. This project is small and the rules are short.
 
 Every commit must carry a `Signed-off-by` trailer. That is your statement that you wrote the change
 or otherwise have the right to submit it under the project's licence, per the
-[Developer Certificate of Origin](https://developercertificate.org/).
+[Developer Certificate of Origin](https://developercertificate.org/). Sign off under a real name
+and an address that reaches you — a pseudonym or an anonymous address is not a valid sign-off.
 
 Git writes the trailer for you:
 
@@ -47,9 +48,8 @@ cd bridge && go test ./...
 cd mac && swift test
 ```
 
-Run the ones your change touches; run all three if you are not sure. Note that `bridge/`, the Gradle
-project and `mac/` do not exist yet — the repository is still being bootstrapped, so until those
-directories land there is nothing for these commands to run.
+These are what CI runs. Each one becomes runnable as its component lands in the tree; skip the ones
+whose directory the repository does not have yet, and run every one your change touches.
 
 ## Everything else
 

@@ -6,10 +6,10 @@ Report privately, through GitHub's private security advisories:
 
 **<https://github.com/isachivka/agterm-remote/security/advisories/new>**
 
-That opens a report only the maintainer can see. Please do not open a public issue, and please do
-not post the details in a pull request or a discussion. If you would rather start with a nudge than
-a full report, mention [@isachivka](https://github.com/isachivka) on GitHub and ask for a private
-channel.
+That opens a report only the maintainer can see, and it is the only private route into this project.
+Please do not open a public issue, and please do not post the details in a pull request or a
+discussion. Nothing on GitHub outside that advisory form is private, so start there even if all you
+have is a suspicion.
 
 Include, as far as you can: what an attacker gains, the steps to reproduce it, and the versions of
 the Mac app, the Android app and agterm you saw it on.
