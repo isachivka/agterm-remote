@@ -193,12 +193,16 @@ check() { # name, content, expected exit
   [ "$got" = "$3" ] || { echo "FAIL $1: expected $3 got $got"; fail=1; }
 }
 
-check "bare ipv4"      "connect to 10.11.12.13 now"      1
-check "ipv4 with port" "host=203.0.113.5:8443"            1
-check "home path"      "/Users/somebody/.config/x"        1
-check "ddns name"      "laptop.mynetname.net"             1
-check "clean text"     "the owner supplies host and port" 0
-check "documentation"  "example: HOST:PORT"               0
+check "bare ipv4"       "connect to 10.11.12.13 now"       1
+check "ipv4 with port"  "host=10.11.12.14:8443"            1
+check "home path"       "/Users/somebody/.config/x"        1
+check "ddns name"       "laptop.mynetname.net"             1
+check "clean text"      "the owner supplies host and port" 0
+check "placeholder"     "example: HOST:PORT"               0
+# Documentation ranges (RFC 5737) are ALLOWED: the README and the onboarding copy need an
+# example address, and refusing them would push writers towards a real one.
+check "documentation ip" "for example 203.0.113.5:8443"    0
+check "loopback"         "listens on 127.0.0.1"            0
 exit "$fail"
 ```
 
