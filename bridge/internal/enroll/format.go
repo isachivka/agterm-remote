@@ -78,6 +78,21 @@ const (
 // It is deliberately comparable with ==, which is what lets a round-trip test assert on the whole
 // value instead of field by field, and what will catch a field added to the struct but forgotten in
 // the encoder.
+//
+// # The precondition on that ==, which is not obvious and has already caught one caller
+//
+// Decode always returns an Expiry of exactly time.Unix(n, 0).UTC(). A payload built any other way is
+// NOT == to what a round trip gives back, even though it encodes to identical bytes, and time.Time
+// is exactly the type where that goes unnoticed:
+//
+//   - time.Now() carries a monotonic clock reading. == compares it; the decoded value has none.
+//   - time.Now() carries sub-second precision. The wire carries whole seconds, so the fraction is
+//     gone on the way back.
+//   - time.Unix(n, 0) without .UTC() carries the local location. == compares the location pointer.
+//
+// Encode truncates and normalises what it writes, so none of this affects the BYTES - only equality
+// of the struct. Canonical is the one line that makes a payload compare equal to its own round trip,
+// and a test asserting p == round-trip(p) on a time.Now()-derived payload should call it.
 type Payload struct {
 	// Host is where the phone dials: a DNS name or a literal IP address, as text. It is the owner's
 	// own address and never belongs in this repository - see scripts/check-no-addresses.sh.
@@ -97,6 +112,19 @@ type Payload struct {
 	// silently wrapping one. Sub-second precision is not carried; a pairing window is measured in
 	// minutes.
 	Expiry time.Time
+}
+
+// Canonical returns p with its Expiry in the form Decode produces: truncated to the second, in UTC,
+// with no monotonic clock reading.
+//
+// It changes nothing about the encoded bytes - Encode already truncates. What it changes is whether
+// the value compares == to its own round trip, which is what a caller holding a time.Now()-derived
+// payload actually wants:
+//
+//	p := enroll.Payload{Host: host, Port: port, Expiry: time.Now().Add(5 * time.Minute)}.Canonical()
+func (p Payload) Canonical() Payload {
+	p.Expiry = p.Expiry.Truncate(time.Second).UTC()
+	return p
 }
 
 // Encode serialises a payload.
@@ -129,7 +157,11 @@ func Encode(p Payload) ([]byte, error) {
 	if p.Port < 0 || p.Port > 0xffff {
 		return nil, fmt.Errorf("enroll: port %d is outside a uint16", p.Port)
 	}
-	secs := p.Expiry.Unix()
+	// Truncated here rather than demanded of the caller. The format has one-second granularity, and a
+	// caller writing time.Now().Add(5*time.Minute) - which is every caller minting a pairing window -
+	// should not have to know that. Truncate also drops the monotonic reading, which is invisible on
+	// the wire and visible to ==; see Canonical.
+	secs := p.Expiry.Truncate(time.Second).Unix()
 	if secs < 0 || secs > 0xffffffff {
 		return nil, fmt.Errorf("enroll: expiry %s is outside the representable range (1970-01-01 to 2106-02-07)", p.Expiry.UTC().Format(time.RFC3339))
 	}

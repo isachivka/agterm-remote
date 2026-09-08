@@ -1,0 +1,74 @@
+[
+  {
+    "name": "wrong-version",
+    "refusal": "unsupported-version",
+    "note": "Version byte 2 in a build that speaks 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here.",
+    "text": "AgAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "version-zero",
+    "refusal": "unsupported-version",
+    "note": "Version 0 - the shape a zero-filled or truncated-then-padded buffer takes.",
+    "text": "AAAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "trailing-byte",
+    "refusal": "length-mismatch",
+    "note": "A valid payload with one byte appended. The length the header describes is the only length the payload may have; a trailing byte is the tail of a second message, or somebody probing for a parser that ignores what it does not understand.",
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAAA="
+  },
+  {
+    "name": "host-length-overruns-buffer",
+    "refusal": "length-mismatch",
+    "note": "Host length 300 in an 85-byte buffer. Under MaxField, so the ceiling does not catch it: this is the case a decoder that reads hostLen bytes without checking what it holds gets wrong.",
+    "text": "AQEsZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "host-length-65535",
+    "refusal": "host-length-over-ceiling",
+    "note": "The largest number the uint16 length field can hold. Must be refused before anything is allocated for it - a length field an attacker chose must never size an allocation.",
+    "text": "Af//ZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "host-length-zero",
+    "refusal": "empty-host",
+    "note": "Host length 0, and a buffer exactly that long, so only the empty host is wrong. A payload naming no host is nothing the phone can act on.",
+    "text": "AQAAIPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "truncated-in-the-middle",
+    "refusal": "length-mismatch",
+    "note": "A valid payload with its last four bytes - the expiry - cut off. Long enough to pass a minimum-length check, short of what its own header describes.",
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHg"
+  },
+  {
+    "name": "truncated-to-a-stub",
+    "refusal": "too-short",
+    "note": "Twenty bytes: a correct version byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQI="
+  },
+  {
+    "name": "url-safe-alphabet",
+    "refusal": "not-standard-base64",
+    "note": "The valid payload rendered in the URL-safe base64 alphabet. java.util.Base64.getDecoder() refuses this and so must every other decoder here: two sides that disagree about the alphabet disagree about which codes exist.",
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH__-_fz7-vn49_b19PPy8fDv7u3s6-rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "unpadded",
+    "refusal": "not-standard-base64",
+    "note": "The valid payload rendered without '=' padding. java.util.Base64.getDecoder() refuses this too.",
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA"
+  },
+  {
+    "name": "host-not-utf8",
+    "refusal": "host-not-utf8",
+    "note": "The host field filled with 0xff bytes, which are not UTF-8 in any position. A decoder that lets them through arrives at a host of replacement characters - a different host from the one the owner is looking at.",
+    "text": "AQAM////////////////IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+  },
+  {
+    "name": "empty-text",
+    "refusal": "empty-payload",
+    "note": "The empty string. Valid base64 of zero bytes, so the refusal has to come from the payload parser rather than from the alphabet.",
+    "text": ""
+  }
+]
