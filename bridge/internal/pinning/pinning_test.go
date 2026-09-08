@@ -204,6 +204,30 @@ func TestAnonymousServerConfigIsStillPinnedFromTheClientSide(t *testing.T) {
 	}
 }
 
+// Session tickets are off on BOTH server configurations, and this is asserted structurally because
+// the cost of losing it is silent.
+//
+// A resumed TLS 1.3 handshake never runs VerifyPeerCertificate: Go restores the peer certificate
+// from the ticket and checks nothing but its expiry. So with tickets on, a phone the owner has
+// UNPAIRED goes on being served until its ticket expires - seven days by default - with the trust
+// store never consulted. That was measured end to end before this flag existed, not inferred.
+//
+// A test that only dials twice cannot notice the flag going missing unless it shares a session
+// cache, which is exactly why the hole survived a green suite; this one reads the field.
+func TestSessionTicketsAreDisabledOnBothServerConfigs(t *testing.T) {
+	_, bridgeOwn, _ := mint(t, "agterm-bridge")
+	_, _, phoneCert := mint(t, "agterm-remote phone")
+
+	for name, cfg := range map[string]*tls.Config{
+		"ServerConfig":          ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert}),
+		"AnonymousServerConfig": AnonymousServerConfig(bridgeOwn),
+	} {
+		if !cfg.SessionTicketsDisabled {
+			t.Errorf("%s issues session tickets, and a resumed handshake skips the pinned verifier", name)
+		}
+	}
+}
+
 // The phone pins the bridge too, so a substituted server is refused by the client.
 func TestUnpinnedServerIsRejectedByClient(t *testing.T) {
 	_, imposterOwn, _ := mint(t, "not the owner's laptop")
