@@ -23,12 +23,25 @@
 #
 #   - Non-test .go files under bridge/internal/enroll only. Tests legitimately compare two minted
 #     tokens with == to assert they differ; that is not a secret comparison and must stay allowed.
-#   - bytes.Equal, reflect.DeepEqual, strings.Compare and strings.EqualFold, on a line that mentions
-#     a token.
+#   - bytes.Equal, bytes.Compare, slices.Equal, slices.Compare, reflect.DeepEqual, strings.Compare
+#     and strings.EqualFold, with a token inside the call.
 #   - == and != with a token as an immediate operand, on either side.
+#   - string(token) != string(other), which is how two byte slices get compared by somebody who did
+#     not want to import bytes. Go compiles it to memequal, which returns on the first differing
+#     byte like every other one of these. It is the single most likely way this rule gets broken and
+#     it walked past the first version of this guard.
 #   - Full-line comments are skipped, so the prose explaining this very rule does not trip it. The
 #     cost is that a trailing comment on a code line is still read as code: keep the reasoning on its
 #     own line.
+#
+# WHAT IT MUST NOT DO, which took as much care as the matching
+#
+# It matches the token VALUE - an identifier whose last segment is exactly `token` - and not every
+# identifier with the word in it. `w.tokenExpiry != expiry`, `w.tokenCount == 0`,
+# `err == errTokenMissing` and `hdr.TokenType != "bearer"` are ordinary code, and an earlier draft
+# failed all four. Nobody had been burned only because none of those fields exists yet; the first
+# contributor to add one would have read the failure as noise, and a guard read as noise is a guard
+# about to be weakened or deleted. Both families are in the self-test below.
 #
 # It is a floor. A comparison spelled across two lines, hidden behind a helper, or written on a copy
 # of the token under another name walks through it. What it stops is the edit that actually happens -
@@ -50,15 +63,24 @@ if ! root="$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null)"; then
   exit 2
 fi
 
-# A token-ish identifier: an optional qualifier (w., h., etc.), the word token, and whatever suffix
-# a name carries (tokenBytes, candidateToken).
-tok='[A-Za-z0-9_.]*[Tt]oken[A-Za-z0-9_]*'
-# The two shapes. The call form is caught by the function name plus the token filter below; the
-# operator form demands the token be an IMMEDIATE operand, which is what keeps len(token) == 32 and
-# ConstantTimeCompare(...) != 1 - both correct code - out of the results.
-calls='(bytes\.Equal|reflect\.DeepEqual|strings\.(Compare|EqualFold))\('
-ops="${tok}(\[[^]]*\])?[[:space:]]*[!=]=|[!=]=[[:space:]]*${tok}"
-pattern="(${calls})|(${ops})"
+# The token value: an optional qualifier (w., h., ...) and then the word token as the WHOLE final
+# segment. No trailing characters, which is what separates w.token from w.tokenExpiry.
+tok='([A-Za-z0-9_]+\.)*[Tt]oken'
+# Where a name may legally end. Written as a character class plus end-of-line rather than a word
+# boundary, because \b, \> and [[:>:]] are each supported by only some of the greps this runs under.
+end='([^A-Za-z0-9_]|$)'
+
+# Three shapes, and each demands the token itself rather than a line that merely mentions one.
+#
+#   calls  - a comparison helper with a token inside the parentheses.
+#   ops    - == or != with a token as an IMMEDIATE operand. This is what keeps len(token) == 32 and
+#            subtle.ConstantTimeCompare(...) != 1 - both correct code - out of the results, since
+#            neither has the token up against the operator.
+#   strcmp - the string(...) conversion form, on either side.
+calls="(bytes\.(Equal|Compare)|slices\.(Equal|Compare)|reflect\.DeepEqual|strings\.(Compare|EqualFold))\([^)]*[Tt]oken"
+ops="${tok}(\[[^]]*\])?[[:space:]]*[!=]=|[!=]=[[:space:]]*${tok}${end}"
+strcmp="string\([^)]*[Tt]oken[^)]*\)[[:space:]]*[!=]=|[!=]=[[:space:]]*string\([^)]*[Tt]oken"
+pattern="(${calls})|(${ops})|(${strcmp})"
 
 # The single scan. Defined once and called from BOTH the self-test below and the real scan, so the
 # probe cannot succeed through a path the scan does not use.
@@ -80,12 +102,19 @@ trap 'rm -f "$probe"' EXIT
 
 must_match=(
   '	if bytes.Equal(w.token[:], token) {'
+  '	if bytes.Compare(w.token[:], token) != 0 {'
+  '	if slices.Equal(w.token[:], token) {'
   '	if reflect.DeepEqual(w.token, token) {'
   '	if strings.Compare(string(w.token[:]), string(token)) == 0 {'
   '	if strings.EqualFold(hex.EncodeToString(w.token[:]), token) {'
   '	if w.token == candidate {'
   '	if candidate == w.token {'
   '	if w.token[0] != token[0] {'
+  '	return got == w.token'
+  # The two that walked past the first version of this guard, kept here so they cannot walk past a
+  # later one. Both compile, both pass the whole enroll suite, both are early-exit.
+  '	if string(w.token[:]) != string(token) {'
+  '	if string(token) == string(w.token[:]) {'
 )
 must_not_match=(
   '	if subtle.ConstantTimeCompare(w.token[:], token) != 1 {'
@@ -93,6 +122,15 @@ must_not_match=(
   '	if len(token) == 32 {'
   '	w.token = token'
   '	if w.attempts >= maxAttempts {'
+  # The false-positive family: identifiers that merely contain the word. None of these exists in the
+  # package today, which is exactly why they are here - the first one somebody writes must not be
+  # met with a failure they will read as noise.
+  '	if w.tokenExpiry != expiry {'
+  '	if expiry == w.tokenExpiry {'
+  '	if w.tokenCount == 0 {'
+  '	if err == errTokenMissing {'
+  '	if hdr.TokenType != "bearer" {'
+  '	if tokenLen != 32 {'
 )
 
 for line in "${must_match[@]}"; do

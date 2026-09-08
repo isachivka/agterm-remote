@@ -237,14 +237,21 @@ func TestRefusalsAreIndistinguishableFromOutsideThePackage(t *testing.T) {
 // report that it found nothing: it plants the token under the state directory in every rendering it
 // searches for, requires a hit on each, and only then removes them and requires none.
 //
-// # Why the streams are captured and not only the filesystem
+// # The capture is the fence; the rendering list is only a sieve
 //
 // The first version of this test walked the filesystem alone, and a log.Printf("token=%x", token)
 // added to Open left it passing: the standard logger writes to stderr, and WalkDir never sees
 // stderr. It proved "this package writes no file", which is not what its name claims. The three
 // default destinations - the std logger, os.Stdout and os.Stderr - are therefore pointed at files
-// INSIDE the walked tree for the duration of the lifecycle, so that a token printed anywhere lands
-// somewhere the walk will find it. Both mutations were then confirmed to fail this test.
+// INSIDE the walked tree for the duration of the lifecycle. THAT is the durable part of this test:
+// a whole channel closed, so a token printed anywhere lands somewhere the walk will find it.
+//
+// The seven renderings are not a fence and must not be read as one. No list of renderings can be
+// complete, and these are demonstrably not: a leak written as base32, as a partial prefix (%x of the
+// first sixteen bytes), as hex split into halves, as %q of a string cast, or as a decimal big.Int
+// walks past all seven. They are a sieve sized for the forms a careless print actually takes -
+// raw, hex, base64, and Go's own decimal - and adding an eighth is fair game, but the reason this
+// test has teeth is the capture above it, not the length of the list below.
 func TestTokenNeverReachesDisk(t *testing.T) {
 	state := t.TempDir()
 	// Every directory a Go program writes to without being told to lands inside the tree this test
@@ -275,12 +282,15 @@ func TestTokenNeverReachesDisk(t *testing.T) {
 	// os.Stdout and os.Stderr are read at call time by fmt.Println and friends, so replacing the
 	// variables catches a print made anywhere below. log.SetOutput catches the standard logger,
 	// which holds its own reference to the original stderr and would otherwise escape both.
-	realStdout, realStderr := os.Stdout, os.Stderr
+	realStdout, realStderr, realLog := os.Stdout, os.Stderr, log.Writer()
 	os.Stdout, os.Stderr = captured["stdout"], captured["stderr"]
 	log.SetOutput(captured["log"])
 	restore := func() {
 		os.Stdout, os.Stderr = realStdout, realStderr
-		log.SetOutput(realStderr)
+		// log.Writer(), not os.Stderr. They are the same thing today; they would not be if anything
+		// in this package's future test setup redirected the logger first, and restoring the
+		// assumption rather than the observation is how that becomes a silent one-line bug.
+		log.SetOutput(realLog)
 	}
 	t.Cleanup(restore)
 
