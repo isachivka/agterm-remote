@@ -27,6 +27,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -244,58 +245,210 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 // all.** The certificate is public - it is what the phone pins - and the key never leaves this
 // directory, so there is nothing about generating it that needs a person present. A bridge that
 // refused to start until somebody ran a provisioning command would make the first run a support
-// question, and that command would exist only to write two files this process is already allowed to
-// write.
+// question, and that command would exist only to write two files this process is already allowed
+// to write.
 //
-// A half-written pair is not repaired silently. If one file is there and the other is not, that is
-// reported rather than papered over by minting, because a new identity unpairs every phone that
-// pinned the old certificate.
+// # Two starts at once must not produce a certificate and a key from different mints
+//
+// Minting is not "check, then write". Two processes given the same empty state directory both see
+// no identity, both mint, and both write - and with a plain write the two files are installed
+// independently, so the loser can overwrite the winner's key after the winner has already installed
+// its certificate. **Both files then exist, the half-pair check passes, and every start after that
+// dies with `tls: private key does not match public key`** - which is worse than either half being
+// missing, because the recovery is deleting both and re-pairing every phone.
+//
+// Two properties fix it, and neither is enough alone:
+//
+//   - **The key is installed by a hard link from a temporary file, and the link IS the lock.** link
+//     fails with EEXIST when the target is there, atomically, so exactly one process can install a
+//     key. Whoever does owns the mint and goes on to install the certificate; whoever loses adopts
+//     the winner's pair and throws away the one it minted. Nothing is ever overwritten.
+//
+//   - **Both files appear complete or not at all.** A create-then-write leaves a zero-length file
+//     visible to any reader in between, and a reader that finds one is not looking at a half-pair,
+//     it is looking at a file that will not parse. Content first, install second - link for the
+//     key, rename for the certificate - so the only intermediate state anybody can observe is a
+//     key with no certificate yet.
+//
+// That last state is also what a run that CRASHED between the two installs leaves behind, and the
+// two cannot be told apart by looking. So they are told apart by waiting: a mint in flight resolves
+// in milliseconds, and a crashed one never does. A half pair that outlasts the budget is reported
+// rather than repaired, because minting over half of a pair would unpair every phone that pinned
+// the certificate.
 func identity(stateDir string) (tls.Certificate, error) {
 	certPath := filepath.Join(stateDir, certFile)
 	keyPath := filepath.Join(stateDir, keyFile)
 
-	certPEM, certErr := os.ReadFile(certPath)
-	keyPEM, keyErr := os.ReadFile(keyPath)
-	switch {
-	case certErr == nil && keyErr == nil:
-		own, err := pinning.LoadIdentity(pinning.Identity{CertPEM: certPEM, KeyPEM: keyPEM})
-		if err != nil {
-			return own, fmt.Errorf("bridge identity: %w", err)
-		}
-		return own, nil
-	case errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist):
-		// Neither half is there, which is a bridge that has never run. Fall through and mint.
-	case errors.Is(certErr, os.ErrNotExist) || errors.Is(keyErr, os.ErrNotExist):
-		return tls.Certificate{}, fmt.Errorf(
-			"bridge identity: %s and %s must both exist or neither; minting over half of a pair would "+
-				"unpair every phone that pinned the certificate", certFile, keyFile)
-	default:
-		return tls.Certificate{}, fmt.Errorf("bridge identity: %w", errors.Join(certErr, keyErr))
+	own, found, err := loadIdentity(certPath, keyPath)
+	if found {
+		return own, err
+	}
+	if errors.Is(err, errHalfPair) {
+		return awaitIdentity(certPath, keyPath)
+	}
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	// 0700: the directory holds the one secret this process has.
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return tls.Certificate{}, fmt.Errorf("state directory: %w", err)
 	}
 
 	id, err := pinning.Mint("agterm-remote bridge", identityLifetime)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("mint bridge identity: %w", err)
 	}
-	// 0700 on the directory, 0600 on both files. The key is the one secret this process holds, and
-	// the certificate is written at the same mode because nothing needs to read either of them
-	// except this process and the app that started it.
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return tls.Certificate{}, fmt.Errorf("state directory: %w", err)
+
+	installed, err := installKey(stateDir, keyPath, id.KeyPEM)
+	if err != nil {
+		return tls.Certificate{}, err
 	}
-	// The key first. A certificate with no key behind it is the half-pair the switch above refuses,
-	// so writing the key second would make a crash between the two produce the unrecoverable order.
-	if err := os.WriteFile(keyPath, id.KeyPEM, 0o600); err != nil {
-		return tls.Certificate{}, fmt.Errorf("write bridge key: %w", err)
+	if !installed {
+		// Somebody else got there first. Their certificate is what every phone will pin, so this
+		// process adopts it and the identity minted a few lines above is thrown away unused.
+		return awaitIdentity(certPath, keyPath)
 	}
-	if err := os.WriteFile(certPath, id.CertPEM, 0o600); err != nil {
-		return tls.Certificate{}, fmt.Errorf("write bridge certificate: %w", err)
+
+	// The certificate second, and any failure from here takes the key with it. Leaving the key
+	// behind would leave the half pair the check above refuses, and the next start would then wait
+	// out the budget and stop, needing a person to delete a file before the bridge would run.
+	if err := installFile(stateDir, certPath, id.CertPEM); err != nil {
+		_ = os.Remove(keyPath)
+		return tls.Certificate{}, fmt.Errorf("install bridge certificate: %w", err)
 	}
 	log.Printf("minted a bridge identity in %s", stateDir)
 
-	own, err := pinning.LoadIdentity(id)
+	own, err = pinning.LoadIdentity(id)
 	if err != nil {
 		return own, fmt.Errorf("bridge identity: %w", err)
 	}
 	return own, nil
+}
+
+// errHalfPair is one of the two files without the other. Its own error because the caller has to
+// tell it from an unreadable directory: this one is worth waiting on, and that one is not.
+var errHalfPair = errors.New("one half of the identity is missing")
+
+// loadIdentity reads the pair if it is there.
+//
+// The three outcomes are distinct on purpose. Both files present is an identity; neither is a
+// bridge that has never run, and found is false so the caller mints; exactly one is errHalfPair,
+// which the caller must not paper over. Collapsing the last into the second is what would let a
+// crashed run's leftover key be silently replaced, taking every paired phone with it.
+func loadIdentity(certPath, keyPath string) (own tls.Certificate, found bool, err error) {
+	certPEM, certErr := os.ReadFile(certPath)
+	keyPEM, keyErr := os.ReadFile(keyPath)
+	switch {
+	case certErr == nil && keyErr == nil:
+		own, err := pinning.LoadIdentity(pinning.Identity{CertPEM: certPEM, KeyPEM: keyPEM})
+		if err != nil {
+			return own, true, fmt.Errorf("bridge identity: %w", err)
+		}
+		return own, true, nil
+	case errors.Is(certErr, fs.ErrNotExist) && errors.Is(keyErr, fs.ErrNotExist):
+		return tls.Certificate{}, false, nil
+	case errors.Is(certErr, fs.ErrNotExist) || errors.Is(keyErr, fs.ErrNotExist):
+		return tls.Certificate{}, false, fmt.Errorf(
+			"bridge identity: %s and %s must both exist or neither; minting over half of a pair "+
+				"would unpair every phone that pinned the certificate: %w", certFile, keyFile, errHalfPair)
+	default:
+		return tls.Certificate{}, false, fmt.Errorf("bridge identity: %w", errors.Join(certErr, keyErr))
+	}
+}
+
+// awaitIdentity waits for the process that won the key to finish installing its certificate.
+//
+// The half-pair error is not an answer here, and that is the whole reason this is a loop rather
+// than one more read: between the winner installing the key and installing the certificate there is
+// a window in which exactly one file exists, and reporting that as a fault would turn a race this
+// design has already handled into a failed start. It is only a fault once the winner has plainly
+// stopped, which is what the budget decides - and then the error the caller gets is the half-pair
+// one, naming both files and what deleting the survivor would cost.
+func awaitIdentity(certPath, keyPath string) (tls.Certificate, error) {
+	deadline := time.Now().Add(identityWaitBudget)
+	for {
+		own, found, err := loadIdentity(certPath, keyPath)
+		if found {
+			return own, err
+		}
+		if err != nil && !errors.Is(err, errHalfPair) {
+			return tls.Certificate{}, err
+		}
+		if time.Now().After(deadline) {
+			if err == nil {
+				err = errors.New("the identity that was being written is not there")
+			}
+			return tls.Certificate{}, err
+		}
+		time.Sleep(identityWaitStep)
+	}
+}
+
+// installKey writes the key to a temporary file and hard-links it into place, reporting whether
+// this process was the one that got there.
+//
+// link rather than rename: rename REPLACES, which is exactly the overwrite this must not do, while
+// link refuses when the target exists and refuses atomically. That refusal is the whole
+// coordination mechanism - there is no lock file to go stale, because the thing being locked is the
+// thing being created.
+func installKey(dir, keyPath string, pem []byte) (bool, error) {
+	tmp, err := writeTemp(dir, keyFile, pem)
+	if err != nil {
+		return false, fmt.Errorf("write bridge key: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp) }()
+
+	if err := os.Link(tmp, keyPath); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("install bridge key: %w", err)
+	}
+	return true, nil
+}
+
+// installFile writes content to a temporary file in the same directory and renames it over path, so
+// no reader ever sees a partial one. Same directory because a rename across filesystems is a copy.
+func installFile(dir, path string, content []byte) error {
+	tmp, err := writeTemp(dir, filepath.Base(path), content)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	return os.Rename(tmp, path)
+}
+
+// writeTemp writes content to a new file in dir at 0600 and returns its name.
+//
+// The mode is set explicitly rather than left to CreateTemp, whose 0600 is still subject to the
+// process umask. Set before any content is written, so the file is never briefly readable with the
+// key in it.
+func writeTemp(dir, prefix string, content []byte) (string, error) {
+	f, err := os.CreateTemp(dir, prefix+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if _, err := f.Write(content); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	// Before the install, not after: a link or a rename that lands ahead of the data it points at is
+	// the tearing both were chosen to prevent.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
