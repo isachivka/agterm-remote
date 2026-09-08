@@ -741,3 +741,34 @@ func protoClient(own tls.Certificate, bridgeCert *x509.Certificate, proto string
 	cfg.NextProtos = []string{proto}
 	return cfg
 }
+
+// The reviewer's variant of the same arm, and the one most likely to arrive by accident: **no ALPN at
+// all, with the pinned client certificate presented.**
+//
+// The handshake completes - the API configuration is what it ran under, and this caller satisfied the
+// pinned verifier - and NegotiatedProtocol is the empty string, which is neither branch. So it is
+// closed unserved. Nothing about that is unsafe today; what it buys is that the dispatch has no
+// default arm to grow a hole in later, and it is why the bridge's own client offers exactly one
+// protocol per connection.
+func TestAPinnedCallerOfferingNoProtocolAtAllIsClosed(t *testing.T) {
+	h := startWith(t, []string{enroll.ProtoAPI}, nil)
+
+	// pinning.ClientConfig names no protocols, which is the point.
+	conn, err := tls.Dial("tcp", h.addr, pinning.ClientConfig(h.phoneOwn, h.bridgeCert))
+	if err == nil {
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if got := conn.ConnectionState().NegotiatedProtocol; got != "" {
+			t.Fatalf("this caller was supposed to negotiate nothing, it negotiated %q", got)
+		}
+		_, _ = conn.Write([]byte(`{"verb":"sessions"}` + "\n"))
+		_, readErr := conn.Read(make([]byte, 1))
+		conn.Close()
+		if readErr == nil {
+			t.Fatal("a caller that negotiated nothing was served")
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := h.rec.calls.Load(); got != 0 {
+		t.Fatalf("a caller that negotiated nothing reached the handler %d time(s)", got)
+	}
+}
