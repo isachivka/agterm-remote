@@ -6,7 +6,8 @@ name: Commit hygiene
 #   1. The PULL REQUEST TITLE must be a conventional-commit subject. This repository squash-merges,
 #      and `squash_merge_commit_title=PR_TITLE` pins the resulting subject to the title - so the
 #      title, not any branch commit, is what lands on `main` and what release-please parses into a
-#      version bump and release notes. It is the one string that survives the merge.
+#      version bump and release notes. It is the one string that survives the merge, so the
+#      docs-only rule below is applied to it as well as to each commit.
 #   2. No commit typed `feat:`/`fix:` may change only documentation. Kept per-commit: a reviewer
 #      reads those subjects, and a branch that is rebased rather than squashed keeps them.
 #   3. Every commit carries a `Signed-off-by:` trailer. CONTRIBUTING.md makes the DCO a condition of
@@ -20,12 +21,20 @@ name: Commit hygiene
 #     ./scripts/check-commit-types.sh origin/main..HEAD
 #     ./scripts/check-signed-off.sh   origin/main..HEAD
 #
-# PULL REQUESTS ONLY, AND DELIBERATELY SO. This used to run on `push: main` as well. It cannot any
-# more: with `squash_merge_commit_message=PR_BODY`, the commit GitHub synthesises on `main` carries
-# the pull request body and none of the branch's trailers, so rule 3 would fail on `main` after
-# every single merge - not because anything was unsigned, but because the trailer the author did
-# write is discarded during the squash. Sign-off is verified here, on the commits that actually
-# carry it, before the merge. See the Task 4 report for the trade this reflects.
+# A `squash_merge_commit_message=PR_BODY` SQUASH DOES NOT DROP THE SIGN-OFF. An earlier revision of
+# this file claimed it did, and dropped the `push: main` trigger on that basis. The claim was wrong,
+# and the correction was measured rather than argued - in a throwaway repository configured exactly
+# like this one:
+#
+#   - a branch commit carrying `Signed-off-by:` under a pull request body carrying none produced a
+#     squash commit with the trailer appended below the body;
+#   - a branch commit carrying none produced a squash commit with none - so GitHub is propagating
+#     the author's own trailer, not stamping the merger's;
+#   - two commits signed off by two different people produced BOTH trailers on the squash commit.
+#
+# So rule 3 holds on `main` too, which is why `push: main` is back. It is the only thing watching the
+# one route that bypasses every required check: a direct push by an admin, which `enforce_admins:
+# false` deliberately leaves open.
 on:
   pull_request:
     # `edited` is load-bearing. The default type list is opened/synchronize/reopened, none of which
@@ -33,13 +42,16 @@ on:
     # whatever the title was when the branch was last pushed, and a fixed title could never turn the
     # check green. It also fires on body edits, which costs one cheap run.
     types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # main is exempt: superseding a run there would leave the pushed commits unjudged.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   commits:
@@ -53,26 +65,47 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The title arrives through the environment, never interpolated into the shell command. A
-      # pull request title is attacker-controlled text - anyone may open a pull request here - and
-      # `${{ }}` inside a `run:` is substituted before bash ever sees it, which would turn a title
-      # containing shell syntax into shell this workflow executes.
-      - name: The title is a conventional-commit subject
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: ./scripts/check-pr-title.sh "$PR_TITLE"
-
-      # The range is computed once and reused by both per-commit checks.
+      # The range is computed first: every check below judges the commits it names, and the title
+      # check needs it too, to see which paths the pull request touches.
       - name: Work out the range of added commits
         id: range
         if: ${{ !cancelled() }}
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
-          git fetch --quiet origin "$BASE_REF"
-          range="origin/$BASE_REF..HEAD"
+          if [ -n "$BASE_REF" ]; then
+            git fetch --quiet origin "$BASE_REF"
+            range="origin/$BASE_REF..HEAD"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            # A first push, or a run started by hand: judge the tip commit and say so.
+            echo "No usable commit range for this event - checking the tip commit only."
+            range="HEAD~1..HEAD"
+          fi
           echo "range: $range"
           echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      # The title arrives through the environment, never interpolated into the shell command. A
+      # pull request title is attacker-controlled text - anyone may open a pull request here - and
+      # `${{ }}` inside a `run:` is substituted before bash ever sees it, which would turn a title
+      # containing shell syntax into shell this workflow executes. The changed paths go through a
+      # file for the same reason: a path is attacker-controlled too.
+      #
+      # Skipped on a push to `main`, where there is no pull request and so no title. The subject that
+      # arrived there was already judged as the title of the pull request it came from.
+      - name: The title is a conventional-commit subject
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Three dots: what this branch changed since the merge base, not the difference between
+          # the two tips. `strict: true` makes them equal today; a two-dot diff would still be the
+          # wrong question, and would start giving wrong answers the moment that setting changed.
+          git diff --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/changed-paths.txt"
+          ./scripts/check-pr-title.sh "$PR_TITLE" "$RUNNER_TEMP/changed-paths.txt"
 
       # Separate steps, and each runs even when an earlier one failed: a branch can break more than
       # one rule, and a single step would report only the first, costing a round trip per rule.
