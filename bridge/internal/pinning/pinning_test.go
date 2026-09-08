@@ -205,10 +205,10 @@ func TestReissuedCertificateWithTheSameKeyIsRejected(t *testing.T) {
 
 // What ClientCAs actually does, measured — because I got this wrong by reasoning about it.
 //
-// An earlier sketch used RequireAndVerifyClientCert with the phone's certificate in ClientCAs, and I
-// claimed that could not work with a non-CA certificate. **It works.** Go accepts a self-signed leaf
-// that is itself in the root pool, without requiring IsCA. The claim was wrong and this test is what
-// corrected it.
+// An earlier sketch used RequireAndVerifyClientCert with the phone's certificate in ClientCAs, and
+// I claimed that could not work with a non-CA certificate. **It works.** Go accepts a self-signed
+// leaf that is itself in the root pool, without requiring IsCA. The claim was wrong and this test
+// is what corrected it.
 //
 // It is kept because the interesting result is the second one: ClientCAs ALSO refuses a certificate
 // signed by the pinned key, with "parent certificate cannot sign this kind of certificate". So both
@@ -297,8 +297,8 @@ func TestMintedCertificateIsNotAnIssuer(t *testing.T) {
 // --- Validity, fingerprints, and the shape of what gets carried ----------------------------------
 
 // It was measured that PKIX does not validate a trust anchor's own validity dates. A pinned
-// certificate IS its own anchor, so without the explicit check in pinnedPeers an expired one would be
-// accepted forever.
+// certificate IS its own anchor, so without the explicit check in pinnedPeers an expired one would
+// be accepted forever.
 func TestExpiredPinnedCertificateIsRejected(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
 
@@ -394,8 +394,8 @@ var _ = net.Dial
 // rebuilt so its verdict could survive the trip. Asserting it only there
 // would leave the same property held at one end of the wire and not the other.
 //
-// The certificate here lives for a moment on purpose. A short lifetime is mintable on demand, and it
-// is why the expiry path is testable on the owner's phone at all rather than argued from
+// The certificate here lives for a moment on purpose. A short lifetime is mintable on demand, and
+// it is why the expiry path is testable on the owner's phone at all rather than argued from
 // the contract forever.
 func TestAnExpiredPeerIsRefusedAsExpiredRatherThanAsAStranger(t *testing.T) {
 	id, err := Mint("briefly valid", 2*time.Second)
@@ -461,8 +461,8 @@ func TestAStrangerIsStillRefusedAsAStrangerRatherThanAsExpired(t *testing.T) {
 
 // **Any phone on the list is accepted, not merely the first.**
 //
-// The store holds a list because a second phone should cost a screen and a call to Add rather than a
-// migration of the file, and a verifier that only ever consulted element zero would make that
+// The store holds a list because a second phone should cost a screen and a call to Add rather than
+// a migration of the file, and a verifier that only ever consulted element zero would make that
 // promise false at the one point where it is enforced. Asserted with the LAST element, because a
 // loop that returns early on the first match passes with the first.
 func TestAnyPinnedPeerOnTheListIsAccepted(t *testing.T) {
@@ -481,9 +481,9 @@ func TestAnyPinnedPeerOnTheListIsAccepted(t *testing.T) {
 
 // **An empty list accepts nobody**, which is what a bridge nobody has paired yet must do.
 //
-// This is the case that lets the bridge start before enrolment: the door is open, and no certificate
-// that exists can get through it. A verifier that treated "nothing to compare against" as "nothing
-// to object to" would turn an unpaired bridge into an open one.
+// This is the case that lets the bridge start before enrolment: the door is open, and no
+// certificate that exists can get through it. A verifier that treated "nothing to compare against"
+// as "nothing to object to" would turn an unpaired bridge into an open one.
 func TestAnEmptyPeerListAcceptsNobody(t *testing.T) {
 	_, bridgeOwn, bridgeCert := mint(t, "agterm-bridge")
 	_, phoneOwn, _ := mint(t, "agterm-remote phone")
@@ -494,6 +494,53 @@ func TestAnEmptyPeerListAcceptsNobody(t *testing.T) {
 
 	if clientErr == nil {
 		t.Fatal("a bridge with no paired phones must accept nobody")
+	}
+}
+
+// **An expired phone on a MULTI-ELEMENT list is refused as expired, not as a stranger.**
+//
+// The two verdicts mean different things to the owner - a stranger means this is not the machine
+// that was paired, an expiry means an identity needs re-minting - and holding that only for a
+// one-element list would leave the property asserted for the wiring the bridge no longer uses. The
+// specific way it could break is worth naming: a verifier that checked the validity window of the
+// list's FIRST element rather than of the one that matched would report a valid neighbour's dates
+// here, and this test would be the only thing that noticed.
+//
+// The expired certificate is deliberately not first, and a valid phone sits on either side of it.
+func TestAnExpiredPeerOnAMultiElementListIsRefusedAsExpired(t *testing.T) {
+	_, _, before := mint(t, "agterm-remote phone")
+	_, _, after := mint(t, "agterm-remote phone")
+
+	brief, err := Mint("briefly valid", 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := LoadPeer(brief.CertPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	verify := pinnedPeers([]*x509.Certificate{before, expired, after})
+
+	// While it is valid the same bytes are accepted from the middle of the list, so the refusal
+	// below is about the clock and not about the position.
+	if err := verify([][]byte{expired.Raw}, nil); err != nil {
+		t.Fatalf("a valid peer in the middle of the list must be accepted: %v", err)
+	}
+
+	time.Sleep(700 * time.Millisecond)
+
+	err = verify([][]byte{expired.Raw}, nil)
+	if !errors.Is(err, ErrExpired) {
+		t.Fatalf("an expired peer on a list must be refused as expired, got %v", err)
+	}
+	if errors.Is(err, ErrNotPinned) {
+		t.Fatal("expiry must not be reported as a wrong certificate: the remedies differ")
+	}
+
+	// And its neighbours are unaffected: one certificate's clock is not the list's.
+	if err := verify([][]byte{after.Raw}, nil); err != nil {
+		t.Errorf("a valid peer was refused because another entry expired: %v", err)
 	}
 }
 

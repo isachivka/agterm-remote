@@ -396,8 +396,9 @@ func TestTheSameBoxWidthNeverRecalibrates(t *testing.T) {
 	}
 
 	for _, what := range []string{"reconnect", "new session", "rotation", "font change", "restart"} {
-		// `applied` too, now that a cached apply verifies: this loop asserts on the RESIZES, and a list that
-		// accumulates across iterations would report the first calibration's probes for ever.
+		// `applied` too, now that a cached apply verifies: this loop asserts on the RESIZES, and a
+		// list that accumulates across iterations would report the first calibration's probes for
+		// ever.
 		term.created, term.closed, term.resizes = nil, nil, 0
 		term.applied = nil
 		reloaded := LoadStore(dir)
@@ -479,10 +480,10 @@ func TestAStoredFitIsAppliedVerbatim(t *testing.T) {
 
 // **A fit the terminal contradicts is DELETED, and the press that found it corrects itself.**
 //
-// This is the 2026-08-06 failure as one test. The stored entry says 37 columns at 626 points; this fake really
-// renders 39 there, which is the shape of what happened on the owner's machine on 2026-08-06 - a
-// sidebar dragged narrower, 110 points handed to the terminal, and an entry promising 45 delivering
-// 59 on every press for ever.
+// This is the 2026-08-06 failure as one test. The stored entry says 37 columns at 626 points; this
+// fake really renders 39 there, which is the shape of what happened on the owner's machine on
+// 2026-08-06 - a sidebar dragged narrower, 110 points handed to the terminal, and an entry
+// promising 45 delivering 59 on every press for ever.
 func TestAContradictedFitIsDeletedAndRecalibrated(t *testing.T) {
 	term, store, dir := fresh(t)
 	key := fitKey(0, boxDp, charMilli)
@@ -660,8 +661,8 @@ func TestChromeMovedExplainsOnlyWhatItCanMeasure(t *testing.T) {
 
 // **THE HEIGHT IS THE OWNER'S, AND THE RESTORE MUST NOT PUT BACK A REMEMBERED ONE.**
 //
-// Their report, 2026-08-09: *"фит-режим телефона изменил высоту экрана… половина экрана по высоте
-// простаивает"*. Every resize on the search path already sends the height read immediately before it
+// Their report, 2026-08-09: the phone's fit mode changed the height of his screen and left half of
+// it idle. Every resize on the search path already sends the height read immediately before it
 // — `TestAResizeNeverChangesTheHeight` holds that. The restore did not: it wrote back `r.Height`, the
 // height captured when the fit was switched ON, which is the one place in this package that CHOOSES
 // a height instead of passing one through.

@@ -64,7 +64,7 @@ type Terminal interface {
 	// be given.
 	//
 	// It also FOCUSES what it creates, so the owner's view jumps for the second or two calibration
-	// takes. They accepted that - *"Это тоже окей не проблема"* - which is why there is no
+	// takes. They accepted that, which is why there is no
 	// session.select here putting it back. See the note in the agterm client.
 	NewSession(ctx context.Context, command, name string) (string, error)
 	CloseSession(ctx context.Context, id string) error
@@ -123,10 +123,11 @@ type Fit struct {
 	// **Evidence, not identity**: neither is part of [fitKey] and no decision reads them. A fit is
 	// found by the phone's numbers exactly as before.
 	//
-	// They exist because of one measured failure. On 2026-08-06 a stored fit promised 45 columns and the terminal
-	// rendered 59, and working out why took two live measurements and simultaneous equations against
-	// two historical entries in this file. The search already computes both numbers from its probes
-	// and used to throw them away; written down, the file can say it itself.
+	// They exist because of one measured failure. On 2026-08-06 a stored fit promised 45 columns
+	// and the terminal rendered 59, and working out why took two live measurements and simultaneous
+	// equations against two historical entries in this file. The search already computes both
+	// numbers from its probes and used to throw them away; written down, the file can say it
+	// itself.
 	//
 	// What they buy is the sentence a contradiction prints - see the verification in [To]: the chrome
 	// then, the chrome now, and therefore what moved on the machine. What they do NOT buy is
@@ -337,9 +338,9 @@ func MeasureColumns(screen string) int {
 // rejected it, because there is nothing wrong with it except when it was true.
 //
 // The shaped probe is what made this bite: splitting the probe and moving its divider immediately
-// before the first measurement is a re-layout, and the first read after it returned the pane width from before
-// the split. On the owner's machine that produced the same figure for both probe widths and the
-// calibration refused, blaming a long line that was rendering perfectly.
+// before the first measurement is a re-layout, and the first read after it returned the pane width
+// from before the split. On the owner's machine that produced the same figure for both probe widths
+// and the calibration refused, blaming a long line that was rendering perfectly.
 //
 // So a reading counts only once [stableReadings] consecutive reads agree. The span that requires is
 // longer than the probe's own redraw period, which is a constant this package AUTHORS — see
@@ -1034,9 +1035,9 @@ func RestoreWindow(ctx context.Context, t Terminal, store *Store) error {
 	//
 	// This used to send `r.Height`, the height captured when the fit was switched on, and the
 	// paragraph here argued for it: the record is the only thing that remembers the window they had.
-	// That argument was wrong in a way the owner's report made obvious - *"фит-режим телефона изменил
-	// высоту экрана… половина экрана по высоте простаивает"*, 2026-08-09, after carrying the window
-	// to a 2560x1440 screen. The remembered 938 came back and half their display sat idle.
+	// That argument was wrong in a way the owner's report made obvious: the phone's fit mode
+	// changed the height of his screen and left half of it idle, 2026-08-09, after carrying the
+	// window to a 2560x1440 screen. The remembered 938 came back and half their display sat idle.
 	//
 	// **And it is the same defect pointed both ways.** They reported a height that shrank; the same
 	// line would stamp a stale height over a window they had made TALLER while the fit was on, and
@@ -1164,10 +1165,11 @@ func currentHeight(ctx context.Context, t Terminal, id string) (int, error) {
 //
 // # A resize is not effective when the command returns
 //
-// The owner said it first - *"попробуйте сначала медленно мануально"* - and by hand it is obvious: a
-// person pauses without thinking about it and sees the window move. A script that resizes and reads
-// the geometry back immediately can read the OLD value and conclude nothing happened, which is exactly
-// the silence a rejected command produces. Two different causes, one indistinguishable reading.
+// The owner said it first - try it slowly by hand before anything else - and by hand it is obvious:
+// a person pauses without thinking about it and sees the window move. A script that resizes and
+// reads the geometry back immediately can read the OLD value and conclude nothing happened, which
+// is exactly the silence a rejected command produces. Two different causes, one indistinguishable
+// reading.
 //
 // # Waiting for STABILITY, not for equality
 //
@@ -1445,8 +1447,8 @@ func CloseStraySession(ctx context.Context, t Terminal, dir string) error {
 // from a parameter, or accepts one over the wire - which is what makes "close the session we just
 // created" impossible to turn into "close a session" by editing one line.
 //
-// The owner's view jumps to this session while it exists. They accepted that -
-// *"Это тоже окей не проблема"* - so there is no session.select putting it back, and that absence is
+// The owner's view jumps to this session while it exists. They accepted that, so there is no
+// session.select putting it back, and that absence is
 // a decision recorded in the allowlist.
 func withCalibrationSession(ctx context.Context, t Terminal, dir string, body func(sessionID string) error) error {
 	created, err := t.NewSession(ctx, CalibrationCommand, CalibrationSessionName)

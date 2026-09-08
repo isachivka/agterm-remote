@@ -44,17 +44,17 @@ func TestTheLengthCapIsExactlyWhereItSaysItIs(t *testing.T) {
 
 // **The cap counts RUNES, and a test written only in ASCII cannot tell.**
 //
-// This is the assertion the whole unit choice rests on: `len(s)` would give a Cyrillic name half the
-// allowance of an English one, so the owner writing a Russian workspace name — which they do — would
-// hit a limit an English speaker never sees. Sixty-four two-byte runes is 128 bytes, so a
-// byte-counting implementation fails right here.
+// This is the assertion the whole unit choice rests on: `len(s)` would give a name written outside
+// ASCII half the allowance of an English one, so anyone naming a workspace in their own alphabet
+// would hit a limit an English speaker never sees. The rune below is two bytes in UTF-8, so
+// sixty-four of them are 128 bytes and a byte-counting implementation fails right here.
 func TestTheCapIsInRunesAndNotInBytes(t *testing.T) {
-	cyrillic := strings.Repeat("я", maxLabelRunes)
-	if len(cyrillic) <= maxLabelRunes {
-		t.Fatalf("this test cannot detect the bug it exists for: %d bytes is within the rune cap", len(cyrillic))
+	twoByteRunes := strings.Repeat("λ", maxLabelRunes)
+	if len(twoByteRunes) <= maxLabelRunes {
+		t.Fatalf("this test cannot detect the bug it exists for: %d bytes is within the rune cap", len(twoByteRunes))
 	}
-	if _, err := Label(cyrillic); err != nil {
-		t.Errorf("a %d-rune Cyrillic name was refused, so the cap is counting bytes: %v", maxLabelRunes, err)
+	if _, err := Label(twoByteRunes); err != nil {
+		t.Errorf("a %d-rune non-ASCII name was refused, so the cap is counting bytes: %v", maxLabelRunes, err)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestLabelErrorsNeverQuoteTheInput(t *testing.T) {
 	// Every one of these must be REFUSED, or it contributes nothing — which is asserted rather than
 	// assumed, because a leak test whose inputs are all accepted passes for free.
 	secrets := []string{
-		strings.Repeat("хозяйская", 9), // over the cap
+		strings.Repeat("ιδιοκτητη", 9), // over the cap
 		strings.Repeat("secret", 40),   // over the cap
 		"pass\x00word",                 // a control character
 		"   ",                          // empty after trimming
@@ -110,7 +110,7 @@ func TestLabelErrorsNeverQuoteTheInput(t *testing.T) {
 		}
 		// And the substring leak: a message quoting the offending run of characters is the same
 		// disclosure arriving one piece at a time.
-		for _, word := range []string{"хозяйская", "secretsecret", "password", "pass"} {
+		for _, word := range []string{"ιδιοκτητη", "secretsecret", "password", "pass"} {
 			if strings.Contains(secret, word) && strings.Contains(message, word) {
 				t.Errorf("the error leaks part of the name (%q): %q", word, message)
 			}

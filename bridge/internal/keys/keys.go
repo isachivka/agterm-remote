@@ -78,8 +78,8 @@ var ErrEmpty = errors.New("nothing to type")
 //     owner asked for Ctrl-A and Ctrl-E by name - a phone keyboard has no Home or End that a shell's
 //     line editor listens to, so neither end of a long command was reachable from the phone at all.
 //
-//     **Ctrl-D (0x04, "eof") was REMOVED the same day**, at their request: *"ctrl+d кстати я вообще
-//     не знаю что зачем - можешь убрать"*. It is deleted from the map rather than merely left
+//     **Ctrl-D (0x04, "eof") was REMOVED the same day**, at their request: they did not know what
+//     it was for and asked for it to go. It is deleted from the map rather than merely left
 //     unoffered by the phone, because an allowlist is the minimum a caller may ask for and not a
 //     catalogue of what was once on the bar. Leaving 0x04 reachable with no button behind it widens
 //     what a taken phone can send and buys nobody anything - end-of-input closes a shell. One line to

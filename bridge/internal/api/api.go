@@ -5,7 +5,8 @@
 // when there were two and was never a property anybody was holding — the invariant is the closed set,
 // not its size, and a sentence that has to be edited every time the set grows is a sentence that ends
 // up lying. It grew by amendment each time, every one of them recorded: window geometry, typing, a
-// file drop, and on 2026-07-31 the four verbs that let the owner create and rename from their phone.
+// file drop, and on 2026-07-31 the four verbs that let the owner create and rename from their
+// phone.
 //
 // The caller never supplies an agterm command. It picks a verb from a closed set, and this package
 // constructs the agterm request itself from validated fields. That is what makes the closed set
@@ -108,7 +109,8 @@ type Request struct {
 	// It picks the target the search aims at, and **it is part of the cache key** - see
 	// resize.fitKey, which is (display, box width, character width). This comment said the opposite
 	// until 2026-08-06, and it was wrong from the day the character width joined the key. Corrected
-	// rather than deleted because it was read while working out what the key was made of, and a comment that describes a key which is not the key costs the next reader the same hour.
+	// rather than deleted because it was read while working out what the key was made of, and a
+	// comment that describes a key which is not the key costs the next reader the same hour.
 	CharacterWidthMilliDp int `json:"character_width_milli_dp,omitempty"`
 	// MarginDp is recorded with the fit so a human can see why a key changed. Not part of any lookup.
 	MarginDp int `json:"margin_dp,omitempty"`
@@ -390,7 +392,8 @@ const (
 	// kind of write and the largest - see internal/dropoff. Requested by the owner on 2026-07-30.
 	VerbFile = "file"
 
-	// The four creating and renaming verbs, added 2026-07-31 so the owner can do both from the phone.
+	// The four creating and renaming verbs, added 2026-07-31 so the owner can do both from the
+	// phone.
 	//
 	// **Dotted names, unlike the five above, and that is deliberate.** `create` and `rename` alone do
 	// not say what they act on, and this set has two of each. The name carries the noun rather than
@@ -408,8 +411,8 @@ const (
 	//
 	// Every verb above this line either reads, or writes something that can be undone by writing
 	// again. These cannot. A closed session and a deleted workspace do not come back, and a phone
-	// that has been taken can now reach both - which is written here and in the allowlist, so nobody
-	// later reads this list and thinks they crept in.
+	// that has been taken can now reach both - which is written here and in the allowlist, so
+	// nobody later reads this list and thinks they crept in.
 	//
 	// The guard is the owner's gesture, not this package: the phone offers Delete only inside a modal
 	// that a long press opened. What this package guarantees is narrower and is all it can guarantee -
@@ -429,8 +432,8 @@ const (
 	// [agterm.Client.OpenSplitPane], where all three states are measured.
 	//
 	// **No confirmation, and that is the owner's ruling rather than an omission.** He specified one
-	// tap doing the whole thing — *"если сессия есть мы её показываем, если её нет мы её создаём и
-	// потом показываем"* — after the mis-tap risk was put to him.
+	// tap doing the whole thing — show the pane if the session has one, make it first if it does
+	// not — after the mis-tap risk was put to him.
 	VerbPaneOpen = "pane.open"
 
 	// VerbPaneShow shows one pane at the full width of the terminal area.
@@ -925,8 +928,8 @@ func gone(kind, message string) string {
 // # Why the FALLBACK is the load-bearing part, not the two translations
 //
 // The design predicted this exact case in July, drafted the sentence to show — *"agterm has not
-// opened this session"* — and it was never wired. In the meantime agterm's wording for it CHANGED, from
-// `session not realized` to what is matched below. A month, one rewording.
+// opened this session"* — and it was never wired. In the meantime agterm's wording for it CHANGED,
+// from `session not realized` to what is matched below. A month, one rewording.
 //
 // The two matches handle what we know today. **The default handles the next rewording**, which is the
 // one thing certain to happen: when a prefix stops matching, the owner reads our sentence rather than
@@ -937,8 +940,9 @@ func unreadable(message string) Response {
 		// The rewrite that already exists, on the path that never called it. Five verbs did.
 		return Response{OK: false, Error: gone("session", message)}
 	case strings.Contains(message, "surface buffer"):
-		// The sentence the design drafted in July, finally used. `select` would fix it and mutates the owner's laptop,
-		// so this says what is true and offers nothing that reaches over and changes their screen.
+		// The sentence the design drafted in July, finally used. `select` would fix it and mutates
+		// the owner's laptop, so this says what is true and offers nothing that reaches over and
+		// changes their screen.
 		return Response{
 			OK:     false,
 			Error:  "Your laptop has not opened this session yet. Open it on the Mac, then try here.",

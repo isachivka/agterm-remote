@@ -190,8 +190,8 @@ func TestAHiddenSidebarBuysAMeasurement(t *testing.T) {
 // --- Calibration: the sidebar stage -------------------------------------------------------------------
 
 // 37 columns needs a 599-point window with the owner's chrome, and the window will not go below 640.
-// Before the sidebar stage existed this press ended in "calibration ended on 41 columns having asked
-// for 37" every time.
+// Before the sidebar stage existed this press ended in "calibration ended on 41 columns having
+// asked for 37" every time.
 func TestAWindowPinnedAtItsFloorWidensTheSidebar(t *testing.T) {
 	term, store, dir := fresh(t)
 	term.floorPoints = 640

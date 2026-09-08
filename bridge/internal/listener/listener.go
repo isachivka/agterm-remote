@@ -52,9 +52,9 @@
 //
 // **Per-source blocking is only meaningful while the connection's peer address IS the caller's
 // address.** That was assumed rather than written down, and it stopped being true the moment the
-// transport became a proxied one: a TLS-terminating proxy terminates TLS at its own end and connects
-// over the LAN, so every connection's peer is the proxy and sourceAddr returns the same host for
-// everybody.
+// transport became a proxied one: a TLS-terminating proxy terminates TLS at its own end and
+// connects over the LAN, so every connection's peer is the proxy and sourceAddr returns the same
+// host for everybody.
 //
 // A per-source counter over a single collapsed source **is a global ceiling wearing a per-source
 // costume** - five failed handshakes and every caller is refused, the owner included, for the rest of

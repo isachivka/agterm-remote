@@ -10,8 +10,8 @@ import (
 //
 // **The only verb in this bridge that puts bytes on a pty.** `resize` changes the shape of a window
 // and can carry nothing into it; this runs whatever the owner typed. Authorised by the owner on
-// 2026-07-29, reversing this bridge's original ruling — see the allowlist entry, which records it as
-// their decision rather than as an inevitability.
+// 2026-07-29, reversing this bridge's original ruling — see the allowlist entry, which records it
+// as their decision rather than as an inevitability.
 //
 // # What the caller may say, and what it may not
 //

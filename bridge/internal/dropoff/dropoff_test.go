@@ -38,7 +38,7 @@ func TestOrdinaryNamesAreAcceptedUnchanged(t *testing.T) {
 		"notes.md",
 		"IMG_20260730_0042.jpg",
 		"docker-compose.yml",
-		"отчёт.txt",
+		"έκθεση.txt",
 		"日本語.pdf",
 		"a file with spaces.log",
 		"v1.2.3-rc1.patch",

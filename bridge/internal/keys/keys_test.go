@@ -60,7 +60,7 @@ func TestOrdinaryTextGoesThroughUnchanged(t *testing.T) {
 	for _, text := range []string{
 		"ls -la",
 		"git commit -m \"fix: the thing\"",
-		"привет",
+		"καλημέρα",
 		"echo '日本語'",
 		"café",
 		"grep -r 'x' . | wc -l",
@@ -311,7 +311,7 @@ func TestTheC0BytesAreExactlyTheOnesNamedInTheComment(t *testing.T) {
 // **A key that is no longer offered is no longer REACHABLE.** That is the difference between an
 // allowlist and a catalogue.
 //
-// Ctrl-D was on the bar and the owner had it removed - *"я вообще не знаю что зачем"*. Taking the
+// Ctrl-D was on the bar and the owner had it removed, not knowing what it was for. Taking the
 // button away while leaving 0x04 in the map would keep it sendable by anything that has got past
 // pairing, for the benefit of nobody: end-of-input closes a shell. This asserts the removal happened
 // where it counts, and that the byte did not simply reappear under a different name.

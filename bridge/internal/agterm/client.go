@@ -377,9 +377,9 @@ type Session struct {
 	// whose second pane is merely collapsed on the Mac — and the phone can read a collapsed pane
 	// perfectly, so those two states must not look alike. See [Session.HasSplitPane].
 	Surfaces []Surface `json:"surfaces"`
-	// Split is agterm's own `isSplit`: **both panes are SHOWN**. This field was once removed because
-	// it was the wrong thing to DECIDE on, and is back because it is the right thing to REPORT. The
-	// two are not in tension.
+	// Split is agterm's own `isSplit`: **both panes are SHOWN**. This field was once removed
+	// because it was the wrong thing to DECIDE on, and is back because it is the right thing to
+	// REPORT. The two are not in tension.
 	//
 	// ### The distinction the whole diagnosis turns on
 	//
@@ -440,9 +440,10 @@ type Surface struct {
 	//
 	// **Existence and visibility are different questions and this is the one that is not asked.**
 	// [Session.HasSplitPane] deliberately ignores it: a pane collapsed on the Mac still reads
-	// perfectly from the phone, which is the whole of that distinction. What this adds is the ability for the
-	// log to say which of the two states the owner was in when a fit went wrong, because "one pane" and
-	// "two panes, one hidden" produce very different column counts and looked identical in the record.
+	// perfectly from the phone, which is the whole of that distinction. What this adds is the
+	// ability for the log to say which of the two states the owner was in when a fit went wrong,
+	// because "one pane" and "two panes, one hidden" produce very different column counts and
+	// looked identical in the record.
 	Visible bool `json:"visible"`
 }
 
@@ -591,17 +592,17 @@ func (c *Client) Windows(ctx context.Context) ([]Window, error) {
 
 // ResizeWindow sets a window's frame, in points.
 //
-// **This is the one write this binary performs**, authorised by the owner on 2026-07-29. It changes the SHAPE of the owner's terminal and can carry nothing into it: no
-// keystroke, no control character, no command. The command name is a literal here and is never
-// assembled from anything a caller sent - the caller supplies a column count, and this package turns
-// that into points.
+// **This is the one write this binary performs**, authorised by the owner on 2026-07-29. It changes
+// the SHAPE of the owner's terminal and can carry nothing into it: no keystroke, no control
+// character, no command. The command name is a literal here and is never assembled from anything a
+// caller sent - the caller supplies a column count, and this package turns that into points.
 // Type sends keystrokes to a session.
 //
 // **This is the second write this binary performs, and it is a different KIND from the first.**
 // window.resize changes the shape of a container and can carry nothing into it. This puts bytes on a
 // pty, which is to say it runs commands on the owner's laptop. The original ruling for this bridge
-// named session.type as the example of what must never appear here; the owner reversed that on 2026-07-29
-// and the allowlist entry records it as their decision rather than as an inevitability.
+// named session.type as the example of what must never appear here; the owner reversed that on
+// 2026-07-29 and the allowlist entry records it as their decision rather than as an inevitability.
 //
 // `text` is bytes, already validated by internal/keys. Nothing here inspects or transforms them: a
 // second check in a second place is a second thing to get wrong, and the one that exists is pure and
@@ -660,9 +661,8 @@ func (c *Client) ResizeWindow(ctx context.Context, id string, width, height int)
 //
 // Measuring the terminal's width against whatever happens to be in the owner's working session was
 // the defect at the root of three failed attempts at the width feature: the content moves, so the
-// measurement moves. The owner's ruling on 2026-07-30 was to stop doing that -
-// *"для калибровки нельзя только использовать текущую сессию, нужно создавать специальную"* - and to
-// accept a second or two of waiting in exchange.
+// measurement moves. The owner's ruling on 2026-07-30 was to stop doing that - calibration gets a
+// session of its own, made over the socket - and to accept a second or two of waiting in exchange.
 //
 // `command` means the calibration never needs session.type. The session prints what it prints because
 // of what it was started as, so the input verb stays out of this path entirely.
@@ -688,9 +688,9 @@ func (c *Client) NewSession(ctx context.Context, command, name string) (string, 
 // # Two callers, two different rules, and neither one is "anybody with an id"
 //
 // This used to say *only ever an id this bridge got back from [NewSession]*. That was the whole
-// safety argument until 2026-07-31, when the owner asked to close sessions from their phone:
-// *"нужна кнопочка чтобы сессии и workspace иметь возможность закрыть"*. So the rule is now stated
-// per caller, because the two are not the same and collapsing them would lose what protects each.
+// safety argument until 2026-07-31, when the owner asked for a button that closes a session or a
+// workspace from their phone. So the rule is now stated per caller, because the two are not the
+// same and collapsing them would lose what protects each.
 //
 //   - **Calibration.** Unchanged, and it does not relax by one word: it closes only the session it
 //     made, in the same operation, held in a variable. `close(created)` is the feature;
@@ -857,8 +857,7 @@ func (c *Client) NewWorkspace(ctx context.Context) (string, error) {
 // agterm focuses what session.new creates, confirmed on 2026-07-31 — the new session came back
 // `active`. There is no flag to suppress it. So pressing + on the phone changes what their laptop is
 // showing, which is recorded here, in the allowlist, and in the PR body rather than being left for
-// them to discover when the screen jumps. They accepted exactly this cost for calibration:
-// *"Это тоже окей не проблема"*.
+// them to discover when the screen jumps. They accepted exactly this cost for calibration.
 //
 // **No command and no cwd are sent**, and the phone has no way to supply either. A command arriving
 // from the wire is the thing the whole allowlist exists to prevent.
@@ -909,7 +908,7 @@ func (c *Client) RenameWorkspace(ctx context.Context, id, name string) error {
 //
 // It was ruled permitted for one purpose - session.new focuses what it creates, so calibration moves
 // the owner's view, and restoring it looked like the courteous thing. The owner overruled that on
-// 2026-07-30: *"Это тоже окей не проблема"*. The jump is fine.
+// 2026-07-30: the jump is fine.
 //
 // Their answer is strictly better than the design it replaced: less code, one fewer permission the
 // bridge carries forever, and one fewer thing to go wrong on an error path. A narrow allowlist is the
