@@ -6,11 +6,11 @@
 //
 // # It is a child process, not a service
 //
-// This binary is started by the menu-bar app that owns the Mac side, and it is meant to die with it.
-// There is no launchd job, no plist and no installer: the app knows where its own state directory is
-// and passes it, along with the address it decided to listen on. That is why there are flags here
-// and no configuration file - the parent already holds every one of these answers, and a file would
-// be a second copy of them that can disagree.
+// This binary is started by the menu-bar app that owns the Mac side, and it is meant to die with
+// it. There is no launchd job, no plist and no installer: the app knows where its own state
+// directory is and passes it, along with the address it decided to listen on. That is why there are
+// flags here and no configuration file - the parent already holds every one of these answers, and a
+// file would be a second copy of them that can disagree.
 //
 // # No default address, ever
 //
@@ -66,6 +66,18 @@ const (
 // phone stops working, most likely while they are away from the only machine that could fix it.
 const identityLifetime = 20 * 365 * 24 * time.Hour
 
+// How long a process that LOST the minting race waits for the winner to finish writing the pair.
+//
+// Two starts against the same empty state directory both see no identity and both mint one. Only
+// one of them may install it, and the other has to end up holding the winner's certificate rather
+// than its own - so it waits for a file it can see is being written. The budget is generous because
+// the cost of being wrong is asymmetric: waiting two seconds on a first start is nothing, and
+// giving up early means starting with a key that does not match the certificate the phone pinned.
+const (
+	identityWaitBudget = 2 * time.Second
+	identityWaitStep   = 10 * time.Millisecond
+)
+
 func main() {
 	listen := flag.String("listen", "", "host:port to listen on (required)")
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
@@ -76,6 +88,13 @@ func main() {
 
 	if *listen == "" || *stateDir == "" {
 		fmt.Fprintln(os.Stderr, "--listen and --state-dir are required")
+		os.Exit(2)
+	}
+	// A negative pid is not a process this or any other program can wait on, so it is a typo rather
+	// than an instruction. Refused here rather than logged verbatim: a flag that accepts a value it
+	// can never act on is a flag that reports success for a mistake.
+	if *parent < 0 {
+		fmt.Fprintln(os.Stderr, "--parent-pid must be a pid, or 0 to disable")
 		os.Exit(2)
 	}
 	if err := run(*listen, *socket, *stateDir, *logPath, *parent); err != nil {
@@ -101,9 +120,31 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// to reach, since enrolment happens over this listener. An empty list accepts nobody, so the
 	// door is shut in the only sense that matters; it is not also locked against the person holding
 	// the key.
+	//
+	// **What the phone list is read into is a snapshot, and it is taken here.** ServerConfig is
+	// built once, below, from the certificates this store holds at THIS moment, and the tls.Config
+	// keeps that closure for the life of the process. So a phone that enrols while the bridge is
+	// running is written to disk and is not accepted until the bridge is restarted. That is a fact
+	// about this wiring rather than about the store, it is written down because a reader will
+	// otherwise assume the listener re-reads, and whatever adds enrolment has to close it - by
+	// rebuilding the config, or by giving the verifier the store instead of a slice.
 	peers, err := trust.Open(stateDir)
 	if err != nil {
 		return err
+	}
+
+	// The state directory's mode is part of what authenticates the LOCAL control socket, so it is
+	// enforced rather than assumed.
+	//
+	// trust.Open creates the directory 0700, but MkdirAll applies a mode only when it CREATES - a
+	// directory the parent made at 0755, or one an older run left behind, keeps whatever it has.
+	// This used to be asserted in a comment two lines further down and was simply not true in that
+	// case, which left peers.json and the resize cache readable by anyone on the machine.
+	//
+	// Not fatal if the chmod fails: the key is written 0600 and the control socket is chmod'ed 0600
+	// in its own package, so this is the outer of two layers rather than the only one.
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		log.Printf("could not set the state directory to 0700: %v", err)
 	}
 
 	own, err := identity(stateDir)
@@ -114,15 +155,16 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	if socketPath == "" {
 		socketPath = agterm.DefaultSocketPath()
 	}
-	// The resize cache lives in the state directory, which is 0700. It holds a points-per-column line
-	// per display and the geometry to put back - no session name, no text.
+	// The resize cache lives in the state directory, whose mode was set above. It holds a
+	// points-per-column line per display and the geometry to put back - no session name, no text.
 	handler := api.New(agterm.New(socketPath), stateDir)
 
-	// false: this bridge may stand behind a TLS-terminating proxy, and behind one every connection's
-	// peer is the proxy rather than the caller. Per-source blocking over a single collapsed source is
-	// a global ceiling wearing a per-source costume - five failed handshakes and everybody is refused,
-	// the owner included. The concurrency bound in the listener does the real work either way. See
-	// internal/listener, where the argument exists precisely so this is said rather than defaulted.
+	// false: this bridge may stand behind a TLS-terminating proxy, and behind one every
+	// connection's peer is the proxy rather than the caller. Per-source blocking over a single
+	// collapsed source is a global ceiling wearing a per-source costume - five failed handshakes
+	// and everybody is refused, the owner included. The concurrency bound in the listener does the
+	// real work either way. See internal/listener, where the argument exists precisely so this is
+	// said rather than defaulted.
 	srv := listener.New(pinning.ServerConfig(own, peers.Certificates()), handler, false)
 
 	tcp, err := net.Listen("tcp", listenAddr)
@@ -131,10 +173,10 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	}
 	defer tcp.Close()
 
-	// A proxy in front may terminate its own TLS and reconnect over the LAN, so a client certificate
-	// cannot survive the trip and the pinned mTLS has to run INSIDE the proxied stream. The front
-	// door is a net.Listener, so the listener above is unchanged and never learns that a proxy, an
-	// HTTP request or a WebSocket frame exists. Pinning is not weakened to fit the proxy.
+	// A proxy in front may terminate its own TLS and reconnect over the LAN, so a client
+	// certificate cannot survive the trip and the pinned mTLS has to run INSIDE the proxied stream.
+	// The front door is a net.Listener, so the listener above is unchanged and never learns that a
+	// proxy, an HTTP request or a WebSocket frame exists. Pinning is not weakened to fit the proxy.
 	ln := frontdoor.Listen(tcp)
 	defer ln.Close()
 
@@ -143,8 +185,8 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	go func() { <-ctx.Done(); ln.Close() }()
 
 	// The address, and how many phones may reach it. No fingerprints: a fingerprint identifies the
-	// owner's phone, this log is a file anything that can read the disk can read, and a count is what
-	// a person needs in order to know whether pairing worked. No version banner and no build
+	// owner's phone, this log is a file anything that can read the disk can read, and a count is
+	// what a person needs in order to know whether pairing worked. No version banner and no build
 	// identifier either - the restraint that keeps them off the wire keeps them out of the log.
 	log.Printf("listening on %s", listenAddr)
 	log.Printf("paired phones: %d", len(peers.Peers()))
@@ -170,9 +212,9 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 		log.Printf("%v", err)
 	}
 
-	// The LOCAL door: a unix socket in the state directory, for the owner's own commands on this Mac.
-	// It is not a second front door - it has no address off this machine, and the directory's 0700 is
-	// what authenticates it. See internal/control.
+	// The LOCAL door: a unix socket in the state directory, for the owner's own commands on this
+	// Mac. It is not a second front door - it has no address off this machine, and the directory's
+	// 0700 is what authenticates it. See internal/control.
 	//
 	// Not fatal: a bridge that refused to start because the control socket could not be created would
 	// take the phone offline to protect a convenience.
@@ -236,8 +278,8 @@ func identity(stateDir string) (tls.Certificate, error) {
 		return tls.Certificate{}, fmt.Errorf("mint bridge identity: %w", err)
 	}
 	// 0700 on the directory, 0600 on both files. The key is the one secret this process holds, and
-	// the certificate is written at the same mode because nothing needs to read either of them except
-	// this process and the app that started it.
+	// the certificate is written at the same mode because nothing needs to read either of them
+	// except this process and the app that started it.
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return tls.Certificate{}, fmt.Errorf("state directory: %w", err)
 	}
