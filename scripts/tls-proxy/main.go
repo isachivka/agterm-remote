@@ -1,3 +1,5 @@
+//go:build proxy
+
 // A stand-in for a router that publishes a Mac by PROXYING it, for scripts/enrol-end-to-end.sh.
 //
 // # Why this exists rather than a note saying the proxied route was reasoned about

@@ -102,7 +102,8 @@ done
 
 if $proxied; then
     echo "== starting the proxy: HTTPS on $front, HTTPS to $port"
-    (cd "$root/scripts/tls-proxy" && go build -o "$work/tls-proxy" .)
+    # -tags proxy: the program is behind a tag so no ordinary build compiles it. See its own doc.
+    (cd "$root/scripts/tls-proxy" && go build -tags proxy -o "$work/tls-proxy" .)
     # The CA is kept between runs, beside the proxy, because the emulator has it INSTALLED. A fresh
     # one every start is a certificate the phone has never trusted, and it fails looking exactly like
     # the thing under test.
