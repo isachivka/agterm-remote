@@ -70,6 +70,22 @@ class PairedLaptop(private val directory: File) {
     }
 
     /**
+     * Moves the laptop to a new address, keeping the pinned certificate exactly as it was.
+     *
+     * **This is the whole of spec §5.5, and the certificate not moving is the point.** The pinned
+     * identity is independent of the address: a dynamic IP that changes is an address problem, not a
+     * trust problem, and an owner whose router renumbered must not have to re-pair — which would mint
+     * a new key on the phone and evict the peer their Mac has pinned.
+     *
+     * Does nothing when this phone is not paired. There is no address to change on a laptop that is
+     * not there, and writing one would create a profile with a certificate nobody chose.
+     */
+    fun setAddress(host: String, port: Int) {
+        val current = read() ?: return
+        write(current.copy(host = host, port = port))
+    }
+
+    /**
      * Forgets the laptop.
      *
      * Does **not** touch [PhoneIdentity]. Re-pairing with the same laptop should not need a new
