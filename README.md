@@ -27,12 +27,6 @@ cannot bundle it.
 Because the socket belongs to agterm, its shape is not under this project's control. Releases here
 name the agterm versions they were verified against.
 
-## What it is not
-
-- Not a relay or tunnel service. It does no NAT traversal; you arrange an address for your Mac.
-- Not a dashboard. Terminal sessions, nothing else.
-- Not an Android Auto app.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and
