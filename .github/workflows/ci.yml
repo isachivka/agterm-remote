@@ -49,9 +49,32 @@ jobs:
 
   # Not gated on anything. The guard scripts and their self-tests are already in the tree, and this
   # is the one job that must be able to fail from the first run.
+  #
+  # BOTH operating systems, and that is not thoroughness for its own sake. These are shell scripts
+  # over `git`, `grep`, `sed` and `iconv`, and the BSD and GNU versions of those do not agree. The
+  # maintainer's machine is the BSD one - every guard here is written and lived in on macOS - while
+  # CI was the GNU one, so a guard could be correct in the place it was tested and wrong in the place
+  # it is used, with nothing anywhere to say so.
+  #
+  # That is not hypothetical. It has happened twice. A claim about `\b` in a pattern was portable in
+  # one direction and not the other; and the decode check spent its whole life as
+  # `iconv ... >/dev/null`, which refuses VALID UTF-8 on macOS as soon as the conversion fills
+  # iconv's output buffer - a false positive in a required check, telling a contributor to convert a
+  # perfectly good file from an encoding it was never in. GNU iconv does not care where its output
+  # goes, so the Ubuntu leg passed on the broken code and on the fixed code alike. The regression
+  # test for it can only fail here, on this leg.
+  #
+  # Both legs are required checks. macOS runners are free for public repositories and this job takes
+  # seconds, so the cost of the second leg is nil next to one more defect that is only reachable on
+  # the machine the maintainer actually uses. `fail-fast: false`, because which leg fails - and
+  # whether the other one passed - is the entire diagnostic.
   guards:
-    name: guards
-    runs-on: ubuntu-latest
+    name: guards (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - run: bash scripts/tests/guards_test.sh
