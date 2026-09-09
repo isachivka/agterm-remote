@@ -34,8 +34,13 @@ class PhoneProvisionsItselfTest {
     @Before
     fun start_from_nothing() {
         PhoneIdentity.clear()
-        // The directory the retired share wrote into. Removed here as well as in the app, so a device
-        // that ran an older build does not carry a certificate around in app storage forever.
+        // The directory the retired share wrote into, cleared so this test starts from nothing.
+        //
+        // **Nothing in the application removes it any more**, and that is deliberate rather than an
+        // oversight: the code that swept up after retired routes went with the routes, and this
+        // application has never shipped a release, so no phone outside this repository has ever
+        // written either directory. If one is ever released with the old share in it, the sweep comes
+        // back - and it belongs in the app, not here.
         File(context.filesDir, "pairing/outgoing").deleteRecursively()
     }
 

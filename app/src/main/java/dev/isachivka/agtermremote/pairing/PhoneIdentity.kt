@@ -152,8 +152,9 @@ object PhoneIdentity {
             // **The breadth is only safe because this verdict no longer destroys anything.** It was a
             // sentence on a screen AND a deletion, and as a deletion one misclassification cost the
             // owner their pairing on 2026-07-29. Reporting broadly is right; acting broadly was not.
-            // See KeystorePhoneHalf.provision, which reports, against replace, which the owner asks
-            // for. Do not reconnect this verdict to a clear().
+            // Its one caller today is EnrolGate, which REFUSES a pairing on it - non-destructive, and
+            // the owner presses Try again. Do not reconnect this verdict to a clear(); the button
+            // that replaces a key belongs on a screen, pressed by the person who loses the pairing.
             SigningState.Unusable
         }
     }
@@ -172,7 +173,13 @@ object PhoneIdentity {
      * would be invisible on the one device it was written for.
      *
      * **This reports. It must never be wired to a deletion** — that is the exact shape of the defect
-     * this whole change is about. See [PhoneHalf.Provisioning.MadeTheOldWay].
+     * this whole change is about.
+     *
+     * It currently has no caller. The state it described - a key that signs today and will stop -
+     * used to be one of the pairing screen's eight states; five remain and none of them is it. Kept
+     * because the fact it reports is still true of keys minted before 2026-07-29 and cannot be
+     * derived from anything else: the flag is not recorded in this app, and a key minted under the
+     * old spec survives an app update untouched, so only the platform can be asked.
      */
     fun isBoundToRecentUnlock(): Boolean = keyInfo()?.isUserAuthenticationRequired == true
 

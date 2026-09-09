@@ -117,6 +117,31 @@ class PairingOutcomeTest {
         assertEquals("a screen that branches on a refusal kind is telling the owner about the wire", 1, sentences.size)
     }
 
+    /**
+     * **A failure that is this phone's own must not describe the Mac.** The screen is reached by
+     * somebody who has just successfully scanned a code, so a sentence about the far end sends them to
+     * look at the wrong machine - which is the defect this project has met more than any other.
+     */
+    @Test
+    fun `a failure of this phone's own key never blames the Mac`() {
+        listOf(PairingOutcome.KEY_CANNOT_SIGN, PairingOutcome.NO_IDENTITY).forEach { reason ->
+            assertTrue(
+                "it must name the phone as the thing at fault: $reason",
+                reason.contains("this phone", ignoreCase = true),
+            )
+            listOf("your Mac", "the Mac", "did not answer", "unreachable").forEach { blame ->
+                assertTrue(
+                    "copy for this phone's own key says \"$blame\", about a Mac that has not been " +
+                        "contacted at all: $reason",
+                    !reason.contains(blame, ignoreCase = true),
+                )
+            }
+        }
+        // The control: a failure that IS about the far end must contain what is forbidden above, or
+        // this asserts against a vocabulary that has simply moved on.
+        assertTrue(PairingOutcome.UNREACHABLE.contains("your Mac"))
+    }
+
     // --- The property the whole type exists for -------------------------------------------------
 
     /**
@@ -136,6 +161,10 @@ class PairingOutcomeTest {
             PairingOutcome.of(EnrollResult.NotTheLaptopInTheCode),
             PairingOutcome.of(EnrollResult.Unreachable(IOException("x"))),
             PairingOutcome.of(EnrollDecode.UnsupportedVersion(9)),
+            // The two the gate produces, which never reach the network at all. They are refusals like
+            // any other to this screen, and they owe the same sentence.
+            PairingOutcome.of(EnrollResult.Refused(PairingOutcome.KEY_CANNOT_SIGN)),
+            PairingOutcome.of(EnrollResult.Refused(PairingOutcome.NO_IDENTITY)),
         ) + EnrollRefusal.entries.map { PairingOutcome.of(EnrollDecode.NotAPairingCode(it)) }
 
         everyFailure.filterIsInstance<PairingUi.Failed>().forEach { failed ->
@@ -151,6 +180,7 @@ class PairingOutcomeTest {
 
     private companion object {
         /** Verbs that name an action. Short on purpose: this pins the property, not the copy. */
-        val IMPERATIVES = listOf("Open ", "Scan ", "Update ", "Check ", "Try ", "Point ", "Paste ")
+        val IMPERATIVES =
+            listOf("Open ", "Scan ", "Update ", "Check ", "Try ", "Point ", "Paste ", "Reinstall ")
     }
 }

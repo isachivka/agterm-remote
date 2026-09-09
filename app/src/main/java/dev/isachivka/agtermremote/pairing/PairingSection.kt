@@ -139,10 +139,17 @@ private fun Paste(onCode: (String) -> Unit) {
 /**
  * The phone is talking to the Mac and nothing has been stored yet.
  *
- * No cancel button. The exchange is one line out and one line in with a two-second deadline at the far
- * end, so a cancel would race the answer — and cancelling after the Mac has already pinned this phone
- * would leave the two disagreeing about whether they are paired, which is the one state this design
- * has no way to detect or repair.
+ * No cancel button, and the reason is weaker than it looks — which is worth saying rather than
+ * overclaiming. The exchange is one line out and one line in with a two-second deadline at the far
+ * end, so a cancel would race the answer, and losing that race after the Mac has pinned this phone
+ * leaves the two disagreeing about whether they are paired.
+ *
+ * **That state is already reachable without a button.** A rotation destroys the composition scope the
+ * enrolment runs in, so turning the phone mid-exchange cancels it exactly as a button would. So the
+ * argument for leaving the button out is not that the state is impossible; it is that a button would
+ * be a second, deliberate way into a state the owner cannot see. It self-heals on the next pairing:
+ * the Mac replaces the phone it pinned, and nothing on either side depends on the one that was
+ * abandoned.
  */
 @Composable
 private fun Working() {

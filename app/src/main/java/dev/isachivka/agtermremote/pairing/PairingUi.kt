@@ -110,6 +110,22 @@ object PairingOutcome {
         "That is not a pairing code. Point the camera at the code on your Mac, or paste the code text."
 
     /**
+     * This phone's key will not sign, so the pairing is refused **before** it is made.
+     *
+     * The enrolment itself would succeed - it presents no client certificate - and the phone would
+     * then be unable to reach the API, holding a receipt for a pairing that cannot work. See
+     * [EnrolGate], which is where the refusal happens and why it refuses rather than repairs.
+     */
+    const val KEY_CANNOT_SIGN =
+        "This phone's key can no longer prove who it is, so pairing would finish and then not work. " +
+            "Reinstall this app to make a new key, then pair again."
+
+    /** The key would not mint at all. Nothing about the Mac is wrong, so the sentence must not blame it. */
+    const val NO_IDENTITY =
+        "This phone could not make the key that proves who it is. Try again, and if it keeps failing, " +
+            "restart the phone."
+
+    /**
      * What the enrolment did, as a screen.
      *
      * [EnrollResult.Refused] already carries a sentence written by the code that knows what failed, and
