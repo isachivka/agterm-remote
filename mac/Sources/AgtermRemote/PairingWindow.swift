@@ -16,6 +16,12 @@ final class PairingWindow: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
+    /// True while this window is on screen. **A save can arrive from the onboarding window**, and the
+    /// app must be able to redraw what is open without opening what is not: `show` makes a window
+    /// when there is none, so calling it to refresh would put a pairing code in front of somebody who
+    /// asked for neither.
+    var isOpen: Bool { window != nil }
+
     /// Handed what was typed, as one string. The view never saves the address itself: parsing,
     /// refusing and writing live in `AddressEdit`/`SaveAddress`, where they are tested without a
     /// window.

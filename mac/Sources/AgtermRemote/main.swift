@@ -23,6 +23,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     private var item: NSStatusItem?
     private let pairing = PairingWindow()
+    private let onboarding = OnboardingWindow()
 
     /// **The single source of what is pressable and what is wired.** An action absent here gets no
     /// handler AND no enabled item, because `MenuModel.items` is given the same set. They cannot come
@@ -88,6 +89,51 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // assuming false means the menu is never briefly wrong after a relaunch.
         rebuildMenu()
         watchForTermination()
+        // **The one window that opens without being asked for**, and only while the three things do
+        // not all hold. A person who has finished setting up never sees it again; a person who has
+        // not cannot be expected to know that the way in is a menu-bar icon they have never met.
+        showOnboardingIfUnfinished()
+    }
+
+    /// The three facts, as they stand right now.
+    ///
+    /// Each is read fresh rather than remembered: agterm can be quit, an address can be cleared in
+    /// System Settings, and the bridge writes its trust store without telling this process. A cached
+    /// answer to any of the three is how an app comes to say something that stopped being true.
+    private func onboardingNow() -> Onboarding {
+        // The trust store is the bridge's own record that a phone completed enrolment. Credited to
+        // the address only if it happened after that address was stored - the rule is in
+        // `AddressPreference.recordEnrolment`, and it is why a new address starts unproven.
+        AddressPreference.recordEnrolment(
+            at: EnrolmentRecord.recordedAt(inStateDirectory: Self.stateDirectory))
+        return Onboarding(
+            // Named for the socket in the design document; what this app may look at is the running
+            // application. See `AgtermPresence` - the socket is on the far side of a boundary this
+            // app does not cross.
+            agtermSocketExists: AgtermPresence.isRunning(),
+            address: AddressPreference.stored(),
+            isPaired: AddressPreference.provenAt() != nil)
+    }
+
+    private func showOnboardingIfUnfinished() {
+        let now = onboardingNow()
+        guard now.step != .done else { return }
+        showOnboarding(now)
+    }
+
+    private func showOnboarding(_ now: Onboarding) {
+        // One save path for the whole app: both windows hand the typed string to the same function,
+        // which is the same `SaveAddress` with the same refusals. Two savers would be two opinions
+        // about what an address is.
+        onboarding.onSave = { [weak self] typed in self?.saveAddress(typed) }
+        onboarding.onShowPairingCode = { [weak self] in self?.openPairing(focusAddress: false) }
+        onboarding.onRecheck = { [weak self] in
+            guard let self else { return }
+            let again = onboardingNow()
+            onboarding.show(again, field: AddressField(AddressPreference.read()))
+            rebuildMenu()
+        }
+        onboarding.show(now, field: AddressField(AddressPreference.read()))
     }
 
     /// **The bridge dies with this app, and that is stated three times because two of them fail.**
@@ -174,17 +220,17 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
         switch outcome {
         case .saved(let address):
-            pairing.reportOnAddress(
+            report(
                 "Saved. Your phone will dial \(address.displayed), and the code below is built from it. "
                     + "Nothing has answered there yet — that is checked separately.")
         case .refused(let sentence), .notWritten(let sentence):
-            pairing.reportOnAddress(sentence)
+            report(sentence)
 
         case .needsConfirmation(let explanation, let question):
             // **Deliberate, not impossible.** A two-label name is a valid destination that looks like
             // the mistake of 2026-08-09, so it costs a second act rather than being prohibited — the
             // same shape as deleting a session on the phone.
-            pairing.reportOnAddress(explanation)
+            report(explanation)
             if confirmSuffix(explanation: explanation, question: question) {
                 return saveAddress(typed, confirmed: true)
             }
@@ -202,10 +248,25 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // about to add the missing label to the front of it.
         case .refused, .notWritten, .needsConfirmation: AddressField(text: typed)
         }
-        pairing.show(state, field: field)
+        // **Only the windows that are already open are redrawn.** Both of them can save, and a save
+        // from one must not conjure the other: somebody on the second onboarding step who presses
+        // Save has not asked to see a pairing code, and a window arriving unasked over their work is
+        // the same rudeness as a modal alert.
+        if pairing.isOpen { pairing.show(state, field: field) }
+        // The address they just typed may have been the second onboarding step, and a pane that
+        // stayed on "type an address" after one was saved would be showing a state that has stopped
+        // being true.
+        if onboarding.isOpen { onboarding.show(onboardingNow(), field: field) }
         // The menu's "Show the pairing code…" is enabled by whether an address exists, and one may have
         // just started existing.
         rebuildMenu()
+    }
+
+    /// One sentence, put in front of whoever is looking. The two windows edit the same address
+    /// through the same saver, so they say the same thing about it.
+    private func report(_ sentence: String) {
+        pairing.reportOnAddress(sentence)
+        onboarding.reportOnAddress(sentence)
     }
 
     /// **Stop, with the cost said BEFORE the press takes effect.**
@@ -250,7 +311,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             return openPairing(focusAddress: true)
         }
         do {
-            try bridge.start(listen: "0.0.0.0:\(address.port)", socket: nil)
+            // **`Address.listen`, not a string built here.** The dial address and the listen address
+            // are different addresses, and the decision about how one becomes the other - the port
+            // travels, the host never does - lives on the value with the reasoning attached to it.
+            try bridge.start(listen: Address(address).listen, socket: nil)
         } catch {
             // A start that could not happen at all: the binary vanished between launch and now, or
             // macOS is holding it because the app arrived by download. The error's own words, not a
@@ -464,6 +528,18 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             menu.addItem(line)
             menu.addItem(.separator())
         }
+        // **The address, and the word unproven, in the place people look.**
+        //
+        // Nothing on this Mac can say whether that address reaches it from outside - the argument is
+        // on the address pane of `OnboardingWindow`, beside the button that must never be added - so
+        // the menu reports the only thing that is known: whether a phone has ever come through it.
+        // Disabled, like the failure line above, because it is a fact rather than an action.
+        if let addressLine = Self.addressLine() {
+            let line = NSMenuItem(title: addressLine, action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            menu.addItem(line)
+            menu.addItem(.separator())
+        }
         for model in MenuModel.items(
             status: status, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin,
             implemented: implemented,
@@ -485,6 +561,20 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // reachability test checks.
         menu.autoenablesItems = false
         return menu
+    }
+
+    /// The address and what is known about it, or nil when there is no address to say anything about.
+    ///
+    /// **Unproven is not a warning and not a failure.** It is the resting state of every address until
+    /// a phone has come through it, and the word is chosen so that somebody reading the menu on a
+    /// perfectly working setup is told what has and has not been established rather than being told
+    /// something is wrong.
+    private static func addressLine() -> String? {
+        guard case .success(let address) = AddressPreference.read() else { return nil }
+        guard let proven = AddressPreference.provenAt() else {
+            return "\(address.displayed) — unproven"
+        }
+        return "\(address.displayed) — a phone paired through it on \(proven.formatted(date: .abbreviated, time: .shortened))"
     }
 
     /// One line for a menu, the whole of it for a tooltip. The bridge's own words can run to several
