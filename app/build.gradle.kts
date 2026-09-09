@@ -229,6 +229,28 @@ dependencies {
 // The cost is that editing any resource re-runs the unit tests. That is the correct trade: a test
 // suite that skips itself is worth less than one that occasionally runs when it did not need to.
 tasks.withType<Test>().configureEach {
+    // **The shared wire vectors, read from the repository ROOT and never from a copy in here.**
+    //
+    // `wire/enroll-payload-vectors.json` and `wire/enroll-payload-reject-vectors.json` are the
+    // contract between the Go encoder in `bridge/` and the Kotlin decoder that will read the QR
+    // code. The two cannot be compiled against each other and nothing else in the build connects
+    // them, so the bytes in those files are the only thing that does. A copy inside this module is
+    // exactly how they drift: the copy is what the Kotlin test pins, the original is what the Go
+    // test pins, and nothing notices they disagree until a phone will not pair. `wire/README.md`
+    // states the rule; `scripts/check-wire-vectors-consumed.sh` enforces it.
+    //
+    // Gradle does not put the repository root on a test's working directory, so it is passed
+    // explicitly. `error(...)` at the reading end makes a missing property a failure rather than a
+    // silently skipped test.
+    systemProperty("wire.dir", rootProject.layout.projectDirectory.dir("wire").asFile.absolutePath)
+    // And declared as an input, for the same reason as everything else in this block: a directory
+    // Gradle does not know a test reads is a directory whose change leaves the task UP-TO-DATE, and
+    // an UP-TO-DATE task reports success by not running. Editing a vector must re-run these tests -
+    // that is the entire mechanism.
+    inputs.dir(rootProject.layout.projectDirectory.dir("wire"))
+        .withPropertyName("sharedWireVectors")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // The three files `ReleasePleaseTest` reads, for exactly the reason above: it asserts facts that
     // live in build configuration rather than in the .apk, so without these the release-please
     // wiring could be broken by an edit and the test would report success by not running - which is

@@ -84,6 +84,7 @@ jobs:
       - run: ./scripts/check-no-addresses.sh
       - run: ./scripts/check-constant-time-tokens.sh
       - run: ./scripts/check-no-cyrillic.sh
+      - run: ./scripts/check-wire-vectors-consumed.sh
 
   bridge:
     name: bridge
