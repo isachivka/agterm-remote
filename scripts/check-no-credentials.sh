@@ -59,7 +59,7 @@ pattern="(${joined})[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^\"']+[\"']"
 # -e is not style. A pattern beginning with a character grep reads as the start of a bundle of
 # options exits 2, and with stderr discarded and the status consumed by an `if`, every file reports
 # clean.
-scan() { grep -InEi -e "$pattern" "$1" 2>/dev/null; }
+scan() { grep -anEi -e "$pattern" "$1" 2>/dev/null; }
 
 # --- The self-test ---------------------------------------------------------------------------------
 #
@@ -86,43 +86,34 @@ done
 rm -f "$probe"
 trap - EXIT
 
-# Tracked files only. Anything gitignored is not what this protects, and a credential has to be
-# tracked to be pushed.
-# The listing is captured and its status checked, rather than piped straight into the loop. A
-# failing `git ls-files` produces an empty list, the loop never runs, and the script prints OK and
-# exits 0 - a guard reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files)"; then
-  echo "::error::check-no-credentials.sh could not list the tracked files in '$root'."
-  echo "    Refusing to report a clean tree on the strength of an empty listing."
-  exit 2
-fi
+# The walk - which files are read, which are declined and which are refused - lives in
+# scripts/lib/tracked-files.sh, shared by every guard here. It is not a tidiness: this script used a
+# bare `git ls-files` and skipped in silence any path holding a byte above ASCII, so a password
+# inside a file named in Russian reported clean while the same bytes under an ASCII name were caught.
+# That defect was found and fixed in one guard while four others carried it verbatim, which is why
+# the mechanism is now in one place instead of four.
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
 
-self="scripts/check-no-credentials.sh"
-found=0
-while IFS= read -r path; do
-  [ "$path" = "$self" ] && continue
-  # ls-files prints repository-root-relative paths, so they are resolved against $root and not against
-  # wherever this was invoked from. Reading them relative to the caller's directory makes every file
-  # vanish and the whole check pass - silently, and only when it is pointed somewhere other than the
-  # current directory, which is exactly what anyone testing it would do.
-  file="$root/$path"
-  [ -f "$file" ] || continue
+# This script excludes itself: it is made of the field names it searches for.
+guard_self="scripts/check-no-credentials.sh"
 
-  if matches="$(scan "$file")"; then
-    echo "::error file=$path::looks like a credential was committed here"
-    # Line numbers only, never the matching text. Printing the credential into a CI log would
-    # finish the job the commit started.
-    echo "$matches" | while IFS= read -r line; do
-      echo "    line ${line%%:*}"
-    done
-    found=1
-  fi
-done <<< "$files"
+examine() { # $1 = path, $2 = the file to read, $3 = what it is
+  local matches
+  matches="$(scan "$2")" || return 1
+  echo "::error file=$1::$3 holds what looks like a credential"
+  # Line numbers only, never the matching text. Printing the credential into a CI log would finish
+  # the job the commit started.
+  echo "$matches" | while IFS= read -r line; do
+    echo "    line ${line%%:*}"
+  done
+  return 0
+}
 
-if [ "$found" -ne 0 ]; then
+guard_walk "$root" "check-no-credentials.sh" examine
+
+if [ "$guard_found" -ne 0 ]; then
   echo "::error::A service credential must never be committed. Change it on the service now -"
   echo "    assume it is published - then remove it from the working tree and from history."
   echo "    This app authenticates to nothing and never needs one."
-  exit 1
 fi
-echo "OK: no credential-shaped field in any tracked file."
+guard_finish "no credential-shaped field in any tracked file."

@@ -125,11 +125,13 @@ pattern="(${calls})|(${ops})|(${strcmp})"
 # preceded by a colon, a quote, a backtick or another slash. What that still cannot see is a `//`
 # inside a bare-backtick raw string.
 #
-# grep -I is on the pipe rather than on the file now, so it guards the stream instead of sniffing the
-# original. For Go source that is the same answer either way.
+# `-a`, not `-I`. Letting grep decide what is binary was a hole in every guard here: it calls any
+# file holding a NUL byte binary and skips it, while a NUL is perfectly valid UTF-8 - so one NUL
+# pasted into a source file laundered everything around it. Deciding what is readable is the shared
+# walk's job, where the decision is explicit and counted.
 scan() {
   sed -e 's|^[[:space:]]*//.*||' -e 's|\([^:"`/]\)//.*|\1|' "$1" 2>/dev/null \
-    | grep -InE -e "$pattern" \
+    | grep -anE -e "$pattern" \
     | grep -E "$tok"
 }
 
@@ -223,43 +225,40 @@ trap - EXIT
 
 # --- The scan --------------------------------------------------------------------------------------
 #
-# The listing is captured and its status checked rather than piped straight into the loop. A failing
-# `git ls-files` yields an empty list, the loop never runs, and the script prints OK - a guard
-# reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files 'bridge/internal/enroll/*.go')"; then
-  echo "::error::check-constant-time-tokens.sh could not list bridge/internal/enroll in '$root'."
-  echo "    Refusing to report a clean tree on the strength of an empty listing."
-  exit 2
-fi
-if [ -z "$files" ]; then
-  # The package is what this guard exists for. If it is gone or moved, this script is being asked a
-  # question about nothing, and must say so rather than pass.
-  echo "::error::check-constant-time-tokens.sh found no Go files under bridge/internal/enroll."
-  echo "    If the package moved, move this guard with it; a guard over an empty set is not a pass."
-  exit 2
-fi
+# The walk lives in scripts/lib/tracked-files.sh, shared by every guard here - including this one,
+# which is scoped to a single package and would otherwise have inherited the same defect the others
+# had: a bare `git ls-files` cannot name a path holding a byte above ASCII, and a Go file named in
+# Russian would have gone unexamined here exactly as it did there.
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
 
-found=0
-while IFS= read -r path; do
-  case "$path" in
-    *_test.go) continue ;;
-  esac
-  file="$root/$path"
-  [ -f "$file" ] || continue
+# The listing is limited to the package this guard is about. An empty result is an error rather than
+# a pass, and the library says so: a guard over an empty set is not a pass, and if the package moved,
+# this guard moves with it.
+guard_pathspec=("bridge/internal/enroll/*.go")
 
-  if matches="$(scan "$file")"; then
-    echo "::error file=$path::the enrolment token is compared without crypto/subtle here"
-    echo "$matches" | while IFS= read -r line; do
-      echo "    line ${line%%:*}"
-    done
-    found=1
-  fi
-done <<< "$files"
+guard_excluded() { # $1 = path
+  case "$1" in
+    # The package's own tests compare tokens freely - that is what a test does. The rule is about the
+    # code that runs against an unauthenticated caller.
+    *_test.go) return 0 ;;  esac
+  return 1
+}
 
-if [ "$found" -ne 0 ]; then
+examine() { # $1 = path, $2 = the file to read, $3 = what it is
+  local matches
+  matches="$(scan "$2")" || return 1
+  echo "::error file=$1::$3 compares the enrolment token without crypto/subtle"
+  echo "$matches" | while IFS= read -r line; do
+    echo "    line ${line%%:*}"
+  done
+  return 0
+}
+
+guard_walk "$root" "check-constant-time-tokens.sh" examine
+
+if [ "$guard_found" -ne 0 ]; then
   echo "::error::Compare the enrolment token with subtle.ConstantTimeCompare and nothing else."
   echo "    ==, bytes.Equal, reflect.DeepEqual and strings.Compare return on the first differing"
   echo "    byte. The caller on the other end of this comparison is unauthenticated and can retry."
-  exit 1
 fi
-echo "OK: the enrolment token is compared with crypto/subtle only."
+guard_finish "the enrolment token is compared with crypto/subtle only."

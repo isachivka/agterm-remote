@@ -88,7 +88,7 @@ allows=("$allow_ipv4" "" "")
 # reports clean.
 scan() { # $1 = pattern, $2 = allowed whole matches (may be empty), $3 = file
   local p="$1" a="$2" f="$3" hit match
-  grep -noEIi -e "$p" "$f" 2>/dev/null | while IFS= read -r hit; do
+  grep -noEai -e "$p" "$f" 2>/dev/null | while IFS= read -r hit; do
     match="${hit#*:}"
     if [ -n "$a" ] && printf '%s\n' "$match" | grep -qEi -e "^($a)$"; then
       continue
@@ -154,16 +154,26 @@ if ! files="$(git -C "$root" ls-files)"; then
   exit 2
 fi
 
-self="scripts/check-no-addresses.sh"
-found=0
-while IFS= read -r path; do
-  [ "$path" = "$self" ] && continue
-  case "$path" in
+# The walk - which files are read, which are declined and which are refused - lives in
+# scripts/lib/tracked-files.sh, shared by every guard here. It is not a tidiness: this script used a
+# bare `git ls-files` and skipped in silence any path holding a byte above ASCII, so an address and a
+# home directory inside a file named in Russian reported clean while the identical bytes under an
+# ASCII name were refused. The file most likely to carry a Russian name is the file most likely to
+# carry the owner's own words, so this was the worst place in the tree to be unable to look.
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+
+guard_self="scripts/check-no-addresses.sh"
+
+# The paths this guard leaves alone, each for its own stated reason. They are DECLINED rather than
+# skipped, so the summary counts them and nobody has to read this function to know how many files
+# went unexamined.
+guard_excluded() { # $1 = path
+  case "$1" in
     # scripts/tests/ holds this guard's fixtures - a detector for addresses cannot be tested without
     # strings that look like addresses.
-    scripts/tests/*) continue ;;
+    scripts/tests/*) return 0 ;;
     # The licence text is not ours to edit and contains nothing personal.
-    LICENSE) continue ;;
+    LICENSE) return 0 ;;
     # This is a hole. docs/superpowers/plans/ carries the plan document, and the plan document spells
     # out this guard's fixtures verbatim - so the guard cannot be run against it without failing on
     # its own test data. Nothing else protects that directory: an address pasted into the plan will
@@ -172,33 +182,34 @@ while IFS= read -r path; do
     #
     # Narrowed to plans/ deliberately: the spec under docs/superpowers/specs/ carries no fixtures and
     # is scanned like everything else. Excluding less costs nothing.
-    docs/superpowers/plans/*) continue ;;
+    docs/superpowers/plans/*) return 0 ;;
   esac
-  # ls-files prints repository-root-relative paths, so they are resolved against $root and not
-  # against wherever this was invoked from.
-  file="$root/$path"
-  [ -f "$file" ] || continue
+  return 1
+}
 
-  i=0
+examine() { # $1 = path, $2 = the file to read, $3 = what it is
+  local i=0 lines hit=1
   while [ "$i" -lt "${#patterns[@]}" ]; do
-    lines="$(scan "${patterns[$i]}" "${allows[$i]}" "$file" || true)"
+    lines="$(scan "${patterns[$i]}" "${allows[$i]}" "$2" || true)"
     if [ -n "$lines" ]; then
-      echo "::error file=$path::${names[$i]} was committed here"
+      echo "::error file=$1::$3 holds ${names[$i]}"
       # Line numbers and the category, never the matching text. The address is the private thing;
       # echoing it into a public CI log would publish it a second time.
       echo "$lines" | while IFS= read -r n; do
         echo "    line $n"
       done
-      found=1
+      hit=0
     fi
     i=$((i + 1))
   done
-done <<< "$files"
+  return "$hit"
+}
 
-if [ "$found" -ne 0 ]; then
+guard_walk "$root" "check-no-addresses.sh" examine
+
+if [ "$guard_found" -ne 0 ]; then
   echo "::error::An address, hostname or personal path must never be committed. Replace it with a"
   echo "    placeholder, or with an RFC 5737 documentation address (203.0.113.x), and remove it from"
   echo "    history if it has already been pushed."
-  exit 1
 fi
-echo "OK: no address, hostname or personal path in any tracked file."
+guard_finish "no address, hostname or personal path in any tracked file."
