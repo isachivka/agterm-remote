@@ -176,6 +176,17 @@ loop_fixture() { # name, expected exit; the fixture is written by the caller int
 }
 fresh_loop() { rm -rf loop && mkdir loop; }
 
+out() { # runs the guard, echoes its stdout
+  "$@" 2>/dev/null || true
+}
+says() { # name, expected substring of the guard's output
+  got="$(out "$cyrillic")"
+  case "$got" in
+    (*"$2"*) ;;
+    (*) echo "FAIL $1: the summary never said \"$2\""; printf '%s\n' "$got" | sed 's/^/        /'; fail=1 ;;
+  esac
+}
+
 russian='// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271 \321\215\321\202\320\276\n'
 english='// nothing to see here\n'
 
@@ -185,6 +196,12 @@ fresh_loop; printf '%b' "$russian" > "loop/$(printf 'Modal\320\236\320\272\320\2
 loop_fixture "cyrillic filename, russian body" 1
 fresh_loop; printf '%b' "$english" > "loop/$(printf 'Modal\320\236\320\272\320\275\320\276.swift')"
 loop_fixture "cyrillic filename, english body" 0
+# ...and it was read from the WORKING TREE, which is the assertion that catches a regression in the
+# listing itself. Dropping `-z` changes no verdict - the mode dispatch still finds the blob by its
+# object id and scans that, which is the belt to the listing's braces - so the only symptom is this
+# line moving to "from the index". Same lesson as the symlink mutation: when the verdict cannot move,
+# the accounting is the assertion.
+says "a non-ascii path is reached in the working tree" "scanned 3 from the working tree"
 
 # 2. A NUL byte in an otherwise ordinary source file. Again both halves.
 fresh_loop; printf '%b\000\n' "$russian" > loop/nul.swift
@@ -238,16 +255,6 @@ rm -rf loop && git add -A
 # That was the fourth defect of one shape - the guard declining to look at something and saying
 # nothing - so the cases below also assert the ACCOUNTING, which is the fix for the shape rather than
 # for its members. Each family of skip has to appear in the summary as a number.
-out() { # runs the guard, echoes its stdout
-  "$@" 2>/dev/null || true
-}
-says() { # name, expected substring of the guard's output
-  got="$(out "$cyrillic")"
-  case "$got" in
-    (*"$2"*) ;;
-    (*) echo "FAIL $1: the summary never said \"$2\""; printf '%s\n' "$got" | sed 's/^/        /'; fail=1 ;;
-  esac
-}
 
 # The target's name is Russian; the link's own body is that name. Caught whether or not the target
 # is present, because the blob is read rather than the filesystem followed.
@@ -259,7 +266,7 @@ loop_fixture "symlink to a russian name, target present" 1
 rm -f -- "$target"                    # exactly what a fresh clone of a filtered checkout leaves
 git add -A
 loop_fixture "symlink to a russian name, target absent" 1
-says "the symlink is reported as a name" "read 1 symlink target name(s)"
+says "the symlink is reported as a name" "scanned 1 symlink target name(s)"
 
 # A link pointing outside the repository at a file full of Russian. The blob is one line of path, so
 # this must be CLEAN - the content at the far end was never committed here.
@@ -279,17 +286,18 @@ printf '// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271\n' 
 git add -A && rm loop/staged-then-deleted.swift
 got="$(run "$cyrillic")"
 [ "$got" = "1" ] || { echo "FAIL staged, then deleted from the working tree: expected 1 got $got"; fail=1; }
-says "the index read is reported" "read 1 from the index"
+says "the index read is reported" "scanned 1 from the index"
 
 # Every family of skip is counted and named. A guard that declines to look at something without
 # saying so is how all four holes stayed invisible; these assert the numbers rather than the verdict.
 fresh_loop; printf '\211PNG\r\n\032\n\320\260\377\376\320\261' > loop/icon.png
 git add -A
-says "a declined binary asset is counted" "declined 1: binary asset(s)"
-says "the summary always states both totals" "declined 1)."
+says "a declined binary asset is counted" "declined 1 binary asset(s) by extension"
+says "the summary reconciles against the tracked count" "tracked 3: scanned 2, declined 1, refused 0"
 
-fresh_loop; git add -A
-says "a clean run still states its totals" "declined 0)."
+fresh_loop; printf 'nothing to see here\n' > loop/ordinary.md; git add -A
+says "a clean run still states its totals" "declined 0, refused 0"
+says "ordinary files are read from the working tree" "scanned 3 from the working tree"
 
 # An unreadable file names its real cause. It used to be reported as invalid UTF-8, which is the
 # wrong cause and sends whoever reads it to convert an encoding that was never the problem.
@@ -302,6 +310,93 @@ got="$(run "$cyrillic")"
 [ "$got" = "1" ] || { echo "FAIL an unreadable file is refused, not skipped: expected 1 got $got"; fail=1; }
 says "the permission message names its cause" "could not be opened for reading"
 chmod 644 loop/locked.txt
+
+rm -rf loop && git add -A
+
+# --- every guard walks the same listing -----------------------------------------------------------
+#
+# The first defect in this family - a path holding a byte above ASCII, C-quoted by `git ls-files`,
+# skipped in silence - was fixed in the Cyrillic guard while FOUR OTHER GUARDS carried it verbatim.
+# An address, a home directory, a password, a private key and a token inside a file named in Russian
+# passed every one of them; the identical bytes under an ASCII name were refused by every one of
+# them. The walk now lives in scripts/lib/tracked-files.sh and they all source it, so this case is
+# run against each of them rather than against the one that happened to be reviewed.
+#
+# The fixture is assembled at run time rather than written out. A literal token or key banner in this
+# file would be caught by the very guards it is meant to test, on the real repository, on every run.
+russian_name="$(printf '\320\236\320\272\320\275\320\276.md')"
+fresh_loop
+{
+  printf 'the bridge answers at 10.11.12.13:8443\n'
+  printf '/Users/somebody/.config/agterm\n'
+  printf 'pass%s = "hunter2-not-a-real-one"\n' word
+  printf -- '-----BEGIN RSA PRIVATE %s-----\n' KEY
+  printf 'gh%s_%s\n' p AAAAAAAAAAAAAAAAAAAAAAAA
+} > "loop/$russian_name"
+git add -A
+
+for guard in check-no-addresses check-no-credentials check-no-tokens check-no-private-keys; do
+  got="$(run "$here/../$guard.sh")"
+  [ "$got" = "1" ] || { echo "FAIL $guard over a russian filename: expected 1 got $got"; fail=1; }
+done
+
+# ...and the same guards must still be clean over an ordinary tree, or the case above proves only
+# that they fail on everything.
+fresh_loop; printf 'nothing to see here\n' > loop/plain.md; git add -A
+for guard in check-no-addresses check-no-credentials check-no-tokens check-no-private-keys; do
+  got="$(run "$here/../$guard.sh")"
+  [ "$got" = "0" ] || { echo "FAIL $guard over a clean tree: expected 0 got $got"; fail=1; }
+done
+
+# An entry whose blob cannot be read - a promisor or partial clone missing an object it lists. It was
+# `|| true` once: the blob came back empty, was scanned as nothing, and was COUNTED AS A READ. A
+# decline reported as a read is worse than a silent skip, because the accounting says it was checked.
+fresh_loop
+printf 'hello\n' > loop/vanishing.txt && git add -A
+object="$(git rev-parse ":loop/vanishing.txt")"
+rm loop/vanishing.txt && ln -s /dev/null loop/vanishing.txt     # index says regular, worktree says link
+rm -rf ".git/objects/$(printf '%s' "$object" | cut -c1-2)"
+got="$(run "$cyrillic")"
+[ "$got" = "1" ] || { echo "FAIL an unreadable blob is refused: expected 1 got $got"; fail=1; }
+says "the unreadable blob is refused, not counted" "refused 1"
+rm -f loop/vanishing.txt && git add -A
+
+# A conflicted merge lists one path three times, once per stage. Counting it three times would make
+# the totals irreconcilable for a reason that has nothing to do with what was scanned - and the
+# reconciliation is what makes an unexpected number legible.
+conflict="$(mktemp -d)/conflict"
+(
+  set -e
+  mkdir -p "$conflict" && cd "$conflict" && git init -q -b main .
+  git config user.email a@b && git config user.name a
+  printf 'base\n' > c.txt && git add -A && git commit -q -m base
+  git checkout -q -b other && printf 'theirs\n' > c.txt && git commit -q -am theirs
+  git checkout -q main && printf 'ours\n' > c.txt && git commit -q -am ours
+  git merge -q other >/dev/null 2>&1 || true
+)
+stages="$(cd "$conflict" && git ls-files -s | wc -l | tr -d ' ')"
+[ "$stages" = "3" ] || { echo "FAIL the conflict fixture: expected 3 staged entries, got $stages"; fail=1; }
+out_conflict="$(cd "$conflict" && "$cyrillic" 2>/dev/null || true)"
+case "$out_conflict" in
+  (*"tracked 1: scanned 1"*) ;;
+  (*) echo "FAIL a conflicted merge counts one path once:"; printf '%s\n' "$out_conflict" | sed 's/^/        /'; fail=1 ;;
+esac
+
+# A submodule gitlink: an entry with a commit id and no blob. There is nothing here to open, and the
+# files live in a repository with its own tree and its own run of this guard - so it is declined,
+# counted and named, rather than skipped in silence like everything else in this family was.
+fresh_loop
+(
+  set -e
+  mkdir -p loop/embedded && cd loop/embedded && git init -q .
+  git config user.email a@b && git config user.name a
+  printf 'x\n' > f.txt && git add -A && git commit -q -m x
+)
+# The warning about an embedded repository is the point of the fixture, not a problem with it.
+git -c advice.addEmbeddedRepo=false add -A 2>/dev/null
+got="$(run "$cyrillic")"
+[ "$got" = "0" ] || { echo "FAIL a gitlink is declined, not refused: expected 0 got $got"; fail=1; }
+says "the gitlink is counted and named" "declined 1 submodule gitlink(s)"
 
 rm -rf loop && git add -A
 

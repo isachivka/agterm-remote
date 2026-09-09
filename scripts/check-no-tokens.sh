@@ -32,7 +32,7 @@ pattern="${pattern%|}"
 # -e is not style. Two of these patterns begin with a character grep would otherwise read as the
 # start of a bundle of options; without -e it exits 2, and with stderr discarded and the status
 # consumed by an `if`, every file reports clean.
-scan() { grep -InE -e "$pattern" "$1" 2>/dev/null; }
+scan() { grep -anE -e "$pattern" "$1" 2>/dev/null; }
 
 # --- The self-test ---------------------------------------------------------------------------------
 #
@@ -68,42 +68,34 @@ done
 rm -f "$probe"
 trap - EXIT
 
-# Tracked files only: anything gitignored is not what this protects, and a token has to be tracked
-# to be pushed. This script excludes itself.
-# The listing is captured and its status checked, rather than piped straight into the loop. A
-# failing `git ls-files` produces an empty list, the loop never runs, and the script prints OK and
-# exits 0 - a guard reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files)"; then
-  echo "::error::check-no-tokens.sh could not list the tracked files in '$root'."
-  echo "    Refusing to report a clean tree on the strength of an empty listing."
-  exit 2
-fi
+# The walk - which files are read, which are declined and which are refused - lives in
+# scripts/lib/tracked-files.sh, shared by every guard here. It is not a tidiness: this script used a
+# bare `git ls-files` and skipped in silence any path holding a byte above ASCII, so a token inside a
+# file named in Russian reported clean while the same bytes under an ASCII name were caught. The fix
+# was found and fixed in one guard while four others carried it verbatim, which is why the mechanism
+# is now in one place.
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
 
-self="scripts/check-no-tokens.sh"
-found=0
-while IFS= read -r path; do
-  [ "$path" = "$self" ] && continue
-  # ls-files prints repository-root-relative paths, so they are resolved against $root rather than
-  # against wherever this was invoked from. Without this the [path] argument made every file vanish
-  # and the check pass silently - green for the wrong reason, and only when pointed at a tree other
-  # than the current directory, which is precisely what testing it looks like.
-  file="$root/$path"
-  [ -f "$file" ] || continue
+# This script excludes itself: it assembles the prefixes it searches for, but its own name is the one
+# path in the tree guaranteed to sit beside them.
+guard_self="scripts/check-no-tokens.sh"
 
-  if matches="$(scan "$file")"; then
-    echo "::error file=$path::looks like a GitHub token was committed here"
-    # The matching line number, never the match itself - printing the secret into a public CI log
-    # would finish the job the commit started.
-    echo "$matches" | while IFS= read -r line; do
-      echo "    line ${line%%:*}"
-    done
-    found=1
-  fi
-done <<< "$files"
+examine() { # $1 = path, $2 = the file to read, $3 = what it is
+  local matches
+  matches="$(scan "$2")" || return 1
+  echo "::error file=$1::$3 holds what looks like a GitHub token"
+  # The matching line number, never the match itself - printing the secret into a public CI log
+  # would finish the job the commit started.
+  echo "$matches" | while IFS= read -r line; do
+    echo "    line ${line%%:*}"
+  done
+  return 0
+}
 
-if [ "$found" -ne 0 ]; then
+guard_walk "$root" "check-no-tokens.sh" examine
+
+if [ "$guard_found" -ne 0 ]; then
   echo "::error::A GitHub token must never be committed. Revoke it now - assume it is public -"
   echo "    then remove it from the working tree and from history before pushing again."
-  exit 1
 fi
-echo "OK: no GitHub token pattern in any tracked file."
+guard_finish "no GitHub token pattern in any tracked file."

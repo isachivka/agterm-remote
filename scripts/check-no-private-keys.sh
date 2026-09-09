@@ -53,7 +53,7 @@ pattern="${dashes}BEGIN( [A-Z0-9]+)*( ENCRYPTED)? ?${label}${dashes}"
 # of options, exits 2, and - with stderr discarded and the status consumed by an `if` - reports
 # every file clean. The first version of this script did exactly that and passed on a tree
 # containing a real private key.
-scan() { grep -InE -e "$pattern" "$1" 2>/dev/null; }
+scan() { grep -anE -e "$pattern" "$1" 2>/dev/null; }
 
 # --- The self-test ---------------------------------------------------------------------------------
 #
@@ -61,7 +61,7 @@ scan() { grep -InE -e "$pattern" "$1" 2>/dev/null; }
 # known-positive is a hard error, not a clean run.
 #
 # The first version of this self-test had the defect it was written to prevent. It probed with
-# `grep -qE` while the scan used `grep -InE` - a DIFFERENT invocation - so it was testing a copy of
+# `grep -qE` while the scan used `grep -anE` - a DIFFERENT invocation - so it was testing a copy of
 # the pattern rather than the code path that does the work, and would have passed while the real one
 # was broken. It now goes through `scan`, the same function the loop calls.
 #
@@ -82,43 +82,31 @@ done
 rm -f "$probe"
 trap - EXIT
 
-# Tracked files only. Anything gitignored is not what this protects, and a key has to be tracked to
-# be pushed.
-# The listing is captured and its status checked, rather than piped straight into the loop. A
-# failing `git ls-files` produces an empty list, the loop never runs, and the script prints OK and
-# exits 0 - a guard reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files)"; then
-  echo "::error::check-no-private-keys.sh could not list the tracked files in '$root'."
-  echo "    Refusing to report a clean tree on the strength of an empty listing."
-  exit 2
+# The walk - which files are read, which are declined and which are refused - lives in
+# scripts/lib/tracked-files.sh, shared by every guard here. It is not a tidiness: this script used a
+# bare `git ls-files` and skipped in silence any path holding a byte above ASCII, so a private key
+# inside a file named in Russian reported clean while the same bytes under an ASCII name were caught.
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+
+# This script excludes itself: it is made of the banners it searches for.
+guard_self="scripts/check-no-private-keys.sh"
+
+examine() { # $1 = path, $2 = the file to read, $3 = what it is
+  local matches
+  matches="$(scan "$2")" || return 1
+  echo "::error file=$1::$3 holds a private key"
+  # Line numbers only. The key material itself never reaches a log.
+  echo "$matches" | while IFS= read -r line; do
+    echo "    line ${line%%:*}"
+  done
+  return 0
+}
+
+guard_walk "$root" "check-no-private-keys.sh" examine
+
+if [ "$guard_found" -ne 0 ]; then
+  echo "::error::A private key must never be committed. Treat it as compromised: generate a new one,"
+  echo "    replace whatever trusted the old one, and remove it from the working tree and from"
+  echo "    history before pushing again."
 fi
-
-self="scripts/check-no-private-keys.sh"
-found=0
-while IFS= read -r path; do
-  [ "$path" = "$self" ] && continue
-  # ls-files prints repository-root-relative paths, so they are resolved against $root and not against
-  # wherever this was invoked from. Reading them relative to the caller's directory makes every file
-  # vanish and the whole check pass - silently, and only when it is pointed somewhere other than the
-  # current directory, which is exactly what anyone testing it would do. Both siblings shipped with
-  # that defect and it went unnoticed because its only symptom was a green tick.
-  file="$root/$path"
-  [ -f "$file" ] || continue
-
-  if matches="$(scan "$file")"; then
-    echo "::error file=$path::a private key was committed here"
-    # Line numbers only, never the matching text.
-    echo "$matches" | while IFS= read -r line; do
-      echo "    line ${line%%:*}"
-    done
-    found=1
-  fi
-done <<< "$files"
-
-if [ "$found" -ne 0 ]; then
-  echo "::error::A private key must never be committed. Assume it is published:"
-  echo "    destroy it, mint a replacement, and re-pin the peer that trusted it."
-  echo "    Removing it from the working tree is not enough - it is in the history."
-  exit 1
-fi
-echo "OK: no private key in any tracked file."
+guard_finish "no private key in any tracked file."
