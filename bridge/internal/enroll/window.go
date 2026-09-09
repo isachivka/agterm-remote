@@ -17,6 +17,30 @@ import (
 // small enough that a window under noise shuts instead of standing open until its expiry.
 const maxAttempts = 5
 
+// MaxTTL is the longest a window may be open, and [Open] will not exceed it whatever it is asked for.
+//
+// # Why the ceiling is here rather than in whoever calls Open
+//
+// **Every argument for this design's anonymous branch rests on "a window is seconds of the bridge's
+// life and requires a person at the Mac".** It is the reason an unauthenticated caller may reach the
+// bridge at all, the reason the enrolment handler's bounded log lines are acceptable, and the reason
+// the memory an anonymous caller can hold is a residual rather than a hole. Nothing enforced it. Open
+// took any duration, and the policy lived in a user interface nobody has written yet - so the
+// property the whole surface is justified by was a habit, and the first `Open(24*time.Hour)` written
+// by somebody debugging would have turned it into an all-day anonymous port with no code anywhere
+// objecting.
+//
+// So the ceiling lives next to the argument it protects, in the type whose three properties are that
+// argument. A caller cannot opt out of it, and a caller that wants a longer pairing session has to
+// come here and change this line, which is exactly the conversation that should happen.
+//
+// Five minutes, because that is what the QR payload's own example carries, it is far more than the
+// seconds a person needs to pick up a phone and scan a code they are looking at, and it is short
+// enough that a window left open by mistake closes itself long before anybody notices the panel is
+// still up. Re-pressing the button is what a person does when a code goes stale, and it costs them
+// nothing.
+const MaxTTL = 5 * time.Minute
+
 // ErrRefused is every refusal Consume can return, and it is deliberately the only one that says
 // anything.
 //
@@ -116,6 +140,23 @@ func NewWindow(now func() time.Time) *Window {
 // the button a second time, and it is why the count cannot outlive the secret it was counting
 // against.
 //
+// # ttl is CLAMPED to [MaxTTL], never exceeded
+//
+// A ttl over the ceiling is silently reduced to it rather than refused, and that is deliberate on a
+// signature with no error to return. Clamping fails in the safe direction - the window is open for
+// less time than was asked for, never more - and the caller is TOLD, because the expiry this returns
+// is the one that will be enforced and is the one the QR payload carries. So a Mac app that asks for
+// an hour gets a five-minute window and a code that says five minutes; the phone and the bridge agree,
+// and the only thing lost is the request nobody should have made.
+//
+// Refusing instead would mean an error return, and an error return on this call means a pairing panel
+// that can fail to open - a worse outcome for the owner than a shorter window, in service of the same
+// bound.
+//
+// A ttl of zero or less produces a window that is already past its expiry, which [IsOpen] and
+// [Consume] both report as closed. That is fail-closed and is left alone rather than clamped upward:
+// nothing should be inventing a window duration on the caller's behalf.
+//
 // # Why the expiry is truncated
 //
 // The returned expiry is already Truncate(time.Second).UTC() - the exact form Payload.Canonical
@@ -125,6 +166,11 @@ func NewWindow(now func() time.Time) *Window {
 // second. Rounding DOWN is the safe direction of the two: the window is never open a moment longer
 // than what the phone was told.
 func (w *Window) Open(ttl time.Duration) ([32]byte, time.Time) {
+	// The ceiling, before anything else happens, so no path below can be reached with a longer one.
+	if ttl > MaxTTL {
+		ttl = MaxTTL
+	}
+
 	var token [32]byte
 	// As of Go 1.24 crypto/rand.Read never returns an error - it panics if the system source fails -
 	// so this err is checked for the reader of this code rather than for the runtime. Panicking is

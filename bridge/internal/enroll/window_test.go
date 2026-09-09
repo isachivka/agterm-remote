@@ -423,3 +423,91 @@ type hit struct {
 }
 
 func (h hit) String() string { return fmt.Sprintf("%s in %s", h.rendering, h.path) }
+
+// **A window cannot be opened for longer than MaxTTL, whatever the caller asks for.**
+//
+// This is the enforcement behind the sentence every argument about the anonymous branch rests on -
+// that a window is seconds of the bridge's life. Nothing enforced it until now: the policy lived in a
+// user interface nobody has written, so `Open(24*time.Hour)` would have produced an all-day anonymous
+// port with no code anywhere objecting.
+//
+// The boundary is tested in both directions, because a clamp that is off by one in the permissive
+// direction is the whole bug and a clamp that is off in the other silently shortens a legitimate
+// window.
+func TestOpenWillNotExceedTheMaximumTTL(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	for _, tc := range []struct {
+		name string
+		ask  time.Duration
+		want time.Duration
+	}{
+		{"well under the ceiling", time.Minute, time.Minute},
+		{"exactly the ceiling", enroll.MaxTTL, enroll.MaxTTL},
+		{"one nanosecond over", enroll.MaxTTL + time.Nanosecond, enroll.MaxTTL},
+		{"a day", 24 * time.Hour, enroll.MaxTTL},
+		{"a year", 365 * 24 * time.Hour, enroll.MaxTTL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := enroll.NewWindow(func() time.Time { return at })
+			_, expiry := w.Open(tc.ask)
+
+			if got := expiry.Sub(at); got != tc.want {
+				t.Fatalf("asked for %s, window runs for %s, want %s", tc.ask, got, tc.want)
+			}
+			if expiry.Sub(at) > enroll.MaxTTL {
+				t.Fatalf("a window of %s is past the %s ceiling", expiry.Sub(at), enroll.MaxTTL)
+			}
+		})
+	}
+}
+
+// The clamp is what the window ENFORCES as well as what it reports, and those are two different
+// claims: an expiry that is returned truthfully but not honoured would be the same hole wearing an
+// honest label.
+func TestTheClampedWindowIsActuallyEnforced(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	clock := func() time.Time { return at }
+	w := enroll.NewWindow(clock)
+	token, expiry := w.Open(24 * time.Hour)
+
+	// A second before the clamped expiry: still live.
+	at = expiry.Add(-time.Second)
+	if !w.IsOpen() {
+		t.Fatal("the window closed before its own stated expiry")
+	}
+
+	// At it: shut, and the right token no longer works. The day that was asked for is not honoured
+	// anywhere, including by the code the phone is holding.
+	at = expiry
+	if w.IsOpen() {
+		t.Fatal("the window outlived the expiry it advertised")
+	}
+	if err := w.Consume(token[:]); err == nil {
+		t.Fatal("a token was spent after the clamped window had closed")
+	}
+}
+
+// And the expiry Open returns is the one the QR payload will carry, so the phone and the bridge agree
+// about a window the caller did not get the length it asked for. A clamp the payload did not learn
+// about would show the owner a code claiming an hour against a window of five minutes.
+func TestTheClampedExpiryIsWhatThePayloadWouldCarry(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	w := enroll.NewWindow(func() time.Time { return at })
+	token, expiry := w.Open(time.Hour)
+
+	text, err := enroll.EncodeToText(enroll.Payload{
+		Host: "a-laptop.invalid", Port: 8443, Token: token, Expiry: expiry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := enroll.DecodeText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Expiry.Equal(expiry) {
+		t.Fatalf("the code would say %s, the window enforces %s", got.Expiry, expiry)
+	}
+	if got.Expiry.Sub(at) > enroll.MaxTTL {
+		t.Fatalf("the code advertises %s, past the %s ceiling", got.Expiry.Sub(at), enroll.MaxTTL)
+	}
+}
