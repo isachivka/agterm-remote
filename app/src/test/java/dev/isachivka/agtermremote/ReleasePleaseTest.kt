@@ -61,7 +61,10 @@ class ReleasePleaseTest {
         val declared = Regex("""val appVersionName = "([^"]+)"""")
             .find(buildFile.readText())?.groupValues?.get(1)
             ?: error("no `val appVersionName = \"...\"` in ${buildFile.path}")
-        val current = Regex(""""\.":\s*"([^"]+)"""")
+        // Whitespace on BOTH sides of the colon. JSON permits it there, and a formatter that put a
+        // space before it would have made this `error(...)` rather than compare - failing on how the
+        // file is laid out instead of on the fact it states, which is the one thing this must not do.
+        val current = Regex(""""\."\s*:\s*"([^"]+)"""")
             .find(manifest.readText())?.groupValues?.get(1)
             ?: error("no root entry in ${manifest.path}")
 

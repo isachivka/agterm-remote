@@ -23,7 +23,7 @@ import dev.isachivka.agtermremote.pairing.PairedLaptop
 import dev.isachivka.agtermremote.pairing.PairingHost
 import dev.isachivka.agtermremote.pairing.PairingSequence
 import dev.isachivka.agtermremote.settings.StyledScreenStore
-import dev.isachivka.agtermremote.ui.module.SettingsScreen
+import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.nav.BackStack
 import dev.isachivka.agtermremote.ui.nav.Screen
 import dev.isachivka.agtermremote.ui.theme.AppTheme

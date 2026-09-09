@@ -7,8 +7,8 @@ import dev.isachivka.agtermremote.wire.WireFailure
 /**
  * What the owner is told, and the two things it must never do.
  *
- * **It must not assert a cause the app cannot observe.** The house rule, held over the
- * Immich report, and this feature has three indistinguishable causes rather than one: a sleeping
+ * **It must not assert a cause the app cannot observe.** The house rule, and this feature is where
+ * it is hardest: there are three indistinguishable causes rather than one - a sleeping
  * laptop, a filtered network and a VPN all arrive here as the same silence. So the copy says what was
  * observed and points at the preconditions document; it does not guess between them.
  *

@@ -8,8 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The pairing payload is the only place the laptop's address exists, so the codec is what makes
- * What keeps switching transport to re-minting this blob rather than rebuilding the app.
+ * The pairing payload is the only place the laptop's address exists, so the codec is what keeps
+ * switching transport to re-minting this blob rather than rebuilding the app.
  *
  * Everything it carries is public — a certificate and an address. The tests below are about a decoder
  * pointed at a camera, which will be shown arbitrary rubbish as a matter of course and must never

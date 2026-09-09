@@ -2,9 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      The app's first network access: validating the token against api.github.com, and from
-      iteration 2 on, checking for a release. Cleartext is not permitted by default at this
-      targetSdk and nothing here re-enables it.
+      The only thing this app does over the network: reach the laptop the owner paired it with, at the
+      address that arrived in the pairing code. Nothing else. There is no analytics endpoint, no crash
+      reporter, no update check and no server of this project's own - the far end is a machine
+      belonging to the person holding the phone.
+
+      Cleartext is not permitted by default at this targetSdk and nothing here re-enables it; the
+      outer hop is TLS to the router and the inner one is pinned mTLS to the bridge inside it.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 

@@ -52,8 +52,8 @@ class PairingAddressTest {
     /**
      * **The suffix and the subdomain must not elide into each other.**
      *
-     * This is the failure that actually happened, on 2026-08-09: the bare KeenDNS name is the
-     * homelab's suffix, shared with every other service on it, and the bridge lives on its own
+     * This is the failure that actually happened, on 2026-08-09: the bare registered name is the
+     * suffix, shared with every other service behind it, and the bridge lives on its own
      * subdomain. Pairing to the bare name reaches the router and not us, and every screen afterwards
      * says the laptop is not answering. The two strings are one label apart, one is a suffix of the
      * other, and a renderer that truncated, ellipsised or right-aligned could show them identically.

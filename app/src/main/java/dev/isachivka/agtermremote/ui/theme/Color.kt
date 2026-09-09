@@ -3,7 +3,7 @@ package dev.isachivka.agtermremote.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * Every colour in the app, read out of `design/v0/Homelab Monoapp.dc.html`.
+ * Every colour in the app, read out of the design.
  *
  * These are raw values and nothing outside this package should reach for them — screens use
  * [androidx.compose.material3.MaterialTheme.colorScheme] and [AppTheme.colors], which is what makes
@@ -17,8 +17,8 @@ import androidx.compose.ui.graphics.Color
 // rows by letting the background show through rather than by drawing a line.
 internal val DesignBackground = Color(0xFF15120C)
 
-// Three container depths, and the design uses all three on one screen: a module tile sits lower
-// than the Updates tile, which sits lower than the icon circle inside it.
+// Three container depths. The design used all three on one screen, and the screen that needed all
+// three is gone; what is left uses two - a list container, and the rows inside it.
 internal val DesignSurfaceLow = Color(0xFF1D1A13)
 internal val DesignSurface = Color(0xFF211E16)
 internal val DesignSurfaceHigh = Color(0xFF2C2820)
@@ -29,14 +29,14 @@ internal val DesignTextPrimary = Color(0xFFEBE1D3)
 internal val DesignTextSecondary = Color(0xFFD0C5B3)
 internal val DesignTextSubtle = Color(0xFF9A8F7C)
 
-// Dashed module-tile borders, outlined buttons, the download progress track.
+// Outlined buttons, and the hairline around a container.
 internal val DesignOutline = Color(0xFF4D4639)
 
 // The divider inside the release card. Lighter than the outline, because it separates rather than
 // bounds.
 internal val DesignOutlineVariant = Color(0xFF37332A)
 
-// The one accent: Update, Install, Save and check, and the Updates tile's icon.
+// The one accent: Send, Pair, and the controls that act.
 internal val DesignPrimary = Color(0xFFF7BF52)
 internal val DesignOnPrimary = Color(0xFF422C00)
 
@@ -54,7 +54,7 @@ internal val DesignPrimaryContainer = Color(0xFF5E4100)
 internal val DesignOnPrimaryContainer = Color(0xFFFFDEA8)
 
 // The design's one accent-container pair: the Planned chip, the download size chip, and the
-// no-token status card. Both M3 accent-container slots point here - see AppColorScheme.
+// the filled status card. Both M3 accent-container slots point here - see AppColorScheme.
 internal val DesignAccentContainer = Color(0xFF4E452F)
 internal val DesignOnAccentContainer = Color(0xFFF0E0BF)
 
@@ -67,8 +67,7 @@ internal val DesignOnErrorContainer = Color(0xFFFFDAD6)
  * Success, which Material 3 does not have.
  *
  * Two forms, the same distinction M3 draws everywhere else: [DesignSuccess] is a foreground for a
- * plain surface — the Updates tile's "up to date" subtitle — and the container pair fills a card, as
- * on the up-to-date status and the token-connected card.
+ * plain surface, and the container pair fills a card.
  */
 internal val DesignSuccess = Color(0xFFA8D0A3)
 internal val DesignSuccessContainer = Color(0xFF33502F)

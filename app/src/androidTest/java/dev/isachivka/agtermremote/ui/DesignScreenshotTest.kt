@@ -11,7 +11,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import dev.isachivka.agtermremote.ui.module.SettingsScreen
+import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.theme.AppTheme
 import dev.isachivka.agtermremote.ui.theme.ColourRoles
 import dev.isachivka.agtermremote.ui.theme.TypeScale

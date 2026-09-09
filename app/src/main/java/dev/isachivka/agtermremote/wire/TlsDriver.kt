@@ -14,8 +14,8 @@ import javax.net.ssl.SSLEngineResult.Status
 /**
  * The inner half of the wire: pinned mTLS driven by hand over a byte stream.
  *
- * KeenDNS proxies, so there is no `Socket` to hand to `SSLSocketFactory` — only a WebSocket byte
- * stream. `SSLEngine` is therefore driven directly: `wrap` and `unwrap`, a handshake loop, and four
+ * The router proxies rather than forwarding, so there is no `Socket` to hand to
+ * `SSLSocketFactory` — only a WebSocket byte stream. `SSLEngine` is therefore driven directly: `wrap` and `unwrap`, a handshake loop, and four
  * buffers.
  *
  * ### Why this is written by hand rather than the easier way

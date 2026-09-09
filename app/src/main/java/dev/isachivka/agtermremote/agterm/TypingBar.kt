@@ -126,7 +126,7 @@ fun TypingBar(
 ) {
     if (state is TypingState.Closed) return
 
-    // **A card, and the terminal ends where it begins.** design/v1 gives the bar a raised container
+    // **A card, and the terminal ends where it begins.** The design gives the bar a raised container
     // with 28dp top corners so the output above it has a visible edge rather than running under a row
     // of controls. Appearance only: nothing about what this bar DOES changed with it - see the note
     // on singleLine below.

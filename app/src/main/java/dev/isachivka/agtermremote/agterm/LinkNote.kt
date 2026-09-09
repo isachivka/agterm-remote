@@ -5,9 +5,8 @@ package dev.isachivka.agtermremote.agterm
  *
  * ### The surface is real; half of what the mock puts on it is not
  *
- * design/v1 floats notes over the top of the terminal, and draws two: *"Reconnected to
- * MacBook-Pro-Igor"* and *"Waiting on your answer — three install checks and a yes/no on the agterm
- * request"*.
+ * The design floats notes over the top of the terminal, and draws two: one saying the connection
+ * came back, naming the laptop, and one saying an agent is waiting on an answer.
  *
  * The first is real. [Reconnect] already knows a transient failure is being waited out and knows when
  * an attempt succeeded after one, and today that is invisible to the owner: the screen freezes, and
@@ -28,8 +27,8 @@ package dev.isachivka.agtermremote.agterm
  *
  * ### Neither note names the laptop
  *
- * The mock says `MacBook-Pro-Igor`. The phone holds no name for it — see the `laptop` parameter on
- * `AgtermScreen`, which carries an address because an address is what there is.
+ * The mock names it. The phone holds no name for it — see the `laptop` parameter on `AgtermScreen`,
+ * which carries an address because an address is what there is.
  */
 sealed interface LinkNote {
 

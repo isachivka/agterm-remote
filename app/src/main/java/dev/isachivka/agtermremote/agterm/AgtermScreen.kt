@@ -1217,8 +1217,8 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
 /**
  * That something is connected, and to what.
  *
- * **The address, never a name.** The mock says `MacBook-Pro-Igor`; the phone holds no name for the
- * laptop, only the host it dials — see the [AgtermScreen] parameter. Drawing a name would be
+ * **The address, never a name.** The mock draws the laptop's hostname; the phone holds no name for
+ * the laptop, only the host it dials — see the [AgtermScreen] parameter. Drawing a name would be
  * inventing a fact about the owner's machine, which is the rule [copyFor] has always held.
  *
  * The dot is green because this composable is only reached from [AgtermUiState.Sessions] — the laptop

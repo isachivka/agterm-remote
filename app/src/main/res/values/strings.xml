@@ -405,7 +405,7 @@
 
       **%1$s is the ADDRESS this phone dials, not the laptop's name.** The phone holds no name for it:
       the pairing payload carries a kind, a host, a port and a certificate, and nothing else. The
-      design's mock says "MacBook-Pro-Igor", and drawing that would be inventing a fact about the
+      design's mock draws the laptop's hostname, and drawing that would be inventing a fact about the
       owner's machine - the same rule that keeps this app from asserting a cause it cannot observe.
     -->
     <plurals name="agterm_connected">

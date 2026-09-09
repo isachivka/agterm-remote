@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.Color
  * The roles Material 3 does not have.
  *
  * Two of them, and both earn their place. Success is a genuine gap in M3 — there is no slot that
- * means "this went well" — and the design uses it on the up-to-date status and the connected-token
+ * means "this went well" — and the design uses it on a status that has settled and on the paired
  * card. The third text weight is a gap too: M3 offers `onSurface` and `onSurfaceVariant`, and the
  * design uses three levels, with the faintest carrying the supporting line under almost every
  * heading in the app.
@@ -24,9 +24,9 @@ import androidx.compose.ui.graphics.Color
  */
 @Immutable
 data class AppColors(
-    /** Success as a foreground on a plain surface — the Updates tile's subtitle. */
+    /** Success as a foreground on a plain surface — a settled subtitle. */
     val success: Color,
-    /** Success as a filled card — the up-to-date status, the connected-token card. */
+    /** Success as a filled card — the paired-laptop card. */
     val successContainer: Color,
     val onSuccessContainer: Color,
     /**
@@ -88,7 +88,7 @@ private val AppColorScheme = darkColorScheme(
     inverseSurface = DesignTextPrimary,
     inverseOnSurface = DesignSurface,
 
-    // Four depths on one screen: the launcher puts a module tile (Low) beside the Updates tile
+    // Four depths were used on one screen: the deleted launcher put a module tile (Low) beside a tile
     // (Container) with an icon circle inside it (High), all on the background (Lowest).
     surfaceDim = DesignBackground,
     surfaceBright = DesignSurfaceHigh,

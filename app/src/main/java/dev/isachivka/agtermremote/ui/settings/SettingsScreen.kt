@@ -1,4 +1,4 @@
-package dev.isachivka.agtermremote.ui.module
+package dev.isachivka.agtermremote.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -45,11 +45,12 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
  * show on the home page* — a request for the list to be unfilterable, not shorter. Reading it as
  * permission to delete tiles would answer a question they did not ask.
  *
- * ### The route is still `"modules"`
+ * ### The package is `ui.settings` now, and the route is `"settings"`
  *
- * The file and the composable are renamed because they no longer list modules, and a name describing
- * what a screen used to be is the same defect as a comment that does. The route literal is not: a
- * route is persisted state, and renaming one is a migration for no benefit.
+ * Both were `module`/`modules`, named for a registry of launcher tiles that no longer exists. A name
+ * describing what a screen used to be is the same defect as a comment that does. Renaming a route is
+ * normally a migration for no benefit - here there is no installed base to migrate, because the
+ * `applicationId` changed with the port, so this was the last free moment to do it.
  */
 @Composable
 fun SettingsScreen(

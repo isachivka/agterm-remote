@@ -9,8 +9,7 @@ package dev.isachivka.agtermremote.wire
  *
  * The distinction that costs the most to get wrong is [NotPinned] and [CertificateExpired] against
  * everything else. Those two mean *the identity is wrong and the owner must act*; the rest mean *the
- * laptop is not answering and the app cannot say why* — a rule this project has held throughout
- * and held to over the Immich report.
+ * laptop is not answering and the app cannot say why* — a rule this project has held throughout.
  */
 sealed interface WireFailure {
 
