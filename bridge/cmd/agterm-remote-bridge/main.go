@@ -248,7 +248,10 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// owner's phone, this log is a file anything that can read the disk can read, and a count is
 	// what a person needs in order to know whether pairing worked. No version banner and no build
 	// identifier either - the restraint that keeps them off the wire keeps them out of the log.
-	log.Printf("listening on %s", listenAddr)
+	// The BOUND address, not the argument that produced it. `:8443` and `[::]:8443` are one truth
+	// with two spellings, and the control socket's `status` reports the bound one - two spellings in
+	// a log and a status reply is how somebody ends up comparing them and concluding the bridge moved.
+	log.Printf("listening on %s", tcp.Addr())
 	log.Printf("paired phones: %d", len(peers.Peers()))
 	log.Printf("agterm socket %s", socketPath)
 	// **This process exits with the app that started it.**
