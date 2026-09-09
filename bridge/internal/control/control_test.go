@@ -482,7 +482,10 @@ func TestPairOpenReturnsAPayloadThePhoneCanRead(t *testing.T) {
 	path := servingWith(t, &fakeFit{}, b.pairing)
 
 	got := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
-	wantKeys(t, got, "payload", "expires_at")
+	wantKeys(t, got, "payload", "expires_at", "replaced")
+	if got["replaced"] != false {
+		t.Errorf("the first code of the session claims to have replaced one: %#v", got)
+	}
 
 	text, _ := got["payload"].(string)
 	payload, err := enroll.DecodeText(text)
@@ -777,4 +780,181 @@ func mustDial(t *testing.T, path string) net.Conn {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
+}
+
+// **A loopback address mints a code, and that is the emulator's own pairing path.**
+//
+// The Android emulator reaches the bridge through `adb reverse`, where the phone connects to
+// 127.0.0.1 and that is exactly correct. An earlier version of this package refused a wildcard host
+// on the reasoning that a code nobody can dial is worse than no code; it caught one undialable
+// spelling and passed three, and the obvious repair - refusing loopback too - would have broken the
+// one end-to-end path the camera work depends on. So there is no host policy here at all, and this
+// test is what stops one growing back. See dialTarget.
+func TestACodeIsMintedForEveryAddressTheBridgeCanBeBoundTo(t *testing.T) {
+	for _, listening := range []string{
+		"127.0.0.1:8443", // adb reverse, which is the emulator pairing path
+		"localhost:8443",
+		"[::1]:8443",
+		"203.0.113.5:8443",
+		"a-laptop.invalid:8443",
+		// Every interface, which the Mac app is entitled to hand us and which the bridge is
+		// entitled to be bound to. Undialable as written, and minted anyway: which address reaches
+		// this laptop is a question about the owner's network, and refusing here is what broke the
+		// emulator in the version this test replaced.
+		"0.0.0.0:8443",
+		"[::]:8443",
+	} {
+		t.Run(listening, func(t *testing.T) {
+			b := newBridge(t)
+			b.pairing.Listening = listening
+			path := servingWith(t, &fakeFit{}, b.pairing)
+
+			got := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+			if got["error"] != nil {
+				t.Fatalf("no code was minted for %q: %v", listening, got["error"])
+			}
+			payload, err := enroll.DecodeText(got["payload"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantHost, _, _ := net.SplitHostPort(listening)
+			if payload.Host != wantHost || payload.Port != 8443 {
+				t.Errorf("the code points at %s:%d, want %s:8443", payload.Host, payload.Port, wantHost)
+			}
+		})
+	}
+}
+
+// A string that is not a host and a port is still refused, because there are no two fields to put in
+// the payload. That is structural rather than a policy about which addresses are reachable.
+func TestAnAddressThatIsNotAHostAndAPortCannotMintACode(t *testing.T) {
+	// ":8443" is in this list rather than the one above, and the refusal is enroll.Encode's rather
+	// than a policy of this package: the payload has a length-prefixed host field and an empty one
+	// is not a value it can carry. In practice it never arrives - Pairing.Listening is the BOUND
+	// address, and net.Listen("tcp", ":8443") reports itself as "[::]:8443", which mints a code
+	// like any other.
+	for _, listening := range []string{"", ":8443", "8443", "203.0.113.5", "203.0.113.5:not-a-port", "203.0.113.5:0"} {
+		b := newBridge(t)
+		b.pairing.Listening = listening
+		path := servingWith(t, &fakeFit{}, b.pairing)
+
+		got := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+		if got["error"] == nil {
+			t.Errorf("%q minted %#v", listening, got)
+		}
+	}
+}
+
+// **A second pair-open kills the first code, and says so.**
+//
+// enroll.Window.Open replaces rather than refuses, which is right - it is what an owner means by
+// pressing the button again. Doing it silently is not: a second panel window takes the first one's
+// code with nothing anywhere saying so, and the person looking at the dead QR scans it, is refused,
+// and cannot tell that from a broken bridge.
+func TestASecondPairOpenSaysItTookTheFirstCode(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	first := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+	if first["replaced"] != false {
+		t.Fatalf("the first code claims to have replaced one: %#v", first)
+	}
+	firstPayload, err := enroll.DecodeText(first["payload"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+	wantKeys(t, second, "payload", "expires_at", "replaced")
+	if second["replaced"] != true {
+		t.Fatalf("the second code took the first one's window and did not say so: %#v", second)
+	}
+
+	// And it really is dead: the first token no longer opens anything.
+	if err := b.window.Consume(firstPayload.Token[:]); err == nil {
+		t.Fatal("the first token still works after a second pair-open")
+	}
+
+	// After the window is closed, opening again replaced nothing.
+	call(t, path, `{"verb":"pair-close"}`)
+	third := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+	if third["replaced"] != false {
+		t.Errorf("opening against a closed window claims to have replaced one: %#v", third)
+	}
+}
+
+// **One request per connection, and the rest of the line is never read.**
+//
+// Pinned rather than documented alone, because the person who discovers it otherwise is whoever
+// writes the Swift panel, in a debugger, wondering why two of their three verbs did nothing. The
+// convention is agterm's own control socket's, and it is affordable here for the reason it is not
+// affordable on the pinned front door: a connection to a local unix socket costs a syscall pair and
+// no handshake.
+func TestOnlyTheFirstRequestOnAConnectionIsServed(t *testing.T) {
+	b := newBridge(t)
+	b.pair(t, "a phone")
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+
+	// Three verbs, pipelined. The second would open an enrolment window and the third would unpair
+	// the owner's phone, so this is not merely about a dropped reply.
+	if _, err := io.WriteString(conn,
+		"{\"verb\":\"status\"}\n{\"verb\":\"pair-open\",\"ttl_seconds\":300}\n{\"verb\":\"unpair\",\"fingerprint\":\"x\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	r := bufio.NewReader(conn)
+	first, err := r.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(first, []byte(`"listening"`)) {
+		t.Fatalf("the first request was not the one answered: %s", first)
+	}
+
+	// Nothing more comes back, and the connection is closed from this end rather than left open.
+	if extra, err := r.ReadBytes('\n'); err == nil {
+		t.Fatalf("a second reply arrived on one connection: %s", extra)
+	}
+
+	// And - the half that matters - the discarded verbs did not RUN. A silently executed unpair
+	// would be far worse than a silently dropped reply.
+	if b.window.IsOpen() {
+		t.Error("a pipelined pair-open opened a window")
+	}
+	if len(b.peers.Peers()) != 1 {
+		t.Error("a pipelined unpair reached the trust store")
+	}
+}
+
+// **A second token after the object is a different message, not slack.**
+//
+// json.Decoder.Decode stops at the end of the first value and says nothing about what follows, so
+// `{"verb":"status"} junk` decoded cleanly and was answered as an ordinary status - which also means
+// DisallowUnknownFields is defeated by anything written outside the braces rather than inside them.
+// enroll.Decode refuses a trailing byte for the same reason.
+func TestTrailingGarbageAfterTheObjectIsRefused(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	for _, line := range []string{
+		`{"verb":"status"} junk`,
+		`{"verb":"status"}{"verb":"status"}`,
+		`{"verb":"status"} {"surprise":1}`,
+		`{"verb":"pair-open","ttl_seconds":300} 0`,
+	} {
+		got := call(t, path, line)
+		if got["error"] == nil {
+			t.Errorf("%q was answered %#v", line, got)
+		}
+		if b.window.IsOpen() {
+			t.Fatalf("%q opened a window", line)
+		}
+	}
 }
