@@ -93,16 +93,23 @@ import java.util.concurrent.Executors
  *    not the paste field - it was a viewfinder that stayed black forever with no way out, which is
  *    worse than the crash the guard was built for.
  *
- * So there are two mechanisms because there are two shapes, and only one of them is an exception. The
- * state is observed below and the policy is [cameraIsUnusable]; both are unit-tested.
+ * So there are two mechanisms because there are two shapes, and only one of them is an exception, and
+ * **they are reported through two different callbacks because they mean different things.** A throw is
+ * a fact about the device: [onUnavailable], and Try again keeps the owner on the paste field. A state
+ * error is a fact about this moment: [onStalled], which shows the paste field and leaves the scanner
+ * available, because most of these errors are published by a library that is retrying and about to
+ * succeed. Latching on one of those would take a working screen away from somebody a moment from
+ * finishing.
  *
- * **No end-to-end run has produced a camera-state error, and staging one was tried and failed.** A
- * second client opened from inside this process does not do it: Android hands the camera to the
- * foreground application, and CameraX logged `Camera open completed ... errorCode=null` while the test
- * held the device. That is worth knowing rather than hiding - it means the in-use case is rarer on
- * this platform than it sounds, and it means the errors this route will actually carry are more likely
- * to be the ones a person cannot stage either: a camera disabled by device policy, do-not-disturb, or
- * the hardware failing. Recorded as a gap in `docs/pairing.md`.
+ * The state is observed below and the policy is [cameraIsUnusable]; both are unit-tested.
+ *
+ * **No end-to-end run has produced a camera-state error, and staging one was tried and failed** -
+ * which turns out to argue the opposite of what it looks like. A second client opened from inside this
+ * process was evicted and CameraX logged `Camera open completed ... errorCode=null`: Android gives the
+ * camera to the foreground application. **That eviction is the same event that hands the OTHER side a
+ * momentary in-use state**, so the case that could not be staged here is the case a person meets -
+ * resuming this app right after a camera application, or the moment one is slow to let go. It is not
+ * rare; it is just not stageable from the side that wins. Recorded as a gap in `docs/pairing.md`.
  *
  * ### What is proven about this file, and what is not
  *
@@ -115,6 +122,7 @@ import java.util.concurrent.Executors
 fun PairingViewfinder(
     onText: (String) -> Unit,
     onUnavailable: () -> Unit,
+    onStalled: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -255,11 +263,14 @@ fun PairingViewfinder(
     // Keyed on `camera`, so a rebind gets a fresh observer and the old one is removed. The LiveData is
     // observed with the screen's own lifecycle owner as well, so nothing here outlives the screen even
     // if the dispose is missed.
+    val stalled by rememberUpdatedState(onStalled)
     val watched = camera
     DisposableEffect(watched, lifecycleOwner) {
         val state = watched?.cameraInfo?.cameraState
         val observer = Observer<CameraState> { value ->
-            if (cameraIsUnusable(value)) unavailable()
+            // `stalled`, never `unavailable`: this camera opened, so it is not a camera the phone
+            // does not have. See PairingFlow.cameraStalled.
+            if (cameraIsUnusable(value)) stalled()
         }
         state?.observe(lifecycleOwner, observer)
         onDispose { state?.removeObserver(observer) }
