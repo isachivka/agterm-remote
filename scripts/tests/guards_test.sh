@@ -218,6 +218,55 @@ loop_fixture "cp1251 russian" 1
 fresh_loop; printf '%b' "$english" | iconv -f UTF-8 -t UTF-16 > loop/utf16-english.swift
 loop_fixture "utf-16 english is refused too, not read" 1
 
+# 3b. VALID UTF-8, in QUANTITY. Every fixture above is one line long, and that is precisely what let
+#     the next defect live: the decode check was
+#
+#         iconv -f UTF-8 -t UTF-8 < "$target" >/dev/null
+#
+#     and on macOS that refuses VALID UTF-8 once the conversion fills iconv's 1024-byte output
+#     buffer, because it then ioctls its own stdout and /dev/null answers ENOTTY. A megabyte of
+#     ASCII passes, because nothing is converted; 342 em dashes do not. Neither a size limit nor a
+#     content problem - the DESTINATION. Everything tracked here is English prose with the odd
+#     character above ASCII, so the guard was silent by luck rather than by correctness, and the
+#     first file over the line would have been told it "is not valid UTF-8" and instructed to
+#     convert it from an encoding it was never in, which corrupts it.
+#
+#     Three widths one byte apart, and that is the load-bearing part of the fixture. Whether the old
+#     check refused a file turned on where a multi-byte character fell across that buffer, so any
+#     single width reproduces on two thirds of bodies and stops reproducing the moment somebody
+#     edits the prose in front of it - which is the same "no fixture was big enough" that hid the
+#     defect, arriving a second time. One byte of padding per case covers all three alignments.
+#
+#     Matrixed on width as well as on encoding, because the mechanism that changed decides both, and
+#     no one of these three proves anything alone: valid-and-wide is scanned in both directions - a
+#     clean body goes green, a Russian body is CAUGHT rather than refused - while undecodable-and-
+#     wide is still refused with both ways out named. A check that refuses everything wide passes
+#     the third; a check that accepts everything wide passes the first two.
+wide() { # $1 = a body, $2 = 0, 1 or 2 bytes of padding; then em dashes past iconv's output buffer
+  printf '%b' "$1"
+  # BEFORE the dashes, and that is the whole point of it: what decides the old check is where a
+  # multi-byte character lands relative to the buffer, so a byte added after them shifts nothing and
+  # all three cases would be the same case. Verified both ways round - as a suffix, the English body
+  # reproduced at every padding and the Russian one at none.
+  case "$2" in (1) printf '.' ;; (2) printf '..' ;; esac
+  printf '\342\200\224%.0s' $(seq 4096)
+  printf '\n'
+}
+for pad in 0 1 2; do
+  fresh_loop; wide "$english" "$pad" > loop/wide.md
+  loop_fixture "12 KB of valid multi-byte utf-8, english body, +$pad" 0
+  says "a wide valid file is scanned rather than refused, +$pad" "refused 0"
+  fresh_loop; wide "$russian" "$pad" > loop/wide.md
+  loop_fixture "12 KB of valid multi-byte utf-8, russian body, +$pad" 1
+  says "a wide file is caught on its content, not refused for its width, +$pad" "refused 0"
+done
+# ...and the verdict on something genuinely undecodable is unchanged at that width, message and all.
+fresh_loop; wide "$english" 0 | iconv -f UTF-8 -t UTF-16 > loop/wide.md
+loop_fixture "12 KB of utf-16 is still refused" 1
+says "the refusal still states the cause"        "is not valid UTF-8"
+says "the refusal still names converting it"     "iconv -f UTF-16 -t UTF-8"
+says "the refusal still names the other way out" "guard_binary_extensions"
+
 # 4. A binary asset carrying bytes that land in a Cyrillic range by chance. Skipped BY EXTENSION, and
 #    the extension is on a list somebody wrote down - so the same bytes under an extension nobody
 #    listed are refused instead of waved through. A guard that reports Cyrillic in an icon gets
