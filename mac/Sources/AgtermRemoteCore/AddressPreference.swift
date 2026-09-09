@@ -30,7 +30,23 @@ public enum AddressPreference {
 
     /// The one key. Named for what it is from the phone's point of view, because that is the only
     /// point of view from which this value means anything.
+    ///
+    /// It lives in this app's own defaults domain, `dev.isachivka.agtermremote`, so the fully
+    /// qualified name of the preference is that domain and this key. The design document spells it
+    /// as one string; it is one value either way, and renaming the key now would orphan every
+    /// address already stored by a shipped build.
     public static let key = "dialAddress"
+
+    /// When the address currently stored was stored. Written by [write], and **only** when the
+    /// address actually changes: re-saving the same address is not a new address and must not
+    /// discard the proof it has already earned.
+    public static let storedAtKey = "dialAddressStoredAt"
+
+    /// When a phone last completed enrolment through the address stored now.
+    ///
+    /// **Nil is the ordinary state and it is not an error.** It says the address is unproven, which
+    /// is what every address is until something has actually come through it — see [provenAt].
+    public static let provenKey = "addressProvenAt"
 
     /// Reads the address, or says why not.
     public static func read(from defaults: UserDefaults = .standard) -> Result<DialAddress, ReadFailure> {
@@ -42,6 +58,16 @@ public enum AddressPreference {
         case .success(let address): return .success(address)
         case .failure: return .failure(.malformed)
         }
+    }
+
+    /// Exactly what is in the store, unparsed, or nil if nothing is.
+    ///
+    /// For the one caller that must be able to see a value the parser rejects: onboarding decides
+    /// which pane a person is on, and a malformed leftover is the same situation as an empty store —
+    /// but reading the key directly at that call site would make a second reader of the one key, and
+    /// that is how a box and a code end up disagreeing about what is saved.
+    public static func stored(in defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: key)
     }
 
     /// Refused before anything is stored.
@@ -69,11 +95,92 @@ public enum AddressPreference {
     /// this the seam existed only to be injected in tests; now the one thing that can actually stop a
     /// write is checked here, and `SaveAddress` reports it as *the address is the problem, not the
     /// store* — a different sentence from a refusal, and a different one from a failed save.
-    public static func write(_ address: DialAddress, to defaults: UserDefaults = .standard) throws {
+    public static func write(
+        _ address: DialAddress, to defaults: UserDefaults = .standard, at when: Date = Date(),
+    ) throws {
         let rendered = address.displayed
         guard case .success(let readBack) = DialAddress.parse(rendered), readBack == address else {
             throw WriteRefusal.wouldNotReadBack(rendered)
         }
+        // **A new address inherits nothing.** Proof is proof about one destination: a phone that came
+        // through the old one says nothing about this one, and carrying the date across would mark an
+        // address proven that nothing has ever reached. Re-saving the SAME address is not a change —
+        // somebody pressing Save twice, or confirming a suffix — so its proof survives.
+        if defaults.string(forKey: key) != rendered {
+            defaults.removeObject(forKey: provenKey)
+            defaults.set(when, forKey: storedAtKey)
+        }
         defaults.set(rendered, forKey: key)
+    }
+
+    /// When a phone completed enrolment through the address stored now, or nil while it is unproven.
+    public static func provenAt(from defaults: UserDefaults = .standard) -> Date? {
+        defaults.object(forKey: provenKey) as? Date
+    }
+
+    /// Records what the trust store says, **after checking that it says it about this address**.
+    ///
+    /// The whole rule is the comparison: an enrolment is proof of the address that was stored when it
+    /// happened. An enrolment older than the address it is being credited to belongs to the previous
+    /// one, and crediting it would put a proven mark on a destination nothing has ever reached — the
+    /// same class of mistake as a green tick for an address that merely resolves.
+    ///
+    /// An address stored before this app recorded `storedAtKey` has no moment to compare against, so
+    /// it stays unproven. Unproven is the safe direction: it costs one scan and claims nothing.
+    @discardableResult
+    public static func recordEnrolment(
+        at enrolment: Date?, in defaults: UserDefaults = .standard,
+    ) -> Date? {
+        let proof = proof(enrolment: enrolment, addressStoredAt: defaults.object(forKey: storedAtKey) as? Date)
+        if let proof {
+            defaults.set(proof, forKey: provenKey)
+        } else {
+            defaults.removeObject(forKey: provenKey)
+        }
+        return proof
+    }
+
+    /// The rule on its own, so it can be read and tested without a store.
+    static func proof(enrolment: Date?, addressStoredAt: Date?) -> Date? {
+        guard let enrolment, let addressStoredAt, enrolment >= addressStoredAt else { return nil }
+        return enrolment
+    }
+}
+
+/// **The one thing this app can observe about pairing today**, and exactly how much it means.
+///
+/// The bridge writes its trust store when a phone completes enrolment, and nothing else in this
+/// product writes that file. So its existence is the Go side's own record that a phone came through,
+/// and its modification date is when.
+///
+/// ### What this deliberately does not do
+///
+/// It does not read the file. The format belongs to `bridge/internal/trust`, and a Swift decoder for
+/// it would be a second reader of a shape only one side owns — the first thing two readers do is
+/// disagree, and this one would disagree about which phone may drive the owner's Mac.
+///
+/// ### Two limits, written down rather than discovered later
+///
+///  - **Unpairing is not modelled**, because nothing on this side can unpair yet. When it can, an
+///    emptied trust store will still be a file with a recent date, and this must start asking the
+///    bridge how many peers it holds rather than asking the file system whether the file is there.
+///  - **A phone connecting is not an enrolment.** A phone that keeps its pinned peer through an
+///    address change proves the new address in practice and writes nothing here, so the address stays
+///    marked unproven until somebody re-scans. That is the safe direction and re-scanning is offered
+///    for exactly this reason.
+public enum EnrolmentRecord {
+
+    /// Named by the Go side; kept here as one constant so there is one place to change when the
+    /// bridge's state directory changes shape.
+    static let fileName = "peers.json"
+
+    /// When a phone last completed enrolment, according to the bridge's own record, or nil if it has
+    /// never written one.
+    public static func recordedAt(
+        inStateDirectory directory: URL, fileManager: FileManager = .default,
+    ) -> Date? {
+        let path = directory.appending(path: fileName).path
+        guard let attributes = try? fileManager.attributesOfItem(atPath: path) else { return nil }
+        return attributes[.modificationDate] as? Date
     }
 }

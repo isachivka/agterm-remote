@@ -87,9 +87,15 @@ struct AddressPreferenceTests {
         #expect(try AddressPreference.read(from: store.defaults).get() == address)
     }
 
-    /// Writing twice leaves one value. **There is no history and no second key**: a store that kept the
-    /// previous address would be a second source of truth for the one fact this app exists to keep
-    /// unambiguous.
+    /// Writing twice leaves one value. **There is no history and no second address**: a store that
+    /// kept the previous one would be a second source of truth for the one fact this app exists to
+    /// keep unambiguous.
+    ///
+    /// The keys are named rather than counted, and the list grew once — for the two dates that say
+    /// when this address was stored and when a phone last came through it. Neither is an address, and
+    /// the second half of this test is what holds that line: **every value in the store is checked,
+    /// and only one of them may be readable as a destination.** A key-count assertion would have
+    /// passed a store holding `previousAddress` just as happily as one holding a timestamp.
     @Test func aSecondWriteReplacesTheFirst() throws {
         let store = scratch()
         defer { store.discard() }
@@ -98,8 +104,16 @@ struct AddressPreferenceTests {
         try AddressPreference.write(DialAddress(host: "new.example-homelab.invalid", port: 9443), to: store.defaults)
 
         #expect(try AddressPreference.read(from: store.defaults).get().displayed == "new.example-homelab.invalid:9443")
-        let keys = store.defaults.persistentDomain(forName: store.suite)?.keys.sorted() ?? []
-        #expect(keys == [AddressPreference.key])
+        let stored = store.defaults.persistentDomain(forName: store.suite) ?? [:]
+        #expect(
+            stored.keys.sorted()
+                == [AddressPreference.key, AddressPreference.storedAtKey].sorted())
+        let addresses = stored.filter {
+            guard let text = $0.value as? String else { return false }
+            if case .success = DialAddress.parse(text) { return true }
+            return false
+        }
+        #expect(addresses.keys.sorted() == [AddressPreference.key], "a second address in the store")
     }
 
     /// **The invariant, performed rather than asserted in prose.**
@@ -162,5 +176,110 @@ struct AddressPreferenceTests {
         // A parse-shaped address is not refused by the store, so this one saves. The point is that
         // the seam is real: `SaveAddress` can now actually receive a throw from the default writer.
         guard case .saved = outcome else { return #expect(Bool(false), "\(outcome)") }
+    }
+}
+
+/// **Unproven is the resting state of an address, and proof belongs to one address at a time.**
+///
+/// The mark exists because this Mac cannot test its own public address — see `OnboardingWindow` for
+/// the argument in full — so the only thing that ever proves one is a phone arriving through it. Every
+/// case here is about not crediting an address with something another address earned.
+struct AddressProvenanceTests {
+
+    private func scratch(_ name: String = #function) -> ScratchDefaults {
+        ScratchDefaults(suite: "address-provenance-\(name)-\(UUID().uuidString)")
+    }
+
+    private let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
+    private let other = DialAddress(host: "agterm.other-homelab.invalid", port: 8443)
+
+    @Test func anAddressIsUnprovenTheMomentItIsStored() throws {
+        let store = scratch()
+        defer { store.discard() }
+
+        try AddressPreference.write(address, to: store.defaults)
+
+        #expect(AddressPreference.provenAt(from: store.defaults) == nil)
+    }
+
+    /// An enrolment after the address was stored is proof of that address, and the date it happened
+    /// is what is kept — not the moment the app noticed, which is whenever it was next opened.
+    @Test func anEnrolmentAfterTheAddressWasStoredProvesIt() throws {
+        let store = scratch()
+        defer { store.discard() }
+        let stored = Date(timeIntervalSince1970: 1_000)
+        try AddressPreference.write(address, to: store.defaults, at: stored)
+
+        let proof = AddressPreference.recordEnrolment(at: stored.addingTimeInterval(60), in: store.defaults)
+
+        #expect(proof == stored.addingTimeInterval(60))
+        #expect(AddressPreference.provenAt(from: store.defaults) == proof)
+    }
+
+    /// **The case the whole rule is for.** A phone that enrolled through the previous address says
+    /// nothing about this one, and crediting it would put a proven mark on a destination nothing has
+    /// ever reached.
+    @Test func anEnrolmentOlderThanTheAddressIsNotCreditedToIt() throws {
+        let store = scratch()
+        defer { store.discard() }
+        let stored = Date(timeIntervalSince1970: 1_000)
+        try AddressPreference.write(address, to: store.defaults, at: stored)
+
+        #expect(AddressPreference.recordEnrolment(at: stored.addingTimeInterval(-60), in: store.defaults) == nil)
+        #expect(AddressPreference.provenAt(from: store.defaults) == nil)
+    }
+
+    @Test func changingTheAddressDiscardsTheProof() throws {
+        let store = scratch()
+        defer { store.discard() }
+        let stored = Date(timeIntervalSince1970: 1_000)
+        try AddressPreference.write(address, to: store.defaults, at: stored)
+        AddressPreference.recordEnrolment(at: stored.addingTimeInterval(60), in: store.defaults)
+
+        try AddressPreference.write(other, to: store.defaults, at: stored.addingTimeInterval(120))
+
+        #expect(AddressPreference.provenAt(from: store.defaults) == nil)
+        // And the old enrolment cannot prove the new address either: it is older than it.
+        #expect(AddressPreference.recordEnrolment(at: stored.addingTimeInterval(60), in: store.defaults) == nil)
+    }
+
+    /// Saving the same address again is not a change. Somebody presses Save twice, or confirms a
+    /// suffix; discarding the proof there would unprove an address nothing about which has moved.
+    @Test func savingTheSameAddressAgainKeepsItsProof() throws {
+        let store = scratch()
+        defer { store.discard() }
+        let stored = Date(timeIntervalSince1970: 1_000)
+        try AddressPreference.write(address, to: store.defaults, at: stored)
+        let proof = AddressPreference.recordEnrolment(at: stored.addingTimeInterval(60), in: store.defaults)
+
+        try AddressPreference.write(address, to: store.defaults, at: stored.addingTimeInterval(600))
+
+        #expect(AddressPreference.provenAt(from: store.defaults) == proof)
+    }
+
+    /// An address written before this app recorded when it was written has no moment to compare an
+    /// enrolment against. It stays unproven, which costs one scan and claims nothing.
+    @Test func anAddressFromBeforeThisRuleStaysUnproven() {
+        let store = scratch()
+        defer { store.discard() }
+        store.defaults.set(address.displayed, forKey: AddressPreference.key)
+
+        #expect(AddressPreference.recordEnrolment(at: Date(), in: store.defaults) == nil)
+    }
+
+    /// The trust store is read as a date and nothing else — **its contents belong to the Go side.**
+    @Test func theEnrolmentRecordIsTheTrustStoresDateOrNothing() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        #expect(EnrolmentRecord.recordedAt(inStateDirectory: directory) == nil)
+
+        let written = Date(timeIntervalSince1970: 2_000)
+        let file = directory.appending(path: "peers.json")
+        try Data("[]".utf8).write(to: file)
+        try FileManager.default.setAttributes([.modificationDate: written], ofItemAtPath: file.path)
+
+        #expect(EnrolmentRecord.recordedAt(inStateDirectory: directory) == written)
     }
 }
