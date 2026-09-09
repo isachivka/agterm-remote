@@ -55,8 +55,29 @@ data class BackStack(val entries: List<Screen>) {
     fun pop(): BackStack = if (canPop) BackStack(entries.dropLast(1)) else this
 
     companion object {
-        /** The terminal. It is what the app is for, so it is what the app opens on. */
-        val Initial = BackStack(listOf(Screen.Agterm))
+
+        /**
+         * The stack the app opens with, given where [startDestination] says it should open.
+         *
+         * There is no unconditional `Initial` any more, and its absence is the point: a constant root
+         * is what made the app open on a terminal that cannot connect for anyone who has not paired
+         * yet. Building the root from a [Start] means the question "where does this open" has exactly
+         * one answer and it is a function of a fact about the device.
+         *
+         * **[Start.Pairing] puts the terminal underneath rather than opening on a single entry**, and
+         * that entry is load-bearing. `pop()` at the root returns the stack unchanged - correct, so
+         * that system back exits the app rather than being swallowed - which on a one-entry pairing
+         * stack would leave an owner who does not want to pair this minute with no way off the screen
+         * but the task switcher. With the terminal behind it, back does the ordinary thing.
+         *
+         * Pairing resolves to [Screen.Settings] because that is where pairing is: the settings page is
+         * the pairing page with one switch on it. It gets a destination of its own when the scanner
+         * screen is built, and this is the single line that has to change then.
+         */
+        fun initialFor(start: Start): BackStack = when (start) {
+            Start.Terminal -> BackStack(listOf(Screen.Agterm))
+            Start.Pairing -> BackStack(listOf(Screen.Agterm, Screen.Settings))
+        }
 
         /**
          * Survives rotation, and survives the process being killed in the background.

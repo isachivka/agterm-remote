@@ -98,7 +98,7 @@ code to explain it — which is the failure shape this whole directory exists to
 So the rule has one implementation per language and one cross-language enforcement:
 
 - Go: `enroll.Payload.DialAddress()`, which is `net.JoinHostPort`.
-- Kotlin: whatever the equivalent is there, asserted against this field.
+- Kotlin: `EnrollPayload.dialAddress`, asserted against this field by `EnrollPayloadTest`.
 - **The vectors are the connection.** A Go helper the Android app cannot import proves nothing about
   the Android app.
 
@@ -134,7 +134,26 @@ The refusal kinds, and what each means:
 | `host-not-utf8` | The host bytes are not valid UTF-8. |
 
 A decoder must refuse every entry. It need not produce the same message, and it need not distinguish
-`length-mismatch` from `too-short` in its own error type — but it must not return a value.
+`length-mismatch` from `too-short` in its own error type — but it must not return a value. The one
+kind it **must** keep separate is `unsupported-version`: "this Mac is newer than this app" and "that
+is not a pairing code" are different things to tell an owner, with different remedies, and the accept
+vectors cannot tell a decoder that reports the difference from one that shrugs.
+
+### Two things a base64 library will not do for you
+
+Both were written here as assumptions and both turned out to be wrong in one direction or the other,
+which is what the reject vectors are for.
+
+- **`java.util.Base64.getDecoder()` does not refuse missing padding.** Measured on JDK 21: `'='` is
+  "accepted and interpreted as the end of the encoded byte data, but is not required", so the
+  unpadded rendering decodes as happily as the padded one. What it does refuse is a final unit of the
+  wrong length. Go's `base64.StdEncoding` refuses the unpadded form, so **a Java-side decoder has to
+  check the length itself** — a length that is not a multiple of four is not standard padded base64 —
+  or the same string is a pairing code on one machine and not on the other. The `unpadded` vector is
+  the only thing that says so.
+- **Go's decoder skips `\r` and `\n` where Java's refuses them**, which no vector can pin, because a
+  vector is one string and this is a disagreement about what surrounds it. Nothing in this project
+  emits either, so Go is simply the more permissive side and it is recorded rather than fixed.
 
 ## Reading these files from the Android side
 

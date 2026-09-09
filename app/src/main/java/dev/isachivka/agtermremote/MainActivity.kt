@@ -26,6 +26,7 @@ import dev.isachivka.agtermremote.settings.StyledScreenStore
 import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.nav.BackStack
 import dev.isachivka.agtermremote.ui.nav.Screen
+import dev.isachivka.agtermremote.ui.nav.startDestination
 import dev.isachivka.agtermremote.ui.theme.AppTheme
 
 class MainActivity : ComponentActivity() {
@@ -60,11 +61,16 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * The two screens, and one back stack across them.
+ * The two screens, one back stack across them, and the fact that decides which one opens.
  *
  * The launcher this used to open on is gone with the module grid, and so are the update and
  * reachability destinations it led to. What is left is the terminal and the settings screen that
  * pairing lives in.
+ *
+ * **Which of the two the app opens on is conditional**, and the port left it unconditional. A phone
+ * with no laptop opened on a terminal that cannot connect, with the one thing it needed to do behind
+ * a settings button. [startDestination] is that rule and it is a pure function of one stored fact -
+ * see its own note on why the fact is "is a laptop paired" and not "has this owner seen the tour".
  *
  * [BackStack] holds where the owner is as a fact about the journey rather than one hardcoded per
  * screen. That was worth a file of its own when there were five destinations reachable two ways;
@@ -73,9 +79,24 @@ class MainActivity : ComponentActivity() {
  */
 @Composable
 fun App(modifier: Modifier = Modifier) {
-    // rememberSaveable so a rotation does not bounce the owner out of settings mid-pair.
-    var stack by rememberSaveable(stateSaver = BackStack.StateSaver) { mutableStateOf(BackStack.Initial) }
     val context = LocalContext.current
+
+    // One store, read by the start rule below and handed to the pairing sequence, so "is a laptop
+    // paired" cannot be answered two different ways in the same composition.
+    val pairedLaptop = remember(context) { PairedLaptop(context) }
+
+    // rememberSaveable so a rotation does not bounce the owner out of settings mid-pair - and note
+    // that this initialiser runs ONCE, on the first composition and never after a restore, which is
+    // exactly the behaviour wanted: pairing completing, or the process being killed on the terminal,
+    // must not send the owner back to where the app happened to open.
+    //
+    // The store is read here, on the main thread, once per launch. It is a file of a few hundred
+    // bytes in the app's own directory, opened before the first frame - the same shape as the styled
+    // screen preference read below it. If either ever becomes a reason the first frame is late, both
+    // move together.
+    var stack by rememberSaveable(stateSaver = BackStack.StateSaver) {
+        mutableStateOf(BackStack.initialFor(startDestination(hasPairedLaptop = pairedLaptop.isPaired)))
+    }
 
     // Enabled only when there is somewhere to go back to, so that back on the terminal exits the
     // app the way it always has rather than being quietly swallowed.
@@ -84,9 +105,9 @@ fun App(modifier: Modifier = Modifier) {
     // Plain `remember`, not a ViewModel: the sequence holds no coroutines and no state of its own -
     // every transition is a pure function of what it was handed, and what persists is the file
     // underneath it. A ViewModel here would add a lifecycle to something that has none.
-    val pairingSequence = remember(context) {
+    val pairingSequence = remember(pairedLaptop) {
         PairingSequence(
-            store = PairedLaptop(context),
+            store = pairedLaptop,
             // The identity is generated when pairing BEGINS rather than lazily at first connect: at
             // first connect the owner is away from the laptop, and a certificate produced then has
             // nowhere to go and nobody to explain a failure to.
