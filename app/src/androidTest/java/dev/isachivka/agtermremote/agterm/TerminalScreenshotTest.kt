@@ -34,8 +34,8 @@ class TerminalScreenshotTest {
     private val screen = buildString {
         appendLine("$ ls -la")
         appendLine("total 48")
-        appendLine("drwxr-xr-x  8 is  staff   256 Jul 29 22:20 .")
-        appendLine("-rw-r--r--  1 is  staff  1024 Jul 29 22:19 notes.md")
+        appendLine("drwxr-xr-x  8 user  staff   256 Jul 29 22:20 .")
+        appendLine("-rw-r--r--  1 user  staff  1024 Jul 29 22:19 notes.md")
         appendLine("$ hello")
         appendLine("zsh: command not found: hello")
         append("$ ")

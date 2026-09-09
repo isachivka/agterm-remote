@@ -20,14 +20,13 @@
 #   - A generic hostname. `bridge.example.org` and a real vanity domain look identical to this.
 #   - `/home/<name>`, and every other non-macOS home directory layout.
 #   - A MAC address, a serial number, a Wi-Fi SSID.
-#   - **A BARE MACHINE NAME.** A host called `basement-nas` is an ordinary English-looking word in an
-#     ordinary sentence, and nothing distinguishes it from prose. This is not a gap that can be
-#     closed: the fix would be a list of the owner's machine names, and writing them down here is
-#     committing the very thing the guard exists to keep out. It has already happened once - a
-#     server's name survived the Android port inside the comment asserting that no address ever
-#     enters this repository, and it was found by a person reading, on 2026-09-09. Names are a
-#     READING job, and a green run here says nothing about them.
-#   - The same goes for a service name, a network name, or a person's name.
+#   - **A BARE NAME**, of a machine, a service, a network, a project or a person. A host called
+#     `basement-nas` is an ordinary English-looking word in an ordinary sentence, and a Unix login is
+#     three letters. This guard matches SHAPES and a name has none; the general statement of that,
+#     including what would actually work and why it is not here, is in the header of
+#     scripts/lib/tracked-files.sh, which every guard in this directory sources. Read it before
+#     treating a green run as coverage. Names are a READING job, and this port has now been swept for
+#     them three times, finding one more on each pass.
 #   - Anything under docs/superpowers/plans/, which is excluded outright - see the note by that
 #     exclusion.
 # This is a floor, not a ceiling. It catches the mistakes that have actually been made twice.
