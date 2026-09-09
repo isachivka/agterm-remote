@@ -81,12 +81,14 @@ func startBridge(t *testing.T) *bridge {
 	// One enrolment handler for this bridge, as main.go builds it: it owns the rate limit over the one
 	// log line an anonymous caller can cause, so it must be shared by every connection this listener
 	// serves and shared with nothing else.
+	//
+	// Handed to the listener whole rather than as its Serve method: the listener defers its Flush
+	// alongside its own failure counter's, so nothing here - and nothing in main - has to remember it.
 	enrolment := enroll.NewHandler(window, store, bridgeCert, func(p trust.Peer) { paired <- p })
-	t.Cleanup(enrolment.Flush)
 	srv := listener.New(
 		enroll.ServerConfigFor(bridgeOwn, enroll.NewPinnedClients(store).Certificates, window),
 		handler,
-		enrolment.Serve,
+		enrolment,
 		true)
 
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")

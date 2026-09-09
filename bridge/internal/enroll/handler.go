@@ -50,10 +50,17 @@ const maxRequestBytes = 64 << 10
 // the owner's own handshake.
 //
 // That product was measured rather than reasoned about. At about 5,400 completed handshakes a second
-// on loopback, ten seconds implied roughly 54,000 live connections at about 19 KB each - a gigabyte,
-// plus 54,000 goroutines and descriptors. Two seconds implies about 10,800 and 200 MB. **No phone
-// needs ten seconds to write one line onto a connection whose handshake has already completed** - the
-// whole request is under a kilobyte - so the four fifths bought nothing at all.
+// on loopback, **the 10s this used to be** implied roughly 54,000 live connections at about 19 KB
+// each - a gigabyte, plus 54,000 goroutines and descriptors. Two seconds implies about 10,800 and
+// 200 MB.
+//
+// Nothing legitimate paid for that reduction. A phone's request rides immediately behind the TLS
+// Finished, so two seconds is four to six round trips of slack even on a mobile link, and the whole
+// request is under a kilobyte. And the failure mode if a phone ever does run out of time is the cheap
+// one: it lands in readLine's error path, where the cause is nil - **nothing counted, nothing logged,
+// the token unspent and the window still open** - so the owner is not left re-arming a pairing panel,
+// the phone simply dials again. If field reports ever show retries, 5s is the knob, at roughly 513 MB
+// against 200 MB.
 //
 // The read ceiling looks like the same lever and is not, which is worth writing down because it is
 // the one somebody reaches for first. Measured: a silent holder costs 19,188 bytes, while a caller
@@ -205,7 +212,9 @@ func (h *Handler) Flush() { h.refusals.flush() }
 //
 //   - No disk write. Nothing reaches the trust store before [Window.Consume] has returned nil.
 //   - No agterm round trip, no request parser beyond this file's own, no handler.
-//   - Bounded memory and bounded time: 64 KiB and ten seconds.
+//   - Bounded memory and bounded time: 64 KiB and [exchangeTimeout], which is the deadline that
+//     actually bounds this branch - see the note on that constant for why it, and not the read
+//     ceiling, is the number to reach for.
 //   - **A log line only for a refusal that actually cost the caller something. Everything else is
 //     counted and reported as an aggregate at most once per [refusalReportEvery].**
 //
@@ -289,23 +298,44 @@ const refusalReportEvery = time.Minute
 // refusalRate counts the refusals that cost their caller nothing and writes one line per interval,
 // however many there were.
 //
-// # Why this is package state rather than a field on something
+// # Why this belongs to a [Handler] and not to the process
 //
-// It has to be shared by every enrolment connection in the process, and [Serve] is handed a
-// connection, a window, a store and a certificate - all of which are the right lifetime for an
-// exchange and the wrong one for a log-rate decision. The [Window] would survive long enough, but a
-// counter about the LOG has no business inside the type whose three security properties are the whole
-// of this package's argument, and which two separate guards read.
+// It has to outlive an exchange - a rate limit whose lifetime is one connection is not a rate limit -
+// and the shortest thing that outlives every exchange on one bridge is that bridge's handler. So it is
+// a field on it.
 //
-// So: one counter, for the whole process, next to the only function that writes to the log. The log
-// itself is process-global, so a rate limit over it is as well. It holds no secret, nothing about who
-// called, and nothing that survives a restart.
+// It was a package variable, on the argument that the log is process-global so a rate limit over it
+// should be too. **That argument is wrong and the code proved it.** The log is a destination; the
+// decision being rate-limited is "how often may THIS bridge tell its owner that somebody is knocking
+// at ITS window", and two bridges in one process are two owners, two windows and two answers. Sharing
+// the counter made each one's traffic suppress the other's diagnostics: a hundred refusals across two
+// handlers printed nothing where two reports were owed - see
+// TestTwoBridgesInOneProcessCountSeparately, which asserts an equality precisely because every
+// earlier assertion was "no more than one line" and a shared counter satisfies that too.
+//
+// The other half of belonging to a Handler is that it can be STOPPED. An aggregate written by the
+// next event has nothing to ride on once the events stop, so it needs a flush, and a flush needs an
+// owner with a lifetime - which a package variable does not have. internal/listener defers
+// [Handler.Flush] alongside its own failure counter's, so the guarantee is structural rather than
+// something main has to remember.
+//
+// It holds no secret, nothing about who called, and nothing that survives a restart.
 //
 // Safe for concurrent use. Enrolment connections are served one goroutine each.
 type refusalRate struct {
-	// now is injected, like [Window]'s. Nothing in this file calls time.Now() - the elapsed span this
-	// reports is a value a test has to be able to assert in microseconds rather than approximate by
-	// sleeping, and the first version had its own test poking at windowEnd to get around that.
+	// now is injected, like [Window]'s, and it IS [Window]'s - see [NewHandler].
+	//
+	// Because the elapsed span this reports is a value a test has to assert in microseconds rather
+	// than approximate by sleeping; the first version called time.Now and its test had to reach into
+	// the struct to move the clock.
+	//
+	// **Only this counter is on the injected clock.** The rest of the file calls time.Now directly, in
+	// three places - the connection deadline, the certificate's validity check, and the PairedAt stamp
+	// - and that is deliberate rather than an omission: none of the three is a decision a test needs
+	// to steer, and two of them are handed to the operating system and to the disk, which have their
+	// own opinion about what time it is. The stronger claim - that nothing in this file calls
+	// time.Now at all - was written here by carrying over a sentence that is true of window.go, and
+	// was false the moment it was written.
 	now func() time.Time
 
 	mu    sync.Mutex

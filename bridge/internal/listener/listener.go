@@ -141,19 +141,39 @@ type Requests interface {
 	Handle(ctx context.Context, req api.Request) api.Response
 }
 
-// Enrolment serves a connection that negotiated enroll.ProtoEnroll, and it is the ONLY thing such a
+// Enrolment serves connections that negotiated enroll.ProtoEnroll, and it is the ONLY thing such a
 // connection ever reaches.
 //
-// A function rather than an interface because there is nothing to ask it: it is handed an
-// already-handshaked connection, it owns that connection, and it closes it. In the bridge it is
-// enroll.Serve with the window, the trust store and the bridge's certificate closed over.
+// # Two methods rather than one function, and the second one is why
+//
+// This was `func(net.Conn)`, on the reasoning that there is nothing to ask it: it is handed an
+// already-handshaked connection, it owns that connection, it closes it. That was true of serving and
+// false of stopping. An enrolment handler counts the refusals an anonymous caller can cause and
+// reports them as an aggregate, so a burst that stops - or a bridge that exits - leaves a count that
+// nothing will ever write unless somebody flushes it, and "somebody remembers to call Flush in main"
+// is a guarantee that lasts until the second entry point.
+//
+// **This package already solved that for its own counter one line below: `defer s.failures.flush()`.**
+// So the enrolment handler gets the same treatment, which means it has to be something with a Flush
+// on it. Serve is dispatched per connection; Flush runs once, when Serve returns, whatever the reason
+// it returned.
+//
+// Defined here rather than in internal/enroll because it is this package's requirement of its
+// collaborator - the consumer names the interface, so enroll.Handler satisfies it without knowing
+// this type exists, and a test can satisfy it with four lines.
 //
 // **nil is a legitimate value and means "this listener serves no enrolment".** A connection that
 // negotiated the enrolment protocol is then closed unserved, which is the same answer the dispatch
 // gives to a protocol nobody claimed - see accept. That is what lets a caller that has no pairing
 // flow (the front door's tests, a bridge built before this argument existed) leave it out and be
 // safer for it rather than accidentally more permissive.
-type Enrolment func(conn net.Conn)
+type Enrolment interface {
+	// Serve owns one already-handshaked connection and closes it.
+	Serve(conn net.Conn)
+	// Flush writes out whatever the handler has been holding back, and is called when this listener
+	// stops. Must be safe to call with nothing held.
+	Flush()
+}
 
 // Server accepts pinned-mTLS connections and serves the two verbs.
 type Server struct {
@@ -193,8 +213,17 @@ func New(tlsConfig *tls.Config, handler Requests, enrolment Enrolment, peerIsCal
 }
 
 // Serve accepts until ln is closed.
+//
+// Both deferred flushes are the same guarantee and it is worth stating once: a counter that reports
+// an aggregate on the NEXT event has nothing to ride on once the events stop, so whatever it is
+// holding when this returns has to be written here or never. That covers every way out - the context
+// cancelled, a signal, the parent watchdog, or an accept error - because it is a defer on the call
+// that owns the listener's whole life rather than a line in whoever wrote main.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	defer s.failures.flush()
+	if s.enrol != nil {
+		defer s.enrol.Flush()
+	}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -297,14 +326,16 @@ func (s *Server) accept(ctx context.Context, raw net.Conn) {
 	// which sounds like the right kind of bound and is the wrong one here, because the semaphore is
 	// shared: twelve anonymous callers stalling inside enrolment would refuse the OWNER's handshake,
 	// which is the second invariant this package holds. What bounds an anonymous exchange instead is
-	// its own deadline, inside enroll.Serve, plus a bounded read - a goroutine and 64 KiB for ten
-	// seconds, and nothing that outlives the traffic.
+	// its own deadline, inside the enrolment handler, plus a bounded read - a goroutine and 64 KiB for
+	// as long as that deadline, and nothing that outlives the traffic. **The number lives there and is
+	// deliberately not repeated here**: it is a rate times a duration, it has already been retuned
+	// once, and a second copy of it in another package is a sentence that goes stale silently.
 	switch tlsConn.ConnectionState().NegotiatedProtocol {
 	case enroll.ProtoAPI:
 		s.serve(ctx, tlsConn)
 	case enroll.ProtoEnroll:
 		if s.enrol != nil {
-			s.enrol(tlsConn)
+			s.enrol.Serve(tlsConn)
 		}
 	}
 }

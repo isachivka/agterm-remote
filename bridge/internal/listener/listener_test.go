@@ -677,7 +677,7 @@ func TestAListenerWithNoEnrolmentHandlerServesNoEnrolment(t *testing.T) {
 // everything.
 func TestTheEnrolmentBranchReachesItsHandler(t *testing.T) {
 	got := make(chan string, 1)
-	h := startWith(t, []string{enroll.ProtoEnroll}, func(conn net.Conn) {
+	h := startWith(t, []string{enroll.ProtoEnroll}, enrolFunc(func(conn net.Conn) {
 		defer conn.Close()
 		line, err := readLine(conn, 1024)
 		if err != nil {
@@ -685,7 +685,7 @@ func TestTheEnrolmentBranchReachesItsHandler(t *testing.T) {
 		}
 		got <- string(line)
 		_, _ = conn.Write([]byte("{\"ok\":false}\n"))
-	})
+	}))
 
 	conn, err := tls.Dial("tcp", h.addr, protoClient(h.phoneOwn, h.bridgeCert, enroll.ProtoEnroll))
 	if err != nil {
@@ -736,6 +736,14 @@ func startWith(t *testing.T, protos []string, enrolment Enrolment) *harness {
 		phoneOwn: phoneOwn, bridgeCert: bridgeCert, phoneCert: phoneCert}
 }
 
+// enrolFunc is a bare function as an Enrolment, for the tests that care about the dispatch and not
+// about what the handler holds. Flush is a no-op here; the real one is enroll.Handler's.
+type enrolFunc func(net.Conn)
+
+func (f enrolFunc) Serve(conn net.Conn) { f(conn) }
+
+func (f enrolFunc) Flush() {}
+
 func protoClient(own tls.Certificate, bridgeCert *x509.Certificate, proto string) *tls.Config {
 	cfg := pinning.ClientConfig(own, bridgeCert)
 	cfg.NextProtos = []string{proto}
@@ -770,5 +778,103 @@ func TestAPinnedCallerOfferingNoProtocolAtAllIsClosed(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if got := h.rec.calls.Load(); got != 0 {
 		t.Fatalf("a caller that negotiated nothing reached the handler %d time(s)", got)
+	}
+}
+
+// **The enrolment handler's Flush runs because this package defers it, not because a caller remembered.**
+//
+// The enrolment handler counts the refusals an anonymous caller can cause and writes them as an
+// aggregate on the next event, so a burst that stops - or a bridge that exits - leaves a count nothing
+// will ever report unless something flushes it. That was a `defer` in main, which is a guarantee that
+// lasts exactly until somebody writes a second entry point.
+//
+// It is now a defer in Serve, beside this package's own `s.failures.flush()`, so it fires on every way
+// out. Both are exercised here: the context being cancelled, and the listener being closed underneath.
+func TestTheEnrolmentHandlerIsFlushedWhenTheListenerStops(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stop func(cancel context.CancelFunc, ln net.Listener)
+	}{
+		{"the context is cancelled", func(cancel context.CancelFunc, ln net.Listener) {
+			cancel()
+			_ = ln.Close()
+		}},
+		{"the listener is closed underneath", func(_ context.CancelFunc, ln net.Listener) {
+			_ = ln.Close()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log.SetOutput(io.Discard)
+			_, bridgeOwn, _ := mintPeer(t, "bridge")
+			_, _, phoneCert := mintPeer(t, "phone")
+
+			flushed := make(chan struct{}, 1)
+			cfg := pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert})
+			cfg.NextProtos = []string{enroll.ProtoAPI}
+			srv := New(cfg, &recorder{}, &flushRecorder{flushed: flushed}, true)
+
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- srv.Serve(ctx, ln) }()
+
+			tc.stop(cancel, ln)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Serve did not return")
+			}
+
+			select {
+			case <-flushed:
+			default:
+				t.Fatal("the enrolment handler was never flushed; its count would be lost and nothing " +
+					"in this package would say so")
+			}
+		})
+	}
+}
+
+// A nil enrolment - a listener that serves none - must not be flushed, which is the other half of nil
+// being a legitimate value.
+func TestANilEnrolmentIsNotFlushed(t *testing.T) {
+	log.SetOutput(io.Discard)
+	_, bridgeOwn, _ := mintPeer(t, "bridge")
+	_, _, phoneCert := mintPeer(t, "phone")
+
+	cfg := pinning.ServerConfig(bridgeOwn, []*x509.Certificate{phoneCert})
+	cfg.NextProtos = []string{enroll.ProtoAPI}
+	srv := New(cfg, &recorder{}, nil, true)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, ln) }()
+	_ = ln.Close()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return")
+	}
+}
+
+// flushRecorder is an Enrolment that only records having been stopped.
+type flushRecorder struct{ flushed chan struct{} }
+
+func (f *flushRecorder) Serve(conn net.Conn) { _ = conn.Close() }
+
+func (f *flushRecorder) Flush() {
+	select {
+	case f.flushed <- struct{}{}:
+	default:
 	}
 }

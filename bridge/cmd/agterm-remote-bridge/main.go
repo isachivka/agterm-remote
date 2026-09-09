@@ -205,10 +205,13 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	//
 	// The enrolment side, as one object rather than five arguments to a function: it owns the rate
 	// limit over the only log line an anonymous caller can cause, and that limit is per bridge rather
-	// than per process. Flush on the way out, or a burst that stopped is never reported - the same
-	// hook internal/listener's failure counter has.
+	// than per process.
+	//
+	// Nothing here has to remember to flush it. The listener defers that alongside its own failure
+	// counter, so the guarantee comes from the type that owns the accept loop rather than from
+	// whoever writes the next entry point - which is the same reason its handshake-failure aggregate
+	// has never depended on a caller either.
 	enrolment := enroll.NewHandler(window, peers, leaf, pairedPhone)
-	defer enrolment.Flush()
 
 	// The third argument is what a connection that negotiated `agterm/enroll-1` reaches, and the
 	// switch in listener.accept is what guarantees it reaches nothing else. Everything enrolment
@@ -217,7 +220,7 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	srv := listener.New(
 		enroll.ServerConfigFor(own, enroll.NewPinnedClients(peers).Certificates, window),
 		handler,
-		enrolment.Serve,
+		enrolment,
 		false)
 
 	tcp, err := net.Listen("tcp", listenAddr)
