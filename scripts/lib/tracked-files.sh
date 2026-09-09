@@ -115,7 +115,8 @@ fi
 # a fraction of the tree while claiming to have checked all of it is worse than no guard.
 guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine function
   local root="$1" name="$2" examine="$3"
-  local listing blob entry meta path mode rest object file target subject previous extension origin
+  local listing blob decoded entry meta path mode rest object file target subject previous extension
+  local origin
 
   # The callback is checked BEFORE anything is walked, because the shell will not check it for you.
   # `if "$examine" ...; then` treats "command not found" as a non-zero status like any other, so one
@@ -134,6 +135,9 @@ guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine funct
   trap 'rm -rf "$guard_tmp"' EXIT
   listing="$guard_tmp/listing"
   blob="$guard_tmp/blob"
+  # Where the decode check below throws its output. Truncated on every file, so it holds one file at
+  # a time; why it is a file at all is the comment on that check.
+  decoded="$guard_tmp/decoded"
 
   # `-s`, so every entry arrives with its MODE and its object id. The mode comes from the index
   # rather than from the filesystem, which matters twice: a symlink is a symlink even when it
@@ -260,7 +264,35 @@ guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine funct
     # straight through a byte pattern written for UTF-8. So it is refused, with BOTH ways out named:
     # convert it if it is text, list it if it is not. A refusal that offers one answer sends whoever
     # hits it towards the other one by guessing.
-    if ! iconv -f UTF-8 -t UTF-8 < "$target" >/dev/null 2>&1; then
+    #
+    # The decoded bytes are thrown at a scratch FILE, and that is not a style choice. This was
+    # `>/dev/null`, and on macOS that makes iconv fail on VALID UTF-8 once the conversion fills its
+    # 1024-byte output buffer, because it then does an ioctl on its own stdout and /dev/null answers
+    # ENOTTY:
+    #
+    #     $ printf '\342\200\224%.0s' $(seq 342) > m.txt        # 1026 bytes, all valid
+    #     $ iconv -f UTF-8 -t UTF-8 < m.txt >/dev/null
+    #     iconv: iconv(): Inappropriate ioctl for device        # exit 1
+    #     $ iconv -f UTF-8 -t UTF-8 < m.txt > some-file         # exit 0
+    #
+    # One em dash less passes, and so does a megabyte of ASCII, because nothing there is converted.
+    # It is neither a size limit nor a content problem - it is the DESTINATION, and which files it
+    # hits turns on where a multi-byte character happens to fall across that buffer, so it arrives
+    # looking like a file being singled out for nothing. The guard then tells somebody their
+    # perfectly good file is not UTF-8 and instructs them to convert it from an encoding it was
+    # never in. Following that advice corrupts the file.
+    #
+    # Every tracked file today happens to be English prose with occasional punctuation above ASCII,
+    # so the whole tree squeaks past. That is luck, not correctness, and it runs out the moment a
+    # localisation string, a CJK test fixture or a table of box-drawing characters lands.
+    #
+    # A regular file is what iconv is for, on BSD and GNU alike, and it costs one truncating write
+    # per file, of bytes the walk is about to read anyway. The alternative - a pipe, reading iconv's
+    # own status out of PIPESTATUS - also works, and was not taken: it is correct only while
+    # `pipefail` is set or the index is read explicitly, and the failure when it is not is that
+    # every file decodes and nothing is ever refused. A fail-open one edit away is not worth a
+    # saved write.
+    if ! iconv -f UTF-8 -t UTF-8 < "$target" > "$decoded" 2>/dev/null; then
       if guard_is_binary_asset "$path"; then
         guard_declined_binary=$((guard_declined_binary + 1))
         continue
