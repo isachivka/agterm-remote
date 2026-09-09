@@ -141,7 +141,7 @@ func TestOpenReportsAnExpiryAPayloadCarriesExactly(t *testing.T) {
 	if canonical := expiry.Truncate(time.Second).UTC(); expiry != canonical {
 		t.Fatalf("expiry %#v is not already canonical, want %#v", expiry, canonical)
 	}
-	want := enroll.Payload{Host: "example.test", Port: 8443, Token: token, Expiry: expiry}
+	want := enroll.Payload{Host: "example.test", Port: 8443, Scheme: enroll.SchemePlain, Token: token, Expiry: expiry}
 	text, err := enroll.EncodeToText(want)
 	if err != nil {
 		t.Fatal(err)
@@ -496,7 +496,7 @@ func TestTheClampedExpiryIsWhatThePayloadWouldCarry(t *testing.T) {
 	token, expiry := w.Open(time.Hour)
 
 	text, err := enroll.EncodeToText(enroll.Payload{
-		Host: "a-laptop.invalid", Port: 8443, Token: token, Expiry: expiry})
+		Host: "a-laptop.invalid", Port: 8443, Scheme: enroll.SchemePlain, Token: token, Expiry: expiry})
 	if err != nil {
 		t.Fatal(err)
 	}

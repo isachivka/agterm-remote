@@ -1,7 +1,6 @@
 package dev.isachivka.agtermremote.agterm
 
 import dev.isachivka.agtermremote.pairing.ConnectionProfile
-import dev.isachivka.agtermremote.wire.BridgeUrl
 import dev.isachivka.agtermremote.wire.TlsDriver
 import dev.isachivka.agtermremote.wire.WebSocketStream
 import dev.isachivka.agtermremote.wire.WireException
@@ -540,7 +539,7 @@ class BridgeConnection private constructor(
             identity: KeyManager,
             openStream: (String) -> WebSocketStream = { WebSocketStream.open(it) },
         ): BridgeConnection {
-            val stream = openStream(BridgeUrl.of(profile.dialAddress))
+            val stream = openStream(profile.dialUrl)
             val driver = TlsDriver.open(
                 transportIn = stream.input,
                 transportOut = stream.output,

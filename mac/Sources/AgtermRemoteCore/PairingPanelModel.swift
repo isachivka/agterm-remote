@@ -108,7 +108,9 @@ public protocol ControlClient {
     /// - Returns: the payload, and the expiry **the window will actually enforce** — clamped to
     ///   `enroll.MaxTTL` at the far end. A panel that displayed the ttl it asked for would strand
     ///   somebody mid-pairing on a code that advertised an hour against a five-minute window.
-    func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date)
+    func openPairing(
+        ttl: TimeInterval, advertise: String, frontDoor: FrontDoor
+    ) throws -> (payload: String, expiresAt: Date)
 
     /// Shut it. Idempotent at the far end; this app still only calls it for a window it opened.
     func closePairing() throws
@@ -266,7 +268,10 @@ public final class PairingPanelModel: @unchecked Sendable {
     ///
     /// - Parameter address: what the code should tell the phone to dial. **Read at the press**, not at
     ///   the spawn — see [ControlClient.openPairing]. Empty leaves the choice to the bridge.
-    public func open(advertising address: String = "") {
+    /// - Parameter frontDoor: what stands between the phone and this Mac, which decides how the code
+    ///   tells the phone to OPEN that address. Read at the press for the same reason the address is:
+    ///   somebody can put a proxy in front while this app is running.
+    public func open(advertising address: String = "", frontDoor: FrontDoor = .unset) {
         let mine = lock.withLock { () -> Int in
             generation += 1
             return generation
@@ -274,7 +279,8 @@ public final class PairingPanelModel: @unchecked Sendable {
         apply(.asking, from: mine)
         off { [self] in
             do {
-                let minted = try control.openPairing(ttl: Self.ttl, advertise: address)
+                let minted = try control.openPairing(
+                    ttl: Self.ttl, advertise: address, frontDoor: frontDoor)
                 let accepted = lock.withLock { () -> Bool in
                     guard generation == mine else { return false }
                     weOpenedAWindow = true

@@ -1,5 +1,6 @@
 package dev.isachivka.agtermremote.pairing
 
+import dev.isachivka.agtermremote.wire.BridgeUrl
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -27,6 +28,20 @@ data class EnrollPayload(
     val host: String,
     /** The bridge's TLS port. */
     val port: Int,
+    /**
+     * How the phone OPENS that address - the outer hop, not the pinned mTLS inside it.
+     *
+     * **It says nothing about trust and cannot.** The outer hop authenticates nobody in either form;
+     * the laptop is identified by [fingerprint], compared against the certificate presented by the
+     * TLS that runs inside the upgraded stream. What this decides is whether the phone can reach the
+     * front door at all.
+     *
+     * Added in payload version 2. Version 1 carried no such field and every implementation of it
+     * opened a plain connection, so a version 1 code decodes to [StreamKind.DirectTcp] - which is
+     * what it meant. It could not be inferred and must not be guessed: trying one and falling back
+     * to the other doubles the worst case and replaces a fact the owner knows with a heuristic.
+     */
+    val scheme: StreamKind = StreamKind.DirectTcp,
     /** SHA-256 of the bridge certificate's DER. 32 bytes, and not the certificate itself. */
     val fingerprint: ByteArray,
     /**
@@ -75,6 +90,16 @@ data class EnrollPayload(
      */
     val dialAddress: String get() = if (host.contains(':')) "[$host]:$port" else "$host:$port"
 
+    /**
+     * The whole address the phone opens: scheme, host, port, and the path the front door ignores.
+     *
+     * **Derived here and pinned by `dial_url` on every accept vector**, for the same reason
+     * [dialAddress] is. The two mistakes compose: a dialler that builds its own URL has to remember
+     * the bracketing AND the scheme mapping, and getting either wrong produces a phone that will not
+     * pair with nothing on the wire to say why.
+     */
+    val dialUrl: String get() = BridgeUrl.of(dialAddress, scheme)
+
     // Data classes compare arrays by identity, which would make two payloads decoded from the same
     // code unequal. Equality decides whether a rescan changed anything, so it compares contents.
     override fun equals(other: Any?): Boolean {
@@ -82,6 +107,7 @@ data class EnrollPayload(
         if (other !is EnrollPayload) return false
         return host == other.host &&
             port == other.port &&
+            scheme == other.scheme &&
             fingerprint.contentEquals(other.fingerprint) &&
             token.contentEquals(other.token) &&
             expiryUnix == other.expiryUnix
@@ -90,6 +116,7 @@ data class EnrollPayload(
     override fun hashCode(): Int {
         var result = host.hashCode()
         result = 31 * result + port
+        result = 31 * result + scheme.hashCode()
         result = 31 * result + fingerprint.contentHashCode()
         result = 31 * result + token.contentHashCode()
         result = 31 * result + expiryUnix.hashCode()
@@ -176,7 +203,17 @@ object EnrollCodec {
      * remainder hopefully. Bumping this is a breaking wire change and lands on both sides at once -
      * see `wire/README.md`, which describes what has to happen to the vectors when it does.
      */
-    const val VERSION = 1
+    const val VERSION = 2
+
+    /**
+     * Version 1, which this build reads and never writes.
+     *
+     * Kept readable rather than retired because refusing it would report "this Mac is newer than this
+     * app" about a code this build can read perfectly - the wrong sentence, and one nobody can act
+     * on. A version 1 payload means [StreamKind.DirectTcp]: that is the only thing version 1
+     * implementations ever did.
+     */
+    const val VERSION_LEGACY = 1
 
     /**
      * The ceiling on any length-prefixed field, in bytes. Matches `enroll.MaxField` on the Go side.
@@ -190,8 +227,16 @@ object EnrollCodec {
     private const val TOKEN_LENGTH = 32
     private const val EXPIRY_LENGTH = 4
 
-    /** version + host length + port, plus the three fixed fields: the smallest a payload can be. */
-    private const val FIXED_LENGTH = 1 + 2 + 2 + FINGERPRINT_LENGTH + TOKEN_LENGTH + EXPIRY_LENGTH
+    /** version + host length + port, plus the three fixed fields: the smallest a version 1 payload can be. */
+    private const val FIXED_LENGTH_V1 = 1 + 2 + 2 + FINGERPRINT_LENGTH + TOKEN_LENGTH + EXPIRY_LENGTH
+
+    /**
+     * Version 2 adds one byte, the scheme, immediately after the version.
+     *
+     * After the version and before anything length-prefixed, deliberately: it is fixed-width and
+     * readable the moment the version is known, so nothing has to trust a length field to find it.
+     */
+    private const val FIXED_LENGTH_V2 = FIXED_LENGTH_V1 + 1
 
     /**
      * Reads the text a QR code carried, and says why if it will not.
@@ -246,11 +291,34 @@ object EnrollCodec {
         if (bytes.isEmpty()) return EnrollDecode.NotAPairingCode
 
         val version = bytes[0].toInt() and 0xFF
-        if (version != VERSION) return EnrollDecode.UnsupportedVersion(version)
 
-        if (bytes.size < FIXED_LENGTH) return EnrollDecode.NotAPairingCode
+        // **The two layouts are chosen by the version, never treated as interchangeable.** Read with
+        // version 1's offsets, a version 2 payload's scheme byte becomes the high half of the host
+        // length and the payload claims a host of some thousands of bytes - which the ceiling happens
+        // to catch, and which is luck rather than a check. The `v2-payload-labelled-v1` reject vector
+        // is what holds this.
+        val fixedLength: Int
+        val at: Int
+        when (version) {
+            VERSION_LEGACY -> { fixedLength = FIXED_LENGTH_V1; at = 1 }
+            VERSION -> { fixedLength = FIXED_LENGTH_V2; at = 2 }
+            else -> return EnrollDecode.UnsupportedVersion(version)
+        }
 
-        val hostLength = u16(bytes, 1)
+        if (bytes.size < fixedLength) return EnrollDecode.NotAPairingCode
+
+        // Version 1 said nothing about how to reach the address and every implementation of it opened
+        // a plain connection, so that is what it decodes to. A scheme this build does not know is a
+        // Mac that can arrange something this phone cannot: refused rather than treated as either
+        // known one, because guessing wrong is a phone that cannot reach a front door and cannot say
+        // why.
+        val scheme = if (version == VERSION_LEGACY) {
+            StreamKind.DirectTcp
+        } else {
+            StreamKind.fromWire(bytes[1].toInt() and 0xFF) ?: return EnrollDecode.NotAPairingCode
+        }
+
+        val hostLength = u16(bytes, at)
         // Both halves matter and neither implies the other. The ceiling stops a hostile length
         // becoming an allocation; the length check below stops it becoming a read past the end -
         // 4096 is a comfortable allocation and still far past the end of an 85-byte buffer.
@@ -261,27 +329,29 @@ object EnrollCodec {
         // One check for short and for long: the length the header describes is the only length this
         // payload may have. A trailing byte is the tail of a second message, or somebody probing for
         // a parser that ignores what it does not understand.
-        if (bytes.size != FIXED_LENGTH + hostLength) return EnrollDecode.NotAPairingCode
+        if (bytes.size != fixedLength + hostLength) return EnrollDecode.NotAPairingCode
 
         // Refused rather than repaired. `String(bytes, UTF_8)` substitutes a replacement character
         // for every bad byte and returns happily, which would arrive at a DIFFERENT host from the one
         // the owner is looking at - so the decoder reports rather than substitutes.
-        val host = utf8OrNull(bytes.copyOfRange(3, 3 + hostLength)) ?: return EnrollDecode.NotAPairingCode
+        val host = utf8OrNull(bytes.copyOfRange(at + 2, at + 2 + hostLength))
+            ?: return EnrollDecode.NotAPairingCode
 
-        var at = 3 + hostLength
-        val port = u16(bytes, at)
-        at += 2
+        var cursor = at + 2 + hostLength
+        val port = u16(bytes, cursor)
+        cursor += 2
         // copyOfRange, so the payload owns its bytes and the buffer it came from can be reused.
-        val fingerprint = bytes.copyOfRange(at, at + FINGERPRINT_LENGTH)
-        at += FINGERPRINT_LENGTH
-        val token = bytes.copyOfRange(at, at + TOKEN_LENGTH)
-        at += TOKEN_LENGTH
-        val expiry = u32(bytes, at)
+        val fingerprint = bytes.copyOfRange(cursor, cursor + FINGERPRINT_LENGTH)
+        cursor += FINGERPRINT_LENGTH
+        val token = bytes.copyOfRange(cursor, cursor + TOKEN_LENGTH)
+        cursor += TOKEN_LENGTH
+        val expiry = u32(bytes, cursor)
 
         return EnrollDecode.Read(
             EnrollPayload(
                 host = host,
                 port = port,
+                scheme = scheme,
                 fingerprint = fingerprint,
                 token = token,
                 expiryUnix = expiry,

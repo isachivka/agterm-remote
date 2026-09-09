@@ -313,13 +313,13 @@ class EnrollmentTest {
     @Test
     fun `an address that is not one is never dialled`() {
         val notAddresses = listOf(
-            EnrollPayload("host name", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload("", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload(" ", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload("laptop.example/../..", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload("laptop.example\nhost", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload("evil@laptop.example", 8443, ByteArray(32), ByteArray(32), 0),
-            EnrollPayload("laptop.example", 0, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("host name", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload(" ", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("laptop.example/../..", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("laptop.example\nhost", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("evil@laptop.example", 8443, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
+            EnrollPayload("laptop.example", 0, StreamKind.DirectTcp, ByteArray(32), ByteArray(32), 0),
         )
 
         for (payload in notAddresses) {
@@ -451,13 +451,20 @@ class EnrollmentTest {
         }
     }
 
-    /** The transport seam: a plain socket, so the fake bridge above can be a plain TLS server. */
-    private class SocketStream(address: String) : ByteStream {
+    /**
+     * The transport seam: a plain socket, so the fake bridge above can be a plain TLS server.
+     *
+     * It is handed the URL the payload derived, and takes the address back out of it. That is not
+     * ceremony: parsing what production actually passes is what makes the test cover the derivation
+     * rather than route around it - `theUrlIsWhatTheTransportIsHanded` asserts the scheme in it.
+     */
+    private class SocketStream(url: String) : ByteStream {
         private val socket: Socket
 
         init {
-            val host = address.substringBeforeLast(':').removeSurrounding("[", "]")
-            val port = address.substringAfterLast(':').toInt()
+            val authority = url.substringAfter("://").substringBefore("/")
+            val host = authority.substringBeforeLast(':').removeSurrounding("[", "]")
+            val port = authority.substringAfterLast(':').toInt()
             socket = Socket(host, port)
         }
 

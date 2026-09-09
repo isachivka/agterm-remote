@@ -294,7 +294,10 @@ func newBridge(t *testing.T) *bridge {
 	}
 	b.window = enroll.NewWindow(func() time.Time { return b.now })
 	b.pairing = &Pairing{
-		Listening:   listenAddress,
+		Listening: listenAddress,
+		// A plain hop, which is the straight-through deployment and what most of these tests are
+		// about. TestPairOpenCarriesTheScheme covers the other one and the refusal when nobody said.
+		Scheme:      enroll.SchemePlain,
 		Window:      b.window,
 		Peers:       peers,
 		Certificate: leaf,
@@ -1142,5 +1145,85 @@ func TestPairOpenRefusesAnAddressThatIsNotOne(t *testing.T) {
 			t.Errorf("%q left an enrolment window open behind a refusal", bad)
 			b.window.Close()
 		}
+	}
+}
+
+// **The scheme the code carries is the owner's answer about their own network, and this door is
+// where they give it.**
+//
+// It cannot be derived from anything this process can see. What decides it is whatever publishes the
+// Mac to the phone - a forwarded port, or a router that proxies and terminates HTTPS at the edge -
+// and getting it wrong produces a phone that cannot reach the front door with the address right, the
+// fingerprint right, and nothing anywhere saying why.
+func TestPairOpenCarriesTheScheme(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		request string
+		want    enroll.Scheme
+	}{
+		{"the bridge's own default when the caller says nothing", `{"verb":"pair-open","ttl_seconds":300}`, enroll.SchemePlain},
+		{"plain, said explicitly", `{"verb":"pair-open","ttl_seconds":300,"scheme":"plain"}`, enroll.SchemePlain},
+		{"tls, which is what a proxying router needs", `{"verb":"pair-open","ttl_seconds":300,"scheme":"tls"}`, enroll.SchemeTLS},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBridge(t)
+			path := servingWith(t, &fakeFit{}, b.pairing)
+
+			got := call(t, path, c.request)
+			text, _ := got["payload"].(string)
+			payload, err := enroll.DecodeText(text)
+			if err != nil {
+				t.Fatalf("the phone cannot read this code: %v", err)
+			}
+			if payload.Scheme != c.want {
+				t.Errorf("the code says %v, want %v", payload.Scheme, c.want)
+			}
+		})
+	}
+}
+
+// The owner puts a proxy in front while this process is running, and this process is not restarted
+// when they do. Minting a code is where the current answer is available, which is the same argument
+// the advertised address already makes.
+func TestPairOpensSchemeOverridesTheBridgesOwn(t *testing.T) {
+	b := newBridge(t)
+	b.pairing.Scheme = enroll.SchemeTLS
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	got := call(t, path, `{"verb":"pair-open","ttl_seconds":300,"scheme":"plain"}`)
+	payload, err := enroll.DecodeText(got["payload"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Scheme != enroll.SchemePlain {
+		t.Errorf("the request's scheme must win over the process default, got %v", payload.Scheme)
+	}
+}
+
+// A word this build does not know is refused, and **the live window is not spent finding that out**.
+// A caller that mistypes must not cost somebody else the code they are looking at.
+func TestPairOpenRefusesASchemeItDoesNotKnow(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	got := call(t, path, `{"verb":"pair-open","ttl_seconds":300,"scheme":"https"}`)
+	wantKeys(t, got, "error")
+	if b.window.IsOpen() {
+		t.Error("a refused request opened a window")
+	}
+}
+
+// A bridge nobody told is a bridge that must say so, not one that guesses. Defaulting here is the
+// assumption version 1 of the payload made silently, and the failure it produced is the one this
+// whole field exists to end.
+func TestPairOpenRefusesWhenNobodySaidHowThePhoneReachesThisMac(t *testing.T) {
+	b := newBridge(t)
+	b.pairing.Scheme = 0
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	got := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+	wantKeys(t, got, "error")
+	if b.window.IsOpen() {
+		t.Error("a refused request opened a window")
 	}
 }

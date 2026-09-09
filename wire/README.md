@@ -59,22 +59,30 @@ A JSON array. Each entry is one payload, given as inputs plus the text they must
 |---|---|
 | `name` | Identifies the vector in a failure message. |
 | `note` | What this vector is here to pin. Prose; no code reads it. |
+| `version` | Which layout `text` is in. **Both are in the set**: 2 is what a Mac mints, 1 is decode-only. |
 | `host` | The host the phone dials, as text. |
-| `port` | The bridge's TLS port. |
+| `port` | The port the phone dials. Whose port it is depends on `scheme`. |
+| `scheme` | How the phone OPENS that address: 1 plain (`ws`), 2 TLS (`wss`). Added at version 2; a version 1 payload carries no such byte and **means** 1. |
 | `fingerprint_hex` | 32 bytes: SHA-256 of the bridge certificate's DER. |
 | `token_hex` | 32 bytes: the one-time enrolment secret. |
 | `expiry_unix` | Unix **seconds**, carried on the wire as a `uint32`. |
 | `text` | What the encoder must produce: standard, **padded** base64. |
 | `dial_address` | **Derived, not encoded.** `host` and `port` joined the way something about to connect must join them. Nothing in `text` carries it. |
+| `dial_url` | **Derived too**, from `scheme`, `host` and `port`: the whole string something opens. See below. |
 
 The fingerprints and tokens are fixtures — arithmetic ramps and fills, not secrets, and not derived
 from any. Real ones are 32 bytes from a cryptographic random source and never appear in a repository.
 
-The five vectors cover a short host, the longest legitimate DNS name (253 bytes, which is what pins
+The version 2 vectors cover a short host, the longest legitimate DNS name (253 bytes, which is what pins
 the length prefix as a `uint16` rather than a byte), a host with a multi-byte character (which pins
 that the prefix counts bytes and not characters), an IPv6 literal, and every field at its ceiling —
 the largest port a `uint16` holds and the last second a `uint32` expiry can name,
-2106-02-07T06:28:15Z.
+2106-02-07T06:28:15Z, and between them they carry both schemes — a set that exercised only one would
+leave the field untested, which `EnrollPayloadTest` asserts against directly.
+
+Two more are version 1, and they are the whole reason the old layout still decodes: a decoder that
+refused them would report *this Mac is newer than this app* about a code it can read perfectly, which
+is the wrong sentence and one nobody can act on.
 
 ### `dial_address`, and why a decoder test is not enough
 
@@ -106,7 +114,36 @@ Each side must produce `dial_address` from the decoded `host` and `port` and com
 byte, exactly as it does with `text`. The rule, stated without reference to either language: bracket
 the host if and only if it contains a colon, then append `:` and the port.
 
-Adding this field did **not** change any `text`. It is additive, and the four vectors that predate it
+### `dial_url`, and the second constant that was wrong for somebody
+
+`dial_address` pins the bracketing. `dial_url` pins the bracketing **and** the scheme together, and it
+is a separate field because the two mistakes compose: a dialler builds one string, and getting either
+half wrong produces a phone that will not pair with nothing on the wire to say why.
+
+The scheme is in the payload at all because it was a constant twice and both constants were wrong for
+somebody. `wss://` cannot reach a bridge with nothing in front of it. `ws://` cannot reach a router
+that publishes a Mac by proxying it — which is the deployment this project was written for, and which
+shipped broken because the direct route was substituted for the proxied one in every test.
+
+It could not be inferred and must not be guessed. Trying one and falling back to the other leaks
+nothing — the token travels only after the inner handshake — and was still rejected: it doubles the
+worst-case connect and replaces a fact the owner knows with a heuristic.
+
+- Go: `enroll.Payload.DialURL()`.
+- Kotlin: `EnrollPayload.dialUrl`, and `ConnectionProfile.dialUrl`, which must agree — the address
+  enrolment dialled and the address the terminal dials are the same address.
+
+### What version 2 changed
+
+The scheme byte, immediately after the version and before anything length-prefixed, so it is readable
+the moment the version is known and no length field has to be trusted to find it.
+
+**Every version 1 `text` in the accept file changed**, because those vectors are now emitted at
+version 2. The two `legacy-v1-*` vectors are the old layout, kept so it stays decodable, and the
+`v2-payload-labelled-v1` reject vector holds the rule that the version chooses the layout rather than
+the two being interchangeable.
+
+Adding `dial_address` did **not** change any `text`. It is additive, and the four vectors that predate it
 carry byte-identical text — proven by the accept-vector test, which still pins those bytes.
 
 ## `enroll-payload-reject-vectors.json`
@@ -127,6 +164,7 @@ The refusal kinds, and what each means:
 | `not-standard-base64` | The text is not standard padded base64 (URL-safe alphabet, or missing padding). |
 | `empty-payload` | Zero bytes after base64 decoding. |
 | `unsupported-version` | The version byte is not one this build speaks. Report it as a version, never parse on. |
+| `unsupported-scheme` | The scheme byte is not one this build knows. **Not** a malformed payload: it is a Mac that can arrange something this phone cannot, and it must never be treated as either known scheme. |
 | `too-short` | Shorter than the fixed minimum, before any field is read. |
 | `host-length-over-ceiling` | The host length exceeds `MaxField` (4096). Refuse **before** allocating for it. |
 | `empty-host` | The host length is zero. |

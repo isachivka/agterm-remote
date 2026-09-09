@@ -27,6 +27,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// the pairing window uses: **one address, one writer, one set of refusals.** A second save here
     /// would be a second place that decides what an address is.
     var onSave: ((String, String) -> Void)?
+    /// Told the moment the owner picks, because every choice is valid and a Save button here would
+    /// only be a way to forget to press it.
+    var onFrontDoor: ((FrontDoor) -> Void)?
 
     /// Opens the pairing window. The code is rendered in one place, by the type that owns the
     /// invocation of `bridgecert`; drawing a second one here would be a second picture of the same
@@ -41,6 +44,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     private var field = AddressField()
     private var addressBox: NSTextField?
     private var portBox: NSTextField?
+    private var frontDoorBox: NSPopUpButton?
+    /// What the popup is showing. Seeded by the caller from the store before the pane is drawn.
+    var frontDoor = FrontDoor.unset
 
     /// What the arrival-port box starts with. Empty means it follows the dial port.
     var arrivalPortText = ""
@@ -289,9 +295,31 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         port.widthAnchor.constraint(equalToConstant: 120).isActive = true
         portBox = port
 
+        // **What stands in front, which this Mac cannot observe and must ask.**
+        //
+        // See FrontDoor: it decides how the phone opens this address and whether the bridge serves
+        // TLS on its own port. Both constants that answered it before were wrong for somebody, and
+        // the failure is a code that pairs nowhere with nothing anywhere saying why.
+        //
+        // A popup rather than a checkbox, because there are three answers and the third one is the
+        // one nobody would guess at: it names the symptom - a 502 - rather than the mechanism.
+        let door = NSPopUpButton(frame: .zero, pullsDown: false)
+        for choice in FrontDoor.allCases {
+            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
+            door.lastItem?.representedObject = choice.rawValue
+        }
+        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
+        door.target = self
+        door.action = #selector(frontDoorChanged(_:))
+        door.translatesAutoresizingMaskIntoConstraints = false
+        door.widthAnchor.constraint(equalToConstant: 340).isActive = true
+        frontDoorBox = door
+
         let column = NSStackView(views: [
             row, caption(OnboardingCopy.arrivalPortHeading), port,
             body(OnboardingCopy.arrivalPortExplanation),
+            caption(FrontDoorCopy.heading), body(FrontDoorCopy.explanation), door,
+            body(FrontDoorCopy.detail(for: frontDoor)),
         ])
         column.orientation = .vertical
         column.alignment = .leading
@@ -308,6 +336,19 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         let button = NSButton(title: title, target: self, action: #selector(recheckTapped))
         button.bezelStyle = .rounded
         return button
+    }
+
+    /// Stored on the change rather than on Save, because there is no way to get it wrong: every
+    /// choice is valid, and the only thing a Save button would add is a way to forget to press it.
+    @objc private func frontDoorChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+            let chosen = FrontDoor(rawValue: raw)
+        else { return }
+        frontDoor = chosen
+        onFrontDoor?(chosen)
+        // Redrawn so the detail under the popup describes what is now selected. The third answer's
+        // detail is the whole reason somebody would pick it.
+        show(current, field: field)
     }
 
     @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }

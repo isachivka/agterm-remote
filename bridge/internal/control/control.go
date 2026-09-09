@@ -181,6 +181,17 @@ type request struct {
 	// Nothing here validates the host - see [dialTarget], where the reason a host policy would be
 	// actively harmful is written down. What is refused is a string that is not a host and a port.
 	Advertise string `json:"advertise,omitempty"`
+	// Scheme is how the phone should open the address, for THIS code: "plain" or "tls". Empty means
+	// [Pairing.Scheme], which is what a caller with one deployment means.
+	//
+	// It rides on the request for the same reason [request.Advertise] does: the owner can change it
+	// while this process runs - they put a proxy in front, or take one away - and this process is not
+	// restarted when they do. Minting the code is where the current answer is available, so that is
+	// where it is taken.
+	//
+	// Words rather than the wire numbers. This is a local socket read by a person's tooling as often
+	// as by the Mac app, and "tls" is a value somebody can type correctly from memory.
+	Scheme string `json:"scheme,omitempty"`
 }
 
 // response says what happened to a `restore`, including when nothing did.
@@ -339,6 +350,18 @@ type Pairing struct {
 	// what the phone checks the TLS server certificate against, and a mismatch fails every pairing
 	// with a message about a wrong certificate.
 	Certificate *x509.Certificate
+	// Scheme is how a phone should OPEN the address above, when the caller does not say.
+	//
+	// It is not a property of this listener and cannot be derived from one: what decides it is
+	// whatever publishes this Mac to the phone. A forwarded port, a mesh network or anything else
+	// that carries packets to this process means [enroll.SchemePlain]; a router that proxies, a
+	// tunnel whose edge is HTTPS, or a reverse proxy in front means [enroll.SchemeTLS], and the TLS
+	// in question is that thing's, not this one's.
+	//
+	// The zero value is refused rather than defaulted, in [openWindow], for the same reason
+	// enroll.Encode refuses it: a default here is an assumption about somebody's network made
+	// silently, and the failure it produces is a phone that cannot pair with nothing to look at.
+	Scheme enroll.Scheme
 	// Agterm reports whether agterm is answering. A function rather than a client, so this package
 	// does not grow a second opinion about what "reachable" means - production passes the API
 	// handler's own probe, which is the ordinary sessions request and not a new code path.
@@ -519,7 +542,7 @@ func handle(ctx context.Context, conn net.Conn, fit Fit, pairing *Pairing) {
 	case VerbStatus:
 		status(ctx, conn, pairing)
 	case VerbPairOpen:
-		openWindow(conn, pairing, req.TTLSeconds, req.Advertise)
+		openWindow(conn, pairing, req.TTLSeconds, req.Advertise, req.Scheme)
 	case VerbPairClose:
 		closeWindow(conn, pairing)
 	case VerbUnpair:
@@ -598,7 +621,7 @@ func status(ctx context.Context, conn net.Conn, p *Pairing) {
 // strands somebody mid-pairing, and the phone cannot tell a closed window from an unreachable laptop.
 // So the token and the expiry both come out of this one call, and
 // TestPairOpenAdvertisesTheExpiryTheWindowWillEnforce is what keeps it that way.
-func openWindow(conn net.Conn, p *Pairing, ttlSeconds int, advertise string) {
+func openWindow(conn net.Conn, p *Pairing, ttlSeconds int, advertise, scheme string) {
 	if !p.ready() {
 		reply(conn, errorReply{Error: "this bridge was built without a pairing half"})
 		return
@@ -640,6 +663,28 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int, advertise string) {
 			"with the address the phone should use.", host)
 	}
 
+	// The scheme, resolved before anything is opened, so a request naming one this build does not
+	// know costs nobody their live window.
+	//
+	// A word rather than a number on this socket, and refused rather than defaulted: "the phone
+	// dials it plainly" is a claim about the owner's network that this process cannot check and must
+	// not invent. See [Pairing.Scheme].
+	published := p.Scheme
+	switch scheme {
+	case "":
+	case "plain":
+		published = enroll.SchemePlain
+	case "tls":
+		published = enroll.SchemeTLS
+	default:
+		reply(conn, errorReply{Error: fmt.Sprintf("scheme %q is not one of plain, tls", scheme)})
+		return
+	}
+	if !published.Known() {
+		reply(conn, errorReply{Error: "this bridge was not told how a phone should open its address; pass scheme, or start it with -advertise-scheme"})
+		return
+	}
+
 	// Asked BEFORE the call, because Open is what destroys the answer. A window already open here
 	// means this call is about to make somebody's code stop working - see [pairOpenReply.Replaced].
 	replaced := p.Window.IsOpen()
@@ -648,8 +693,9 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int, advertise string) {
 	token, expiry := p.Window.Open(time.Duration(ttlSeconds) * time.Second)
 
 	text, err := enroll.EncodeToText(enroll.Payload{
-		Host: host,
-		Port: port,
+		Host:   host,
+		Port:   port,
+		Scheme: published,
 		// The bridge's OWN certificate, hashed here rather than carried around pre-computed, so what
 		// the code fingerprints is the certificate this process is serving.
 		Fingerprint: sha256.Sum256(p.Certificate.Raw),

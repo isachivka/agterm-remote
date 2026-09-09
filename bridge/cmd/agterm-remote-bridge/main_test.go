@@ -15,6 +15,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
+	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
 func TestMain(m *testing.M) {
@@ -282,7 +285,9 @@ func TestTheReadyLineIsPrintedOnceTheListenerIsBound(t *testing.T) {
 	defer log.SetOutput(io.Discard)
 
 	done := make(chan error, 1)
-	go func() { done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", 0) }()
+	go func() {
+		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", enroll.SchemePlain, "", "", false, 0)
+	}()
 
 	deadline := time.Now().Add(20 * time.Second)
 	for !strings.Contains(said.String(), readyLine) {
@@ -351,4 +356,191 @@ func TestTheCodeNamesWhatAPhoneDialsRatherThanWhatIsBound(t *testing.T) {
 	if got := advertised("", "127.0.0.1:8443"); got != "127.0.0.1:8443" {
 		t.Fatalf("with nothing advertised the bound address must stand; got %q", got)
 	}
+}
+
+// **A proxy that insists on an HTTPS backend must be able to reach this port, and this is the test
+// whose absence let that break.**
+//
+// The on-link wrapper was removed on the argument that it authenticates nothing. That argument is
+// true and is about security; what the wrapper is for is reachability. A router configured to speak
+// HTTPS to its backend opens TLS to this port, and against a plaintext listener it gets a connection
+// that will not answer its ClientHello and returns 502 to the phone - with the address right, the
+// fingerprint right and nothing anywhere saying why.
+//
+// Nothing about the security model is asserted here, because there is nothing to assert: this
+// certificate is not validated by anything and is not meant to be. What is asserted is that a TLS
+// client gets a handshake, which is the whole of what the router needs and the whole of what was
+// lost.
+func TestTheOnLinkHopAnswersATlsClientWhenGivenACertificate(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeOnLinkPair(t, dir)
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	said := &safeBuffer{}
+	log.SetOutput(said)
+	defer log.SetOutput(io.Discard)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "",
+			enroll.SchemeTLS, certPath, keyPath, false, 0)
+	}()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(said.String(), readyLine) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the bridge never became ready. It said:\n%s", said.String())
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the bridge stopped before it was ready: %v\n%s", err, said.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// InsecureSkipVerify because this certificate authenticates nothing and there is no name to
+	// check it against - which is the honest shape of what a proxying router does here, and is
+	// stated in the wrapper's own comment rather than being a shortcut taken by this test.
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("a proxy speaking TLS to the backend could not reach this bridge: %v", err)
+	}
+	defer conn.Close()
+	if !conn.ConnectionState().HandshakeComplete {
+		t.Fatal("the on-link handshake did not complete")
+	}
+	if !strings.Contains(said.String(), "authenticates nothing") {
+		t.Errorf("the log must say what this layer is and is not. It said:\n%s", said.String())
+	}
+}
+
+// The flag an owner actually uses: no certificate to make, and the bridge mints one that nothing
+// validates because nothing can. Asserted through the same TLS dial as the explicit-paths case, and
+// asserted to be reused rather than re-minted, so a router that caches it is not surprised on a
+// restart.
+func TestOnLinkTlsMintsItsOwnCertificateWhenGivenNoFiles(t *testing.T) {
+	stateDir := t.TempDir()
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	said := &safeBuffer{}
+	log.SetOutput(said)
+	defer log.SetOutput(io.Discard)
+
+	go func() {
+		_ = run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), stateDir, "",
+			enroll.SchemeTLS, "", "", true, 0)
+	}()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(said.String(), readyLine) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the bridge never became ready. It said:\n%s", said.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("a proxy speaking TLS to the backend could not reach this bridge: %v", err)
+	}
+	defer conn.Close()
+
+	before, err := os.ReadFile(filepath.Join(stateDir, onLinkCertFile))
+	if err != nil {
+		t.Fatalf("the minted certificate is not in the state directory: %v", err)
+	}
+	// Reused rather than re-minted. onLinkIdentity is the only thing that decides this, so it is
+	// asked directly rather than by restarting a listener.
+	if _, _, err := onLinkIdentity(stateDir); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(stateDir, onLinkCertFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("the on-link certificate was re-minted over an existing one")
+	}
+	// **It is not the identity.** A phone pins the identity; nothing pins this. Two files that got
+	// confused would be a bridge presenting the wrong certificate to every paired phone.
+	identityCert, err := os.ReadFile(filepath.Join(stateDir, certFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(identityCert) == string(after) {
+		t.Error("the on-link certificate and the bridge identity are the same file")
+	}
+}
+
+// The negative, and the reason the flag exists at all: without a certificate this port is plaintext,
+// so the same TLS client gets nothing. It is what the owner's deployment met.
+func TestWithoutACertificateTheOnLinkHopIsPlaintext(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	said := &safeBuffer{}
+	log.SetOutput(said)
+	defer log.SetOutput(io.Discard)
+
+	go func() {
+		_ = run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "",
+			enroll.SchemePlain, "", "", false, 0)
+	}()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(said.String(), readyLine) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the bridge never became ready. It said:\n%s", said.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	if err == nil {
+		conn.Close()
+		t.Fatal("a plaintext listener answered a TLS handshake, which it cannot do")
+	}
+}
+
+// writeOnLinkPair mints a throwaway certificate and key on disk, the way an owner would have one.
+//
+// A self-signed leaf with no name that matters, because nothing validates it - see the wrapper's
+// comment. It exists so the listener has something to present.
+func writeOnLinkPair(t *testing.T, dir string) (certPath, keyPath string) {
+	t.Helper()
+	id, err := pinning.Mint("on-link", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath = filepath.Join(dir, "lan-cert.pem")
+	keyPath = filepath.Join(dir, "lan-key.pem")
+	if err := os.WriteFile(certPath, id.CertPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, id.KeyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
 }

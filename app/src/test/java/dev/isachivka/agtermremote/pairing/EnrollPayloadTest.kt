@@ -76,6 +76,67 @@ class EnrollPayloadTest {
             assertEquals("$name: fingerprint", v.getString("fingerprint_hex"), got.fingerprint.toHex())
             assertEquals("$name: token", v.getString("token_hex"), got.token.toHex())
             assertEquals("$name: expiry", v.getLong("expiry_unix"), got.expiryUnix)
+            assertEquals("$name: scheme", v.getInt("scheme"), got.scheme.wire)
+        }
+    }
+
+    /**
+     * **Both layouts decode, and the set carries both on purpose.**
+     *
+     * Version 2 added the scheme byte. Version 1 is read and never written, because refusing it would
+     * report "this Mac is newer than this app" about a code this build reads perfectly - the wrong
+     * sentence and one nobody can act on. What version 1 MEANT is a plain connection, since that is
+     * the only thing any implementation of it ever did.
+     */
+    @Test
+    fun `both payload versions decode, and version one means a plain connection`() {
+        val byVersion = accepted().groupBy { it.getInt("version") }
+
+        assertTrue("the vector set must carry version 1", byVersion.containsKey(1))
+        assertTrue("the vector set must carry version 2", byVersion.containsKey(2))
+
+        byVersion.getValue(1).forEach { v ->
+            val name = v.getString("name")
+            val got = EnrollCodec.decodeText(v.getString("text")) ?: fail("vector $name did not decode") as Nothing
+            assertEquals("$name: a version 1 code means a plain connection", StreamKind.DirectTcp, got.scheme)
+        }
+        assertTrue(
+            "the version 2 vectors must exercise both schemes, or the field is untested",
+            byVersion.getValue(2).map { it.getInt("scheme") }.toSet() ==
+                setOf(StreamKind.DirectTcp.wire, StreamKind.DirectTls.wire),
+        )
+    }
+
+    /**
+     * **One layer past `dial_address`, and the reason the scheme is in the payload at all.**
+     *
+     * `dial_address` pins the bracketing. This pins the bracketing AND the scheme mapping together,
+     * because a dialler builds one string and gets both right or neither - and being wrong produces a
+     * phone that cannot reach a front door with the address correct and nothing on the wire to say
+     * why. That failure has now happened twice, once for each constant the scheme replaced.
+     */
+    @Test
+    fun `every accept vector produces the dial URL the vectors derive`() {
+        accepted().forEach { v ->
+            val name = v.getString("name")
+            val got = EnrollCodec.decodeText(v.getString("text")) ?: fail("vector $name did not decode") as Nothing
+
+            assertEquals("$name: dial URL", v.getString("dial_url"), got.dialUrl)
+        }
+    }
+
+    /**
+     * The stored profile has to dial the same way the enrolment did, and the two derive it
+     * separately. A pairing that completes and then never connects is what disagreement looks like.
+     */
+    @Test
+    fun `the stored profile dials the same URL the payload did`() {
+        accepted().forEach { v ->
+            val name = v.getString("name")
+            val payload = EnrollCodec.decodeText(v.getString("text")) ?: fail("vector $name") as Nothing
+            val profile = ConnectionProfile(payload.scheme, payload.host, payload.port, ByteArray(1))
+
+            assertEquals("$name: the terminal must dial what enrolment dialled", payload.dialUrl, profile.dialUrl)
         }
     }
 
@@ -150,7 +211,10 @@ class EnrollPayloadTest {
     fun `padding is enforced here, because the standard decoder does not enforce it`() {
         val unpadded = rejected().single { it.getString("name") == "unpadded" }.getString("text")
 
-        assertEquals("the premise: the decoder itself lets this through", 85, Base64.getDecoder().decode(unpadded).size)
+        // 86 rather than 85 since the payload grew a scheme byte at version 2. The NUMBER is not the
+        // point and the premise is: the platform decoder returns a whole payload for text Go refuses,
+        // so this codec has to enforce the padding itself.
+        assertEquals("the premise: the decoder itself lets this through", 86, Base64.getDecoder().decode(unpadded).size)
         assertNull("and the codec must not", EnrollCodec.decodeText(unpadded))
     }
 
@@ -174,6 +238,7 @@ class EnrollPayloadTest {
                 "empty-host",
                 "length-mismatch",
                 "host-not-utf8",
+                "unsupported-scheme",
             ),
             kinds,
         )

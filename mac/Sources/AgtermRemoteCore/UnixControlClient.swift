@@ -111,7 +111,13 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
         )
     }
 
-    public func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date) {
+    /// - Parameter frontDoor: what stands between the phone and this Mac. It decides the scheme the
+    ///   minted code carries, and it is **sent on every mint rather than left to the bridge's own
+    ///   default**: the owner can put a proxy in front while this bridge is running, and the bridge
+    ///   is not restarted when they do. Minting is where the current answer is available.
+    public func openPairing(
+        ttl: TimeInterval, advertise: String, frontDoor: FrontDoor
+    ) throws -> (payload: String, expiresAt: Date) {
         // Whole seconds: the wire field is an integer count and the payload carries Unix seconds.
         // Rounded up rather than truncated, so a ttl expressed as a fraction never becomes zero — the
         // bridge refuses a non-positive ttl, correctly, and it would be this app's rounding that
@@ -122,6 +128,7 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
         // the one spelling the far end documents.
         var request: [String: Any] = ["verb": "pair-open", "ttl_seconds": seconds]
         if !advertise.isEmpty { request["advertise"] = advertise }
+        request["scheme"] = frontDoor.advertiseScheme
         let reply = try call(request)
         guard let payload = reply["payload"] as? String, !payload.isEmpty,
             let expiry = reply["expires_at"] as? Int

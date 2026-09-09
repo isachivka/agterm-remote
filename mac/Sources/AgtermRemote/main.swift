@@ -239,6 +239,15 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // about what an address is.
         onboarding.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
         onboarding.arrivalPortText = Self.arrivalPortText()
+        onboarding.frontDoor = AddressPreference.frontDoor()
+        // **Stored, and then the bridge is restarted if it is running.** One of the two flags it
+        // decides is settled when the listener is built, so a bridge that is already up is serving
+        // the old answer - and the symptom of that is a pairing code that cannot work, which is the
+        // failure this whole question exists to end.
+        onboarding.onFrontDoor = { [weak self] chosen in
+            AddressPreference.writeFrontDoor(chosen)
+            self?.restartTheBridgeIfItIsRunning()
+        }
         onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }
         onboarding.onRecheck = { [weak self] in
             guard let self else { return }
@@ -380,7 +389,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func mintACode() {
         let address = (try? AddressPreference.read().get())?.displayed ?? ""
         pairing.address = address
-        panel.open(advertising: address)
+        // Read at the press, exactly like the address and for the same reason: the owner can put a
+        // proxy in front of this Mac while the bridge is running, and the bridge is not restarted
+        // when they do.
+        panel.open(advertising: address, frontDoor: AddressPreference.frontDoor())
         pairing.show(panel.state)
     }
 
@@ -583,6 +595,21 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         bridge.stop()
     }
 
+    /// **A running bridge is holding the old answer, so it is put down and picked up again.**
+    ///
+    /// One of the two flags the choice decides - whether this port serves TLS - is settled when the
+    /// listener is built, so a bridge already up cannot honour a change. Silently leaving it would
+    /// produce exactly the failure the question exists to end: a screen saying one thing and a
+    /// listener doing another, with the phone reporting a laptop that will not answer.
+    ///
+    /// No confirmation, unlike the Stop item, because this is not stopping the bridge - it is
+    /// applying a setting, and it comes straight back up. A bridge that was already down stays down.
+    private func restartTheBridgeIfItIsRunning() {
+        guard let bridge, bridge.state != .stopped else { return }
+        bridge.stop()
+        startBridge()
+    }
+
     /// Start it.
     ///
     /// ### The port is the only half of the dial address that is also a local fact
@@ -620,7 +647,12 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // the 2026-08-09 failure: a code that pairs and then never connects.
             try bridge.start(
                 listen: Address(address).listen(on: arrival), socket: nil,
-                advertise: address.displayed)
+                advertise: address.displayed,
+                // The other half of the same fact, and it has to be here because it decides a flag
+                // rather than a request: whether this port serves TLS is settled when the listener is
+                // built. Changing it therefore needs a restart, which is why it is asked on the setup
+                // screen rather than beside the code.
+                frontDoor: AddressPreference.frontDoor())
         } catch {
             // A start that could not happen at all: the binary vanished between launch and now, or
             // macOS is holding it because the app arrived by download. The error's own words, not a

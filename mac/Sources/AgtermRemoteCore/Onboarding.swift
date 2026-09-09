@@ -125,7 +125,9 @@ public enum OnboardingCopy {
         "A port forward on your router, and the address written as IP:PORT — when the address does "
             + "not change.",
         "A port forward on your router, and a dynamic-DNS name — when it does.",
-        "Tailscale, WireGuard, Cloudflare Tunnel, or any reverse proxy.",
+        "Tailscale or WireGuard, which carry the connection to this Mac themselves.",
+        "Cloudflare Tunnel, a reverse proxy, or a router that publishes this Mac rather than "
+            + "forwarding to it — tell the app so below, because these are reached differently.",
     ]
 
     /// The example in the field, and it is an RFC 5737 documentation address on purpose. A real one

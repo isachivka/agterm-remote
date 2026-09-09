@@ -329,7 +329,9 @@ struct PairingPanelModelTests {
             return (listening, paired, agterm, window)
         }
 
-        func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date) {
+        func openPairing(
+            ttl: TimeInterval, advertise: String, frontDoor: FrontDoor
+        ) throws -> (payload: String, expiresAt: Date) {
             if let refuseOpenWith { throw refuseOpenWith }
             opened.append(ttl)
             advertised.append(advertise)

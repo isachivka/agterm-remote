@@ -228,6 +228,8 @@ public final class BridgeProcess: @unchecked Sendable {
     /// What the QR code should name. See `start(listen:socket:advertise:)`.
     private var dialAddress = ""
     private var socketPath: String?
+    /// What stands in front of this Mac. It decides two of the bridge's flags; see [FrontDoor].
+    private var frontDoor = FrontDoor.unset
     private var launches = 0
     private var startedRunningAt = Date(timeIntervalSince1970: 0)
     private var pid: Int32?
@@ -328,7 +330,12 @@ public final class BridgeProcess: @unchecked Sendable {
     ///   owner's router forwards to, and `0.0.0.0` is every interface rather than one anything can
     ///   dial. Empty means they are the same, which is the straight-through case and the one a person
     ///   running the bridge by hand gets.
-    public func start(listen: String, socket: String?, advertise: String = "") throws {
+    /// - Parameter frontDoor: what publishes this Mac, as the owner described it. It decides both
+    ///   the scheme the pairing code carries and whether this port serves TLS - two flags, one fact,
+    ///   and neither is something this app could observe for itself.
+    public func start(
+        listen: String, socket: String?, advertise: String = "", frontDoor: FrontDoor = .unset
+    ) throws {
         try lock.withLock {
             if case .running = _state { return }
             if isQuarantined(executable) {
@@ -339,6 +346,7 @@ public final class BridgeProcess: @unchecked Sendable {
             listenAddress = listen
             dialAddress = advertise
             socketPath = socket
+            self.frontDoor = frontDoor
             // Pressing Start after a failure is a fresh five. The owner has just done something about
             // the port, or the binary, and a counter that remembered would refuse to try.
             launches = 0
@@ -435,7 +443,17 @@ public final class BridgeProcess: @unchecked Sendable {
             // zero: a bridge outliving its parent holds the owner's exposed port with no user
             // interface left anywhere that could close it.
             "--parent-pid", String(parentPID),
+            // **Always passed, never inferred.** The bridge has its own default and this app has an
+            // answer, so sending it every time means the two cannot drift into disagreeing about a
+            // deployment neither of them can see.
+            "--advertise-scheme", frontDoor.advertiseScheme,
         ]
+        // Only when the thing in front insists on an HTTPS backend. The bridge mints the certificate
+        // itself - nothing validates it, so there is nothing here only a person could decide, and
+        // asking somebody to generate one would put a chore between them and a working pairing.
+        if frontDoor.servesOnLinkTLS {
+            argv += ["--on-link-tls"]
+        }
         // Absent unless it differs from the bind. The bridge falls back to the bound address, which
         // is the truthful value when there is only one — see `advertised` on the Go side.
         if !dialAddress.isEmpty {

@@ -136,8 +136,8 @@ object Enrollment {
         identity: X509Certificate,
         deviceName: String,
         store: PairedLaptop,
-    ): EnrollResult = enroll(payload, identity, deviceName, store) { address ->
-        WebSocketStream.open(BridgeUrl.of(address)).asByteStream()
+    ): EnrollResult = enroll(payload, identity, deviceName, store) { url ->
+        WebSocketStream.open(url).asByteStream()
     }
 
     /**
@@ -168,7 +168,10 @@ object Enrollment {
         // with a machine on the other end that completed an HTTP upgrade. That boundary, and not the
         // exception type, is what picks the arm below - see the catch around the handshake.
         val stream = try {
-            openStream(payload.dialAddress)
+            // The whole URL, derived once by the payload, so the transport is handed a string rather
+            // than the job of assembling one. The scheme is the owner's declared fact and the
+            // bracketing is the format's rule; neither belongs at a call site.
+            openStream(payload.dialUrl)
         } catch (e: Exception) {
             return EnrollResult.Unreachable(e)
         }
@@ -300,7 +303,9 @@ object Enrollment {
         // Written last. Everything above can refuse; nothing above this line has stored anything.
         store.write(
             ConnectionProfile(
-                kind = StreamKind.DirectTcp,
+                // Stored as the payload said, so the terminal opens the address the same way
+                // enrolment just did. Assuming one here is what version 1 of the payload did.
+                kind = payload.scheme,
                 host = payload.host,
                 port = payload.port,
                 bridgeCertificate = der,
