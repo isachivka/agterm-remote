@@ -1,17 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Release trusts the system store and nothing else, which is Android's default and is restated
-  here only so the debug block below has a file to live in.
+  Two decisions live here, and only one of them is about trust.
 
-  `debug-overrides` applies ONLY when android:debuggable is true, which a release build never is.
-  It lets a debug build trust a CA the tester installed on the device, so the app can be paired
-  with a bridge running on the developer's own machine - an emulator reaching the host through the
-  alias Android reserves for it - whose LAN certificate no public CA has signed. The pinned mTLS inside the stream is unaffected: this is the
-  outer hop, the one the router terminates in production, and it authenticates nothing there either
-  (see the LANCert comment in bridge/cmd/agtermbridge/main.go).
+  TRUST: the system store and nothing else, which is Android's default and is restated so the
+  debug block below has a file to live in. `debug-overrides` applies ONLY when android:debuggable is
+  true, which a release build never is; it lets a debug build trust a CA a tester installed, for a
+  proxy or a capture in front of a scratch bridge. The pinned mTLS inside the stream is unaffected by
+  anything in this file: it is not made with the platform trust store and no anchor here can widen it.
+
+  CLEARTEXT: permitted, and this is the line to read carefully.
+
+  What the phone opens at the address in the pairing code is an HTTP Upgrade, and the bridge in this
+  repository terminates no TLS of its own - `main.go` hands a bare TCP listener straight to
+  `frontdoor`. So the outer hop is `ws://`, and at this targetSdk the platform refuses cleartext by
+  default. Before this line, every pairing to a real laptop failed with `CLEARTEXT communication not
+  permitted` - and the end-to-end test against a real bridge did not catch it, because it dials
+  127.0.0.1 through `adb reverse` and the platform's default configuration carries a loopback
+  exemption this file inherits.
+
+  What is given up, stated narrowly rather than waved at:
+
+    - NOT confidentiality. What travels over this socket is TLS 1.3 with a byte-pinned peer, driven
+      by TlsDriver INSIDE the upgrade. Nothing readable crosses the network.
+    - NOT the trust decision. The outer hop authenticates nobody, by design: the entire reason
+      `frontdoor` exists is that a TLS-terminating proxy in the path destroys a client certificate,
+      so the mTLS was moved inside where a proxy moves bytes it cannot read.
+    - The platform's own belt-and-braces check, which can only see the outer socket and cannot see
+      the TLS inside it. That is a real loss, and it is why `CleartextPolicyTest` asserts this rather
+      than leaving it to a comment.
+
+  The narrower alternative - naming the laptop's host here - is not available: the address arrives in
+  a pairing code at runtime and is deliberately absent from this repository. The alternative worth
+  having is a scheme in the pairing payload, so a deployment behind a TLS-terminating proxy says so
+  and gets `wss://`. That is a payload version bump on both sides, not a line in this file.
 -->
 <network-security-config>
-    <base-config>
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

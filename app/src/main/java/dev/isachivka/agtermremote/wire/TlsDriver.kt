@@ -10,6 +10,7 @@ import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLEngineResult
 import javax.net.ssl.SSLEngineResult.HandshakeStatus
 import javax.net.ssl.SSLEngineResult.Status
+import javax.net.ssl.X509TrustManager
 
 /**
  * The inner half of the wire: pinned mTLS driven by hand over a byte stream.
@@ -63,6 +64,9 @@ internal class TlsDriver private constructor(
     private val transportIn: InputStream,
     private val transportOut: OutputStream,
 ) {
+
+    /** What the handshake actually negotiated, so a caller can assert it rather than assume it. */
+    val negotiatedProtocol: String? get() = engine.applicationProtocol
 
     /** Application bytes decrypted but not yet handed to the caller. */
     private var decrypted: ByteBuffer = ByteBuffer.allocate(0)
@@ -331,6 +335,12 @@ internal class TlsDriver private constructor(
                     }
                 ?: WireFailure.Malformed
 
+        /** The API. A pinned client certificate is required to reach it. */
+        const val PROTOCOL_API = "agterm/api-1"
+
+        /** Enrolment. No client certificate, and offered by the bridge only while a window is open. */
+        const val PROTOCOL_ENROL = "agterm/enroll-1"
+
         /**
          * Wraps a transport in pinned mTLS.
          *
@@ -347,11 +357,68 @@ internal class TlsDriver private constructor(
             handshakeTimeoutSeconds: Long = 15,
         ): TlsDriver {
             val trust = PinnedTrust(pinnedBridgeCertificate)
+            return openWith(
+                transportIn = transportIn,
+                transportOut = transportOut,
+                trust = trust,
+                identity = identity,
+                applicationProtocol = PROTOCOL_API,
+                handshakeTimeoutSeconds = handshakeTimeoutSeconds,
+                verdict = { e -> verdictFor(trust, e) },
+            )
+        }
+
+        /**
+         * The same driver, for the one connection that happens before anything is pinned.
+         *
+         * ### Why the trust manager is a parameter here and is not on [open]
+         *
+         * [open]'s argument — that no caller can supply a weaker decision — is about the connection
+         * that carries the owner's terminal, and it stands. This entry point exists because enrolment
+         * pins a **digest off a QR code** rather than bytes on disk, which is a different comparison
+         * that the pairing package owns, and because a `wire` that reached into `pairing` for it would
+         * put a cycle between the two.
+         *
+         * It is `internal`, it has exactly two call sites, and neither can weaken anything: one builds
+         * [PinnedTrust] from a stored certificate, the other builds `FingerprintTrust` from the 32
+         * bytes the owner's own screen produced. **A third call site is the thing to refuse in
+         * review** — this is the seam through which a permissive trust manager would arrive.
+         *
+         * ### ALPN, which is not decoration
+         *
+         * The bridge dispatches on the negotiated protocol and has exactly two arms; anything else —
+         * including the empty string a client that offers no ALPN negotiates — is closed without a
+         * word. So a connection that names no protocol reaches nothing, and this driver used to name
+         * none. Exactly one is offered per connection, deliberately: the bridge prefers enrolment over
+         * the API when a caller offers both and a window happens to be open, and offering one protocol
+         * is what makes that ordering something this phone never meets.
+         *
+         * [identity] is null for enrolment. The bridge's enrolment branch requires no client
+         * certificate and never asks for one, so there is nothing to present.
+         */
+        internal fun openWith(
+            transportIn: InputStream,
+            transportOut: OutputStream,
+            trust: X509TrustManager,
+            identity: KeyManager?,
+            applicationProtocol: String,
+            handshakeTimeoutSeconds: Long = 15,
+            // A handshake failure with no verdict behind it is the far end not answering. The pinned
+            // path overrides this because PinnedTrust records why it refused; a caller that cannot
+            // tell must not invent a reason.
+            verdict: (Throwable) -> WireFailure = { WireFailure.CannotReach },
+        ): TlsDriver {
             val context = SSLContext.getInstance("TLSv1.3").apply {
-                init(arrayOf(identity), arrayOf(trust), null)
+                init(identity?.let { arrayOf(it) }, arrayOf(trust), null)
             }
             val engine = context.createSSLEngine().apply {
                 useClientMode = true
+                // Set through SSLParameters rather than mutated in place: the getter returns a copy,
+                // so `engine.sslParameters.applicationProtocols = ...` compiles, runs, and offers
+                // nothing.
+                sslParameters = sslParameters.apply {
+                    applicationProtocols = arrayOf(applicationProtocol)
+                }
             }
             val driver = TlsDriver(engine, transportIn, transportOut)
             try {
@@ -365,9 +432,10 @@ internal class TlsDriver private constructor(
                 // into a WireFailure the copy will describe as an ordinary network problem.
                 throw e
             } catch (e: Exception) {
-                throw WireException(verdictFor(trust, e), e)
+                throw WireException(verdict(e), e)
             }
             return driver
         }
+
     }
 }

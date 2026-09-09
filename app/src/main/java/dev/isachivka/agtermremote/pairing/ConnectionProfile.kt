@@ -24,6 +24,20 @@ data class ConnectionProfile(
     /** The bridge's certificate, DER, pinned byte for byte. Public — it is not a credential. */
     val bridgeCertificate: ByteArray,
 ) {
+    /**
+     * Where the phone dials, host and port, with an IPv6 literal bracketed.
+     *
+     * The stored host is **bare**, exactly as the pairing payload carried it, so the brackets are put
+     * back here. Identical to `EnrollPayload.dialAddress` and deliberately so: the address enrolment
+     * dialled and the address the terminal dials are the same address, and two renderings of it is how
+     * a pairing completes and then never connects.
+     *
+     * **Not for a screen.** `PairingAddress` is what a person compares; this is what a socket gets.
+     * They agree today and are separate because their rules could diverge — display never normalises,
+     * and a dialler may have to.
+     */
+    val dialAddress: String get() = if (host.contains(':')) "[$host]:$port" else "$host:$port"
+
     // Data classes compare arrays by identity, which would make two profiles carrying the same
     // certificate unequal. Equality is used when deciding whether a rescan actually changed anything,
     // so it has to compare contents.

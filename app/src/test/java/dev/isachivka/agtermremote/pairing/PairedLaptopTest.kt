@@ -1,5 +1,6 @@
 package dev.isachivka.agtermremote.pairing
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -74,6 +75,45 @@ class PairedLaptopTest {
         store().clear()
 
         assertNull(store().read())
+    }
+
+    /**
+     * Spec §5.5. A dynamic IP that changes is an address problem, not a trust problem: the owner
+     * edits the address in settings and stays paired with the same laptop. Re-pairing instead would
+     * mint a new key on the phone and evict the peer their Mac has pinned.
+     */
+    @Test
+    fun `changing the address keeps the pinned certificate`() {
+        store().write(profile(host = "first.example", port = 8443))
+
+        store().setAddress("second.example", 9443)
+
+        val after = store().read()!!
+        assertEquals("second.example", after.host)
+        assertEquals(9443, after.port)
+        assertArrayEquals("the pinned laptop must survive a renumbering", certificate, after.bridgeCertificate)
+    }
+
+    /**
+     * There is no address to change on a laptop that is not there, and inventing a profile would
+     * store a certificate nobody chose.
+     */
+    @Test
+    fun `changing the address of nothing pairs nothing`() {
+        store().setAddress("laptop.example", 8443)
+
+        assertNull(store().read())
+    }
+
+    /**
+     * The dialler's rendering of the address, which is not the screen's. An IPv6 literal is stored
+     * bare, exactly as the pairing payload carried it, and has to be bracketed before a socket sees
+     * it — the same rule `EnrollPayload.dialAddress` applies to the same address.
+     */
+    @Test
+    fun `the dial address brackets an IPv6 literal and leaves a name alone`() {
+        assertEquals("laptop.example:8443", profile(host = "laptop.example", port = 8443).dialAddress)
+        assertEquals("[fd00::1]:8443", profile(host = "fd00::1", port = 8443).dialAddress)
     }
 
     @Test

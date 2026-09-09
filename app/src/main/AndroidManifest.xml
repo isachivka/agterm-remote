@@ -7,8 +7,11 @@
       reporter, no update check and no server of this project's own - the far end is a machine
       belonging to the person holding the phone.
 
-      Cleartext is not permitted by default at this targetSdk and nothing here re-enables it; the
-      outer hop is TLS to the router and the inner one is pinned mTLS to the bridge inside it.
+      The outer hop may be cleartext and the inner one is pinned mTLS to the bridge inside it. That
+      is not a weakening: the bridge terminates no TLS of its own, so what this app opens is an HTTP
+      Upgrade carrying TLS 1.3 records with a byte-pinned peer. See network_security_config.xml,
+      where the decision and everything it costs are written out, and CleartextPolicyTest, which
+      asserts it against the platform rather than describing it here.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 
