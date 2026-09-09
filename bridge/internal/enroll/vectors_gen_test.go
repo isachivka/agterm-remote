@@ -243,7 +243,7 @@ func TestWriteRejectVectors(t *testing.T) {
 		},
 		{
 			name: "unpadded", refusal: "not-standard-base64",
-			note: "The valid payload rendered without '=' padding. java.util.Base64.getDecoder() refuses this too.",
+			note: "The valid payload rendered without '=' padding. StdEncoding refuses it. java.util.Base64.getDecoder() does NOT - measured on JDK 21, '=' is accepted but not required - so the Kotlin decoder checks the length itself. This vector is the only thing that made that a requirement.",
 			text: base64.RawStdEncoding.EncodeToString(valid),
 		},
 		{

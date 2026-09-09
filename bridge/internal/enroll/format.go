@@ -18,10 +18,19 @@
 // camera will not read the code, in the dark or on a cracked screen. The cost is about a third more
 // characters. The benefit is that pairing never has a dead end.
 //
-// STANDARD alphabet, and PADDED, because the Android side decodes with java.util.Base64.getDecoder(),
-// which refuses the URL-safe alphabet and refuses missing padding. Both refusals are invisible from
-// inside Go, where a URL-safe encoder and a standard one round-trip equally well, so the property is
-// pinned by a test rather than left to be remembered.
+// STANDARD alphabet, and PADDED, because the Android side decodes with java.util.Base64.getDecoder().
+// That decoder refuses the URL-safe alphabet, which is invisible from inside Go - a URL-safe encoder
+// and a standard one round-trip equally well here - so it is pinned by a test rather than left to be
+// remembered.
+//
+// It does NOT refuse missing padding, which is what this comment said until the Kotlin decoder was
+// written against the vectors. Measured on JDK 21: getDecoder().decode("AQAMZXhhbXBsZQ") returns the
+// same ten bytes as the padded form, because '=' is "accepted and interpreted as the end of the
+// encoded byte data, but is not required"; what it does refuse is a final unit of the wrong LENGTH,
+// so "AQAMZXhhbXBsZQ=" throws and the unpadded form does not. StdEncoding here refuses both, so the
+// two sides would have disagreed about whether an unpadded code is a code at all - and the Kotlin
+// side has to enforce the padding itself. The `unpadded` reject vector is what makes that a
+// requirement rather than a detail somebody notices.
 //
 // # A fingerprint, not the certificate
 //
@@ -267,10 +276,12 @@ func EncodeToText(p Payload) (string, error) {
 
 // DecodeText parses the text a QR code carried.
 //
-// Strict on the alphabet and on the padding, and it does not trim: what it accepts has to be what
-// java.util.Base64.getDecoder() accepts, or the two sides disagree about which codes are valid. The
-// one divergence left is that Go's decoder skips \r and \n where Java's refuses them, and nothing
-// here ever emits either.
+// Strict on the alphabet and on the padding, and it does not trim: what it accepts has to be what the
+// Android decoder accepts, or the two sides disagree about which codes are valid. Two divergences
+// from java.util.Base64.getDecoder() are known and neither is left to chance: Java accepts an
+// unpadded final unit where this refuses one, so the Kotlin side checks the length itself against the
+// `unpadded` reject vector; and this skips \r and \n where Java refuses them, which nothing here ever
+// emits and no vector can pin.
 func DecodeText(s string) (Payload, error) {
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
