@@ -1,16 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The only path this app shares, and it shares it with the installer alone.
-
-  files-path is app-internal storage. Deliberately not external-path: an .apk on external storage is
-  readable and writable by anything else on the phone, so it could be swapped between the download
-  finishing and the installer opening it - and the owner would be confirming an install of something
-  they never saw the version number of.
-
-  Must stay in step with UpdateInstaller.downloadDir.
+  The only path this app shares, and it shares it with one app at a time: whichever one the owner
+  picks out of the share sheet.
 -->
 <paths>
-    <files-path name="updates" path="updates/" />
     <!--
       The phone's own certificate, offered to the laptop through the share sheet - REQ-0009 finding 1,
       which is what removed the adb-and-instrumentation route to pairing.

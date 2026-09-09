@@ -1,7 +1,5 @@
 package dev.isachivka.bewareofsugar.agterm
 
-import dev.isachivka.bewareofsugar.limits.LimitsSnapshot
-import dev.isachivka.bewareofsugar.limits.parseLimits
 import dev.isachivka.bewareofsugar.pairing.ConnectionProfile
 import dev.isachivka.bewareofsugar.wire.TlsDriver
 import dev.isachivka.bewareofsugar.wire.WebSocketStream
@@ -276,21 +274,6 @@ class BridgeConnection private constructor(
      */
     fun openPane(sessionId: String) {
         exchange(JSONObject().put("verb", "pane.open").put("session", sessionId))
-    }
-
-    /**
-     * How much of each subscription is left, from the bridge's cache — REQ-0045.
-     *
-     * **The `fresh` key is sent only when true.** The bridge's decoder refuses any key it does not
-     * know with `malformed request`, so a routine poll that spelled out `"fresh": false` would be
-     * refused by an older bridge with a sentence about the request's shape. Without the key an older
-     * bridge says `unknown verb`. [dev.isachivka.bewareofsugar.limits.LimitsResults] reads both as
-     * "update the bridge".
-     */
-    fun limits(fresh: Boolean): LimitsSnapshot {
-        val request = JSONObject().put("verb", "limits")
-        if (fresh) request.put("fresh", true)
-        return parseLimits(exchange(request))
     }
 
     /**

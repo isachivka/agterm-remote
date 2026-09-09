@@ -9,15 +9,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
-      Required to hand a downloaded .apk to Android's installer. It permits *asking*: the owner still
-      confirms on Android's own screen, and they must also have allowed this app under
-      "Install unknown apps" - which UpdateInstaller.canInstall checks before offering.
-    -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
-    <!--
       The first permission this application has ever asked a human for, and the only one it asks for
-      at all - INTERNET and REQUEST_INSTALL_PACKAGES are granted at install with nothing to refuse.
+      at all - INTERNET is granted at install with nothing to refuse.
 
       It is here because a live viewfinder reads frames in OUR process. The route it replaces needed
       no permission precisely because the capture happened inside the system camera app, and that
@@ -29,31 +22,6 @@
       the request at all. The file route is the only one that has ever completed a pairing here.
     -->
     <uses-permission android:name="android.permission.CAMERA" />
-
-    <!--
-      The car - REQ-0044. The terminal is drawn on the rectangle Android Auto lends to navigation
-      apps, and the host lends it only to an app holding these three. They are the car library's own
-      permissions, granted at install with nothing to refuse, and they are the reason the app declares
-      the navigation category: nothing else on Android Auto lets an app draw its own pixels.
-    -->
-    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
-    <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
-    <!--
-      The third one, and the one the navigation guide never names. Found on the head unit on
-      2026-09-05: with only the two above, the host refuses setSurfaceCallback with "The car app does
-      not have a required permission: androidx.car.app.ACCESS_SURFACE", and the refusal arrives as an
-      exception that kills the whole app - phone screen included.
-    -->
-    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
-
-    <!--
-      The second permission this app asks a person for. The car's microphone button runs the phone's
-      own speech recogniser, which records in OUR process; the car library has no speech of its own.
-      Asked for when the button is pressed and not before, and refusing it leaves the keys and the
-      car's keyboard working - see CarVoice. Where the audio comes from while projecting is REQ-0044
-      §5, question 3, which only a car can answer.
-    -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
       required="false", and this line is load-bearing rather than tidy.
@@ -105,39 +73,17 @@
         </activity>
 
         <!--
-          The car - REQ-0044. The Android Auto host binds this service and asks it for templates; the
-          descriptor tells the host this is a template app, and the api level is the lowest the library
-          supports, so no car is refused on that count.
+          Lets the app hand ONE file to whichever app the owner picks from the share sheet: the
+          phone's own certificate, on its way to the Mac. Not exported, so nothing on the phone can
+          enumerate or read what is in here, and file_paths.xml narrows it to a single subdirectory
+          that the paired laptop's address is deliberately not inside.
 
-          Exported, because the host is another process - and that is why TerminalCarAppService
-          validates the host against the library's allowlist of Google's signatures rather than
-          admitting any caller. An app on the phone that could bind this would read the terminal and
-          type into it. CarManifestTest reads this file.
-        -->
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
-        <meta-data
-            android:name="androidx.car.app.minCarApiLevel"
-            android:value="1" />
-        <service
-            android:name=".car.TerminalCarAppService"
-            android:exported="true"
-            android:label="@string/car_app_label">
-            <intent-filter>
-                <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.NAVIGATION" />
-            </intent-filter>
-        </service>
-
-        <!--
-          Lets the installer read exactly one downloaded .apk, for exactly one intent. Not exported,
-          so no other app can enumerate or read what is in here. The authority is duplicated in
-          UpdateInstaller.AUTHORITY, which is asserted against this by an instrumentation test.
+          The authority is duplicated in CertificateHandover, which is asserted against this by
+          PhoneProvisionsItselfTest - getUriForFile throws for an authority this file does not declare.
         -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
+            android:authorities="${applicationId}.pairing"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

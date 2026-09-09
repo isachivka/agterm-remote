@@ -30,11 +30,6 @@ android {
         // Set explicitly rather than relying on the AGP 9 default, so the runner used by
         // connectedDebugAndroidTest is visible in the build file.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // The one place the repository slug is written down. It is used to build the API URL and as
-        // a format argument in the on-screen copy, and iterations 2 and 3 build their URLs from it
-        // too - so it exists once rather than in a URL, three strings and a sentence.
-        buildConfigField("String", "GITHUB_REPO", "\"isachivka/beware-of-sugar\"")
     }
 
     signingConfigs {
@@ -174,15 +169,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.compose)
     implementation(libs.okhttp)
-    // REQ-0050. The only channel that can update this app without changing who installed it - which
-    // is the fact Android Auto reads, and the reason the GitHub updater is now hidden. The -ktx
-    // artifact is the suspend/Flow surface over the same library, not a second dependency.
-    implementation(libs.play.app.update)
-    implementation(libs.play.app.update.ktx)
-    // The car - REQ-0044. Templates for the car screen, and the glue the projected host needs. Latest
-    // stable on Google Maven; 1.8 is still a release candidate. The .apk cost is in REQ-0044 §6.
-    implementation(libs.androidx.car.app)
-    implementation(libs.androidx.car.app.projected)
     debugImplementation(libs.androidx.ui.tooling)
 
     // Unit tests, JVM only.
@@ -206,12 +192,6 @@ dependencies {
     // pulls in transitively, which do not work on API 37.
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.espresso.core)
-    // The device test that joins downloading to the FileProvider handoff serves the bytes itself.
-    androidTestImplementation(libs.okhttp.mockwebserver)
-    // The same TLS scenarios as the JVM tests, run again on a device. Android does not use the JVM's
-    // certificate validator, so the two platforms report a rejected certificate through different
-    // exception chains - and the classification has to hold on the one the owner's phone uses.
-    androidTestImplementation(libs.okhttp.tls)
     // Provides the empty activity the Compose test rule hosts content in.
     debugImplementation(libs.androidx.ui.test.manifest)
 }
@@ -244,10 +224,5 @@ tasks.withType<Test>().configureEach {
         .withPropertyName("appResourcesReadDirectlyByTests")
         // RELATIVE rather than ABSOLUTE: the contents decide the result, not where the checkout is,
         // so a build on another machine or in CI can still reuse the result.
-        .withPathSensitivity(PathSensitivity.RELATIVE)
-    // The manifest, for the same reason: CarManifestTest reads it as a file, because the contract with
-    // the Android Auto host is written there and nowhere the code can see - REQ-0044.
-    inputs.file(layout.projectDirectory.file("src/main/AndroidManifest.xml"))
-        .withPropertyName("appManifestReadDirectlyByTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

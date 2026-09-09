@@ -85,7 +85,7 @@ object CertificateHandover {
         val file = File(directory, fileName(fingerprint))
         file.writeText(pem(certificate.encoded))
 
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.pairing", file)
         return Intent(Intent.ACTION_SEND).apply {
             type = "application/x-pem-file"
             putExtra(Intent.EXTRA_STREAM, uri)
