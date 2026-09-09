@@ -106,6 +106,15 @@ object Enrollment {
      */
     const val REFUSED = "That pairing code did not work. Open a new one on your Mac and scan it."
 
+    /**
+     * Which is also what a spent or expired code produces, and deliberately the same sentence.
+     *
+     * The two arrive by different routes - a bridge that answered `ok:false`, and a bridge whose shut
+     * window means the handshake never completed - and the phone cannot tell them apart even in
+     * principle: the far end is silent about the first by design and says nothing at all about the
+     * second. One remedy, one sentence, and no invented distinction between them.
+     */
+
     /** The bridge pinned something that is not this phone, so the pairing would not survive. */
     const val MISMATCHED = "Your Mac pinned a different phone. Open a new pairing code and scan it."
 
@@ -153,6 +162,11 @@ object Enrollment {
         // to be an address.
         undiallable(payload.host, payload.port)?.let { return EnrollResult.Unreachable(it) }
 
+        // **Opening the transport is what divides "not reachable" from "would not accept this".**
+        //
+        // Everything before this line failed without anything answering. Everything after it failed
+        // with a machine on the other end that completed an HTTP upgrade. That boundary, and not the
+        // exception type, is what picks the arm below - see the catch around the handshake.
         val stream = try {
             openStream(payload.dialAddress)
         } catch (e: Exception) {
@@ -176,10 +190,29 @@ object Enrollment {
                     applicationProtocol = TlsDriver.PROTOCOL_ENROL,
                 )
             } catch (e: Exception) {
+                // **A HANDSHAKE FAILURE HERE IS NEVER "NOT REACHABLE", AND THIS IS THE MOST LIKELY
+                // FAILURE THE OWNER WILL EVER SEE.**
+                //
+                // A code that has been used, or whose five minutes are up, meets a bridge with its
+                // window shut. Such a bridge offers `agterm/api-1` and nothing else, this connection
+                // offers `agterm/enroll-1` and nothing else, and the handshake dies on
+                // `no_application_protocol` - before a certificate is presented, so FingerprintTrust
+                // is never consulted and has no verdict to give. Neither side logs it.
+                //
+                // This used to fall to Unreachable, which is false in all three of the ways that
+                // matter: something is listening at that address, it completed an HTTP upgrade, and
+                // it then declined. It sent the owner to look at their router when the remedy is to
+                // open a new code, and it did so in the file that argues that saying "not answering"
+                // about a machine that answered is the defect this type exists to prevent.
+                //
+                // So the arm is chosen by WHERE the failure happened rather than by what was thrown.
+                // The transport opened; therefore something answered; therefore this is a refusal.
+                // The one distinction still worth making above it is the pinning one, because its
+                // remedy is different - that laptop is the wrong machine, not a shut door.
                 return@use if (trust.refusedTheLaptop) {
                     EnrollResult.NotTheLaptopInTheCode
                 } else {
-                    EnrollResult.Unreachable(e)
+                    EnrollResult.Refused(REFUSED)
                 }
             }
 

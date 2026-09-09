@@ -191,6 +191,49 @@ class EnrollmentTest {
         assertNull(store.read())
     }
 
+    /**
+     * **A spent or expired code is the common failure, and it must not be reported as a dead laptop.**
+     *
+     * With no window open the bridge offers `agterm/api-1` alone, so a phone offering `enroll-1`
+     * alone is refused during ALPN negotiation — before any certificate is presented, and therefore
+     * before `FingerprintTrust` is ever consulted. Everything the four-armed result type exists to
+     * separate collapses at that point unless the arm is chosen by WHERE the failure happened.
+     *
+     * The transport opened. Something is listening at that address, it completed an HTTP upgrade, and
+     * it then declined to speak the protocol this code asks for. "Your laptop is not reachable" is
+     * false about all three, and it sends the owner to their router when the remedy is a new code.
+     */
+    @Test
+    fun `a code the laptop will not accept is refused rather than called unreachable`() {
+        val fake = startWithTheWindowShut()
+        val store = store()
+
+        val result = enrol(payloadFor(fake), store = store)
+
+        assertTrue(
+            "a laptop that answered and declined the protocol is not unreachable, it refused: $result",
+            result is EnrollResult.Refused,
+        )
+        assertEquals(Enrollment.REFUSED, (result as EnrollResult.Refused).reason)
+        assertNull(store.read())
+    }
+
+    /**
+     * The other half of the arm, and the one that keeps the fix from being "call everything refused".
+     * Nothing answered at all, so there is nothing to have refused.
+     */
+    @Test
+    fun `a refusal is not claimed when the transport never opened`() {
+        val store = store()
+        val closed = start(accepted())
+        val port = closed.port
+        closed.close()
+
+        val result = enrol(payloadFor(closed, port = port), store = store)
+
+        assertTrue("nothing answered, so nothing refused: $result", result is EnrollResult.Unreachable)
+    }
+
     @Test
     fun `a refused enrolment pins nothing`() {
         val fake = start(refused())
@@ -310,6 +353,10 @@ class EnrollmentTest {
     private fun start(reply: (JSONObject) -> String): FakeBridge =
         FakeBridge(bridge, reply).also { running = it }
 
+    /** The same laptop with its pairing window shut: it offers the API protocol and nothing else. */
+    private fun startWithTheWindowShut(): FakeBridge =
+        FakeBridge(bridge, accepted(), offers = "agterm/api-1").also { running = it }
+
     /**
      * A TLS server speaking the enrolment protocol: one ALPN entry, no client certificate, one line
      * in and one line out.
@@ -320,6 +367,16 @@ class EnrollmentTest {
     private class FakeBridge(
         held: HeldCertificate,
         private val reply: (JSONObject) -> String,
+        /**
+         * What this bridge offers, and it is **one** protocol, exactly as the far end is.
+         *
+         * `enroll.ServerConfigFor` picks a whole configuration per connection: with a window open it
+         * offers `agterm/enroll-1` alone, and with the window shut it offers `agterm/api-1` alone.
+         * A phone arriving with a spent code therefore meets a server whose single protocol is not
+         * the one it asked for, and the handshake dies on `no_application_protocol` before a
+         * certificate is looked at. That is the state this fixture exists to reproduce.
+         */
+        private val offers: String = ENROL,
     ) : Closeable {
 
         @Volatile var request: JSONObject? = null
@@ -362,7 +419,9 @@ class EnrollmentTest {
                 try {
                     socket.setHandshakeApplicationProtocolSelector { _, offered ->
                         clientOffered = offered.toList()
-                        offered.firstOrNull { p -> p == ENROL }
+                        // null is the platform's "nothing in common", which fails the handshake the
+                        // way Go's does rather than quietly negotiating no protocol at all.
+                        offered.firstOrNull { p -> p == offers }
                     }
                     socket.startHandshake()
                     negotiated = socket.applicationProtocol
