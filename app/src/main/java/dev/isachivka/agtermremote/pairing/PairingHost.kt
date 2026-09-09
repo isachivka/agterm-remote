@@ -43,12 +43,40 @@ class PairingFlow(private val enrol: suspend (EnrollPayload) -> EnrollResult) {
      * Where **Try again** goes back to, which is not always where pairing started.
      *
      * A phone whose owner refused the camera must not be sent to a viewfinder that will never open.
+     * A phone whose camera merely faltered must not be kept away from one that would work.
      */
     private var fallback: PairingUi = PairingUi.Scanning
 
-    /** No camera, or the owner said no. The paste field is the route, and it always works. */
+    /**
+     * There is no camera to use: none on the device, the owner refused it, or it will not open at all.
+     *
+     * **This latches**, because it is a fact about the phone rather than about this moment. Try again
+     * returns to the paste field, which is the only route such a phone has.
+     */
     fun cameraUnavailable() {
         fallback = PairingUi.NeedsCamera
+        state = PairingUi.NeedsCamera
+    }
+
+    /**
+     * The camera opened and then reported an error. **This does not latch, and the difference is the
+     * whole point of it being a second method.**
+     *
+     * The errors that arrive this way are mostly the ones the library publishes *while it is retrying
+     * and about to succeed* — another application released the camera slowly, the phone switched
+     * cameras, this app came back to the foreground and won it. Latching on those would take a working
+     * scanner away from somebody whose scan was one moment from completing, and leave Try again
+     * offering them the paste field they were already looking at.
+     *
+     * That is worse than the black viewfinder this route replaced, in one specific way: a black
+     * viewfinder is a dead end nobody mistakes for progress, and this would be a working screen
+     * quietly withdrawn. So the paste field is shown — the owner needs something to do — and **Try
+     * again goes back to the scanner.**
+     *
+     * A camera the owner has refused stays refused: this never widens [fallback], it only leaves it
+     * alone.
+     */
+    fun cameraStalled() {
         state = PairingUi.NeedsCamera
     }
 
@@ -142,11 +170,14 @@ fun PairingHost(
             if (permitted) {
                 PairingViewfinder(
                     onText = onText,
-                    // A camera that will not open lands where a refused one lands. `hasCamera` above
-                    // is satisfied by a FRONT camera, so a phone with no back camera reaches this
-                    // composable and fails inside it; so does a camera another application is
-                    // holding. Neither may crash a screen that owns a state for exactly this.
+                    // Two callbacks because there are two failures, and they differ in whether the
+                    // scanner is worth offering again. `hasCamera` above is satisfied by a FRONT
+                    // camera, so a phone with no back camera reaches this composable and throws
+                    // inside it - that one is a fact about the device and it latches.
                     onUnavailable = flow::cameraUnavailable,
+                    // A camera that opened and then reported an error is usually a camera that is
+                    // about to work. It shows the paste field without giving up the viewfinder.
+                    onStalled = flow::cameraStalled,
                 )
             }
         },

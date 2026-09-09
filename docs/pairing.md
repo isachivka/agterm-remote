@@ -171,13 +171,22 @@ likely to be wrong are the analysis resolution (the code needs 7–9 pixels per 
   the state is observed and any error routes to the same paste field; `CameraGuardTest` pins the policy
   across every error code and state type this library defines.
 
-  What could not be done is stage one. A second client opened from inside the instrumentation was
-  evicted — Android hands the camera to the foreground application, and CameraX logged `Camera open
-  completed ... errorCode=null` while the test held the device. The stock camera app releases the
-  camera when it goes to the background, which is the same rule from the other side. **So this route
-  has never carried a real error**, and the errors it is most likely to carry in the field are ones
-  that cannot be staged either: a camera disabled by device policy, do-not-disturb, or hardware
-  failure. It is code that is right and unproven, which is the honest description of it.
+  What could not be done is stage one, and **that failure argues the opposite of what it looks like**.
+  A second client opened from inside the instrumentation was evicted: Android hands the camera to the
+  foreground application, and CameraX logged `Camera open completed ... errorCode=null` while the test
+  held the device. That eviction is the same event that hands the **other** side a momentary in-use
+  state — so the case that cannot be staged from here is the case a person meets, resuming this app
+  right after a camera application or while one is slow to let go. It is not rare; it is not stageable
+  from the side that wins.
+
+  Which is also why a state error **does not** give up the scanner: those errors are mostly published
+  while the library is retrying and about to succeed, so the screen shows the paste field and Try again
+  goes back to the viewfinder. Taking a working scanner away from somebody a moment from finishing
+  would be worse than the black viewfinder this replaced — a black viewfinder is a dead end nobody
+  mistakes for progress. `PairingFlowTest` pins which way Try again goes for each of the two.
+
+  **This route has still never carried a real error in a run.** It is code that is right and unproven,
+  which is the honest description of it.
 - **A rotation during the enrolment cancels it.** The exchange runs in the composition's scope, so
   turning the phone mid-pairing ends it; if the bridge had already spent the token, the Mac is paired
   and the phone is not. It self-heals on the next pairing — the Mac replaces the phone it pinned — and

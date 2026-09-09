@@ -29,12 +29,18 @@ class CameraGuardTest {
     private fun <T> guarded(block: () -> T): T? = cameraOrUnavailable({ reported++ }, block)
 
     /**
-     * The two shapes that actually happen, and a third nobody has enumerated.
+     * The shape that actually happens, and three nobody has enumerated.
      *
      * `IllegalArgumentException` is a device with no camera matching the back selector — and
      * `FEATURE_CAMERA_ANY`, which is what the screen checks before getting here, is satisfied by a
-     * front camera alone. `CameraUnavailableException` is a camera another application is holding, and
-     * it is **checked**, so a `catch (e: RuntimeException)` would not have caught it at all.
+     * front camera alone. That one is real, and it is the one reproduced on an emulator.
+     *
+     * **`CameraUnavailableException` is here for its shape, not for a case it stands for.** It was put
+     * here as "a camera another application is holding", and that was wrong: in this version of the
+     * library, a camera in use does not throw at all — the bind succeeds and the refusal arrives as a
+     * `CameraState`, which is why the tests below exist. What it still earns its place for is that it
+     * is a **checked** exception, so it proves `catch (e: Exception)` rather than
+     * `catch (e: RuntimeException)`, which would have missed it.
      */
     @Test
     fun `a camera that will not open is reported rather than thrown`() {
