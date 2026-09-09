@@ -5,8 +5,6 @@ import Testing
 /// The one glyph, and the rule that it must not be a colour.
 struct IconStateTests {
 
-    private let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
-
     /// **A status conveyed only by hue is one the owner cannot read at a glance and may not be able to
     /// read at all.** Five states, five different shapes, and the menu bar applies no tint. The shapes
     /// themselves are checked in `MarkTests`, which renders them rather than comparing names — a
@@ -46,33 +44,29 @@ struct IconStateTests {
     }
 
     /// **The icon names which fact is unresolved. It never says "ok".** This is the one that keeps a
-    /// single dot from reappearing: something answering that is not us must not look like health.
-    @Test func somethingElseAnsweringNeverLooksLikeHealth() {
-        let impostor = BridgeStatus(address: address, running: .running, reachable: .answered,
-                                    identified: .notOurs(presented: "1111 2222"))
+    /// single dot from reappearing: no state's description is a verdict about the whole.
+    ///
+    /// It used to be asked of `MenuModel.icon(for:)`, over a `BridgeStatus` carrying three facts.
+    /// Nothing ever measured two of those three — the app built that value at its own call site out
+    /// of a placeholder address — so the function and the type are gone, and the rule is asked of the
+    /// vocabulary that is still live and still drawn.
+    @Test func noStateDescribesTheWholeInsteadOfNamingAFact() {
+        let verdicts = ["ok", "okay", "fine", "healthy", "good", "working", "all set", "ready"]
 
-        #expect(MenuModel.icon(for: impostor) == .answeredBySomethingElse)
-        #expect(MenuModel.icon(for: impostor) != .allThreeHold)
+        for state in IconState.allCases {
+            let said = state.describedAsWords.lowercased()
+            for verdict in verdicts {
+                #expect(!said.contains(verdict), "\(state) says \(verdict), which is a verdict about the whole")
+            }
+        }
     }
 
-    @Test func eachUnresolvedFactHasItsOwnIcon() {
-        #expect(MenuModel.icon(for: nil) == .notChecked)
-        #expect(MenuModel.icon(for: BridgeStatus(address: address, running: .running, reachable: .answered,
-                                                 identified: .ours)) == .allThreeHold)
-        #expect(MenuModel.icon(for: BridgeStatus(address: address, running: .notRunning, reachable: .answered,
-                                                 identified: .ours)) == .bridgeNotRunning)
-        #expect(MenuModel.icon(for: BridgeStatus(address: address, running: .running,
-                                                 reachable: .noAnswer("refused"),
-                                                 identified: .notEstablished)) == .nothingAnswered)
-    }
+    /// Five states, five different sentences. A vocabulary with two states saying the same thing is
+    /// two states collapsed, which is how the 2026-08-09 viewfinder lost its button.
+    @Test func everyStateSaysSomethingDifferent() {
+        let said = IconState.allCases.map(\.describedAsWords)
 
-    /// A bridge that is down AND an address answering as somebody else: the icon names the address
-    /// problem, because that is the one nobody would guess. The menu still shows both.
-    @Test func theStrangerOutranksTheStoppedProcessInTheGlyph() {
-        let both = BridgeStatus(address: address, running: .notRunning, reachable: .answered,
-                                identified: .notOurs(presented: "1111 2222"))
-
-        #expect(MenuModel.icon(for: both) == .answeredBySomethingElse)
-        #expect(both.problems.count == 2, "the menu must still say both")
+        #expect(Set(said).count == IconState.allCases.count)
+        #expect(said.allSatisfy { !$0.isEmpty })
     }
 }

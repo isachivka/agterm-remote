@@ -98,10 +98,17 @@ public protocol ControlClient {
     /// Mint a code. **The only thing anywhere that opens an enrolment window**, which is why the panel
     /// on screen is the second half of the argument for having an anonymous branch at all.
     ///
+    /// - Parameter advertise: the address a phone should dial, for **this** code. Empty means the one
+    ///   the bridge was started with.
+    ///
+    ///   It rides on the mint rather than on the process because it is editable while the process
+    ///   runs and nothing restarts it. The owner saves a new address, the app says *your phone will
+    ///   dial X*, and a bridge started ten minutes ago goes on minting codes for Y. Passing it here
+    ///   makes the value current by construction instead of by somebody remembering to restart.
     /// - Returns: the payload, and the expiry **the window will actually enforce** — clamped to
     ///   `enroll.MaxTTL` at the far end. A panel that displayed the ttl it asked for would strand
     ///   somebody mid-pairing on a code that advertised an hour against a five-minute window.
-    func openPairing(ttl: TimeInterval) throws -> (payload: String, expiresAt: Date)
+    func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date)
 
     /// Shut it. Idempotent at the far end; this app still only calls it for a window it opened.
     func closePairing() throws
@@ -119,6 +126,13 @@ public enum PairingPanelState: Equatable, Sendable {
 
     /// Nothing is on screen and no window is open at the bridge.
     case closed
+
+    /// The bridge has been asked for a code and has not answered yet. **A real state, not a
+    /// placeholder**: the socket call is off the main thread now, so there is a moment — normally a
+    /// millisecond, and up to the client's timeout against a bridge that accepts and then stalls —
+    /// where the panel is open and there is nothing on it. A blank rectangle for that moment is the
+    /// mystery this enum exists to avoid.
+    case asking
 
     /// The code, and the instant it stops being accepted. The payload is shown as selectable text
     /// beneath the picture: **that text is the phone's paste fallback and it is the same string.**
@@ -148,6 +162,8 @@ public enum PairingPanelState: Equatable, Sendable {
         switch self {
         case .closed, .showing:
             nil
+        case .asking:
+            "Asking the bridge for a code…"
         case .expired:
             "That code has run out. Nobody used it. Press Show a code again for a fresh one."
         case .refused(let spent):
@@ -179,9 +195,22 @@ public enum PairingPanelState: Equatable, Sendable {
 /// `tick` is called by whatever is driving the panel and does the whole decision: it asks the bridge
 /// what happened, and it compares the expiry against the clock. Neither half is sufficient alone. The
 /// bridge is the only thing that knows a phone paired or that five tokens were burnt; the clock is
-/// the only thing that keeps a dead code off the screen when the bridge cannot be reached at all —
-/// **a stale code on screen is a code someone will scan.**
-public final class PairingPanelModel {
+/// the only thing that keeps a dead code off the screen when the answer arrives late.
+///
+/// ### Nothing here runs on the caller's thread if the caller says so
+///
+/// Every verb on [ControlClient] is a blocking round trip to another process, bounded by
+/// `UnixControlClient.timeout` — five seconds against a bridge that accepts the connection and then
+/// says nothing. Driven from a one-second timer on the main thread, that is an interface which freezes
+/// for five seconds out of every six, which is the same hang class `BridgeProcess.stop` was rebuilt to
+/// remove, reintroduced one layer up.
+///
+/// So the round trips go through [off]. Its default runs them inline, which is what every test wants
+/// and what makes `open()` observable on the line after it; the app hands over a background queue and
+/// redraws from [onChange]. The state is behind a lock because of that, and a `generation` counter
+/// decides what a late answer is allowed to do: **an answer about a panel the owner has already
+/// closed changes nothing.**
+public final class PairingPanelModel: @unchecked Sendable {
 
     /// How long a code is asked for. `enroll.MaxTTL` is five minutes and the window clamps to it, so
     /// asking for more would advertise an expiry the bridge will not honour. Asking for exactly the
@@ -195,29 +224,73 @@ public final class PairingPanelModel {
     private let control: ControlClient
     private let now: () -> Date
 
-    public private(set) var state: PairingPanelState = .closed
+    /// Where the blocking calls run. **Inline by default**: a test that had to pump a queue to see
+    /// the result of `open()` would be a test about dispatch.
+    private let off: (@escaping () -> Void) -> Void
+
+    private let lock = NSLock()
+    private var _state: PairingPanelState = .closed
 
     /// True once this panel has opened a window at the bridge and has not closed it. **Closing is
     /// conditional on this**: a panel that fired `pair-close` on every dismissal would shut a window
     /// another panel had just opened.
     private var weOpenedAWindow = false
 
-    public init(control: ControlClient, now: @escaping () -> Date) {
+    /// Bumped by every `open` and every `close`. An answer that arrives for an older generation is
+    /// about a panel that is gone, and it is dropped rather than drawn.
+    private var generation = 0
+
+    /// True while a `status` round trip is out. A one-second timer over a call that can take five
+    /// seconds would otherwise queue five deep and answer with the oldest.
+    private var asking = false
+
+    /// Called on every change, **on whatever thread it happened on**. The app hops to the main one.
+    public var onChange: ((PairingPanelState) -> Void)?
+
+    public var state: PairingPanelState { lock.withLock { _state } }
+
+    public init(
+        control: ControlClient,
+        now: @escaping () -> Date,
+        off: @escaping (@escaping () -> Void) -> Void = { $0() },
+    ) {
         self.control = control
         self.now = now
+        self.off = off
     }
 
     /// Ask the bridge for a code and show it.
     ///
     /// A refusal is a sentence rather than an empty panel: *the bridge is not running* is the ordinary
     /// first answer here, and it is the whole content of the screen when it happens.
-    public func open() {
-        do {
-            let minted = try control.openPairing(ttl: Self.ttl)
-            weOpenedAWindow = true
-            state = .showing(payload: minted.payload, expiresAt: minted.expiresAt)
-        } catch {
-            state = .unavailable("\(error)")
+    ///
+    /// - Parameter address: what the code should tell the phone to dial. **Read at the press**, not at
+    ///   the spawn — see [ControlClient.openPairing]. Empty leaves the choice to the bridge.
+    public func open(advertising address: String = "") {
+        let mine = lock.withLock { () -> Int in
+            generation += 1
+            return generation
+        }
+        apply(.asking, from: mine)
+        off { [self] in
+            do {
+                let minted = try control.openPairing(ttl: Self.ttl, advertise: address)
+                let accepted = lock.withLock { () -> Bool in
+                    guard generation == mine else { return false }
+                    weOpenedAWindow = true
+                    return true
+                }
+                // **The window is shut immediately if nobody is waiting for it.** A panel closed
+                // while this call was in flight would otherwise leave the one anonymous branch of the
+                // front door open for five minutes with no code anywhere.
+                guard accepted else {
+                    try? control.closePairing()
+                    return
+                }
+                apply(.showing(payload: minted.payload, expiresAt: minted.expiresAt), from: mine)
+            } catch {
+                apply(.unavailable(Self.whyThereIsNoCode(error)), from: mine)
+            }
         }
     }
 
@@ -226,54 +299,109 @@ public final class PairingPanelModel {
     /// The window is the one moment this bridge will talk to a phone it has never met, and the
     /// argument for having that branch at all is that it lasts seconds and needs a person at the Mac.
     /// A panel that closed without closing it would leave the second clause resting on a timer.
+    ///
+    /// The state goes to `.closed` on the caller's thread and the round trip does not: a dismissal
+    /// that waited for a socket is a window that will not go away while the bridge is stalled.
     public func close() {
-        if weOpenedAWindow {
-            // A refusal here is not something to put on a screen that is going away. The window
-            // expires on its own, and the bridge is idempotent about closing one that is already shut.
-            try? control.closePairing()
+        let hadWindow = lock.withLock { () -> Bool in
+            generation += 1
+            let had = weOpenedAWindow
             weOpenedAWindow = false
+            _state = .closed
+            return had
         }
-        state = .closed
+        onChange?(.closed)
+        guard hadWindow else { return }
+        // A refusal here is not something to put on a screen that is going away. The window expires
+        // on its own, and the bridge is idempotent about closing one that is already shut.
+        off { [self] in try? control.closePairing() }
     }
 
     /// One turn of the panel's clock.
     ///
     /// The order is deliberate. **What the bridge says outranks the clock**, because a phone that
     /// paired one second before the expiry paired — reporting that as "it ran out" would send somebody
-    /// to re-scan a code for a phone that is already enrolled. The clock is the backstop for the case
-    /// the bridge cannot answer at all.
+    /// to re-scan a code for a phone that is already enrolled.
+    ///
+    /// **A bridge that cannot be asked is not a reason to keep showing the code.** That used to fall
+    /// through to the clock, which left a live-looking code on screen for the rest of its five minutes
+    /// after the bridge died — and a code whose bridge is gone is one somebody scans and gets nothing
+    /// from, which is indistinguishable from a broken phone.
     public func tick() {
-        guard case .showing(_, let expiresAt) = state else { return }
+        let mine = lock.withLock { () -> Int? in
+            guard case .showing = _state, !asking else { return nil }
+            asking = true
+            return generation
+        }
+        guard let mine else { return }
 
-        if let report = try? control.status() {
+        off { [self] in
+            let answer = Result { try control.status() }
+            lock.withLock { asking = false }
+
+            guard case .showing(_, let expiresAt) = state else { return }
+            guard case .success(let report) = answer else {
+                return apply(.unavailable(Self.bridgeStoppedAnswering), from: mine, clearingWindow: true)
+            }
+
             switch report.window.ended {
             case .paired:
-                // The phone is whichever one the bridge now holds. Unpairing is total in v1, so there
-                // is exactly one, and the last of the list is the one that just arrived. A `paired`
-                // ending with an empty list is a bridge contradicting itself; the clock below then
-                // decides, rather than this putting an unnamed phone on the screen.
+                // Unpairing is total in v1, so there is exactly one, and the last of the list is the
+                // one that just arrived. A `paired` ending with an empty list is a bridge
+                // contradicting itself; the clock below then decides, rather than this putting an
+                // unnamed phone on the screen.
                 if let phone = report.paired.last {
-                    weOpenedAWindow = false
-                    state = .paired(fingerprint: phone.fingerprint, name: phone.name)
-                    return
+                    return apply(
+                        .paired(fingerprint: phone.fingerprint, name: phone.name),
+                        from: mine, clearingWindow: true)
                 }
             case .attempts:
-                weOpenedAWindow = false
-                state = .refused(attemptsSpent: Self.maxAttempts - report.window.attemptsLeft)
-                return
+                return apply(
+                    .refused(attemptsSpent: Self.maxAttempts - report.window.attemptsLeft),
+                    from: mine, clearingWindow: true)
             case .closed:
-                weOpenedAWindow = false
-                state = .withdrawn
-                return
+                return apply(.withdrawn, from: mine, clearingWindow: true)
             case .expired:
-                weOpenedAWindow = false
-                state = .expired
-                return
+                return apply(.expired, from: mine, clearingWindow: true)
             case .never, .other:
                 break
             }
-        }
 
-        if now() >= expiresAt { state = .expired }
+            if now() >= expiresAt { apply(.expired, from: mine) }
+        }
+    }
+
+    /// What the panel says when the bridge stops answering while a code is up.
+    static let bridgeStoppedAnswering =
+        "The bridge stopped answering, so that code no longer works — a phone scanning it now would "
+            + "reach nothing. Start the bridge from the menu, then ask for a fresh code."
+
+    /// A refusal, as a sentence rather than as the fragment the bridge wrote.
+    ///
+    /// `ControlFailure.notListening` is already written for a person and is used unchanged. The others
+    /// are a clause: *"this bridge was built without a pairing half"* on its own, lowercase, with no
+    /// subject, on a panel where every other line is a sentence.
+    static func whyThereIsNoCode(_ error: Error) -> String {
+        switch error {
+        case ControlFailure.notListening(let path):
+            ControlFailure.notListening(path: path).description
+        case ControlFailure.refused(let said):
+            "The bridge would not make a code. It said: \(said)"
+        default:
+            "The bridge could not be asked for a code: \(error)"
+        }
+    }
+
+    /// Swap the state, if this answer is still about the panel the owner is looking at, and announce
+    /// it outside the lock — `onChange` redraws a window, and a redraw under this lock is a deadlock
+    /// waiting for the next reader of `state`.
+    private func apply(_ next: PairingPanelState, from generation: Int, clearingWindow: Bool = false) {
+        let changed = lock.withLock { () -> Bool in
+            guard self.generation == generation, _state != next else { return false }
+            if clearingWindow { weOpenedAWindow = false }
+            _state = next
+            return true
+        }
+        if changed { onChange?(next) }
     }
 }

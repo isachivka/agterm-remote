@@ -89,7 +89,8 @@
 //     the pinned door spends a great deal of care rationing.
 //   - `status` — what the menu bar is drawn from: the bound address, the paired phones, whether agterm
 //     is answering, and what the enrolment window is doing.
-//   - `pair-open` — mint a code. **The only thing anywhere that can open an enrolment window.**
+//   - `pair-open` — mint a code, for an address the caller may name. **The only thing anywhere that
+//     can open an enrolment window.**
 //   - `pair-close` — shut it, which is what closing the panel means.
 //   - `unpair` — drop a paired phone.
 //
@@ -104,9 +105,9 @@
 // enroll.Window.Consume. Nothing here writes to the trust store except `unpair`, and nothing here can
 // add to it at all.
 //
-// It also has no opinion about the ADDRESS. It is handed the one the bridge is bound to and puts it in
-// the code unexamined — see [Pairing.Listening], where the reason a validator there would be actively
-// harmful is written down.
+// It also has no opinion about the ADDRESS. It is handed one — on the request, or failing that on the
+// process — and puts it in the code unexamined; see [dialTarget], where the reason a validator there
+// would be actively harmful is written down.
 package control
 
 import (
@@ -161,6 +162,25 @@ type request struct {
 	TTLSeconds int `json:"ttl_seconds,omitempty"`
 	// Fingerprint names the phone `unpair` drops. Never a wildcard and never optional.
 	Fingerprint string `json:"fingerprint,omitempty"`
+	// Advertise is the address a phone should dial, for THIS code. Empty means [Pairing.Listening],
+	// which is what a caller with one address means.
+	//
+	// # Why the address rides on the request rather than only on the process
+	//
+	// Because it is editable while this process runs, and this process is not restarted when it
+	// changes. The Mac app owns the address; the owner types a new one into the setup screen and
+	// presses Save; the bridge - bound to a wildcard, started minutes ago with the previous value on
+	// its command line - goes on minting codes for where they used to live. Nothing is wrong with any
+	// single component and the product is broken: the app says "your phone will dial X", and the code
+	// beside that sentence says Y.
+	//
+	// A code is minted here anyway, so carrying the address on the mint makes it current **by
+	// construction** rather than by somebody remembering to restart. The flag stays for the caller
+	// that has one address and means it, and it is the fallback when this is empty.
+	//
+	// Nothing here validates the host - see [dialTarget], where the reason a host policy would be
+	// actively harmful is written down. What is refused is a string that is not a host and a port.
+	Advertise string `json:"advertise,omitempty"`
 }
 
 // response says what happened to a `restore`, including when nothing did.
@@ -499,7 +519,7 @@ func handle(ctx context.Context, conn net.Conn, fit Fit, pairing *Pairing) {
 	case VerbStatus:
 		status(ctx, conn, pairing)
 	case VerbPairOpen:
-		openWindow(conn, pairing, req.TTLSeconds)
+		openWindow(conn, pairing, req.TTLSeconds, req.Advertise)
 	case VerbPairClose:
 		closeWindow(conn, pairing)
 	case VerbUnpair:
@@ -578,7 +598,7 @@ func status(ctx context.Context, conn net.Conn, p *Pairing) {
 // strands somebody mid-pairing, and the phone cannot tell a closed window from an unreachable laptop.
 // So the token and the expiry both come out of this one call, and
 // TestPairOpenAdvertisesTheExpiryTheWindowWillEnforce is what keeps it that way.
-func openWindow(conn net.Conn, p *Pairing, ttlSeconds int) {
+func openWindow(conn net.Conn, p *Pairing, ttlSeconds int, advertise string) {
 	if !p.ready() {
 		reply(conn, errorReply{Error: "this bridge was built without a pairing half"})
 		return
@@ -591,7 +611,13 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int) {
 			"ttl_seconds must be positive; the ceiling is %d", int(enroll.MaxTTL/time.Second))})
 		return
 	}
-	host, port, err := dialTarget(p.Listening)
+	// The caller's address for this code, or the process's when they did not name one. See
+	// [request.Advertise] for why the per-call value exists at all.
+	target := p.Listening
+	if advertise != "" {
+		target = advertise
+	}
+	host, port, err := dialTarget(target)
 	if err != nil {
 		reply(conn, errorReply{Error: err.Error()})
 		return

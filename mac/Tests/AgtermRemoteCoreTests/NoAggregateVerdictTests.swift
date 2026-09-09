@@ -24,7 +24,7 @@ struct NoAggregateVerdictTests {
     }
 
     /// Comments are removed before scanning, because **the sources' own documentation discusses the
-    /// things this forbids** — the doc comment on `BridgeStatus` explains why there is no aggregate,
+    /// things this forbids** — the doc comment on `IconState` explains why there is no aggregate,
     /// and `AddressPreference`'s explains why the bridge's own configuration is left alone. Scanning
     /// prose finds the explanation and calls it the violation, which is a detector that fires on its
     /// own reasoning.

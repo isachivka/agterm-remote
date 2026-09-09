@@ -39,8 +39,23 @@ public struct MenuItem: Equatable, Sendable {
 /// The one glyph in the menu bar.
 ///
 /// **This is not an aggregate verdict.** It never says "ok" or "not ok"; it names **which fact is
-/// unresolved**, and the menu underneath always lists all three regardless. The distinction matters
+/// unresolved**, and the menu underneath says what it knows regardless. The distinction matters
 /// because a single green dot is exactly what would have shown green for the bare dynamic-DNS suffix.
+///
+/// ### Three of these five have no measurement behind them, and that is now stated rather than faked
+///
+/// `nothingAnswered` and `answeredBySomethingElse` are about whether the configured address answers
+/// and whether what answers is this laptop. **Nothing in this app has ever established either.** They
+/// were derived from a `BridgeStatus` the menu-bar app built at its own call site out of a
+/// placeholder address and the words `not checked`, and that type — with its assessment, its probe
+/// protocol and its handshake outcomes — has been retired rather than left standing as a vocabulary
+/// for a probe nobody has scheduled. The next thing that would have happened to it is a second fake
+/// caller.
+///
+/// The cases stay because [Mark] draws five distinct shapes and `MarkTests` holds them apart; when a
+/// reachability probe is built, this is the vocabulary it reports into, and it will report measured
+/// facts. Until then the app uses `notChecked`, `bridgeNotRunning` and `allThreeHold`, which are the
+/// three it can actually answer.
 public enum IconState: String, CaseIterable, Sendable {
     case notChecked
     case bridgeNotRunning
@@ -68,21 +83,6 @@ public struct MenuModel: Sendable {
 
     static let startLaunching = "Start at login"
     static let stopLaunching = "Don't start at login"
-
-    /// Which fact is unresolved, in the order that makes the next action obvious. **Not a severity
-    /// ranking and not a summary** — the menu shows all three either way.
-    public static func icon(for status: BridgeStatus?) -> IconState {
-        guard let status else { return .notChecked }
-        if case .notOurs = status.identified { return .answeredBySomethingElse }
-        if case .noAnswer = status.reachable { return .nothingAnswered }
-        // `.starting` is not running. It is honestly the same glyph as not-running: the bridge is
-        // not answering, which is what the mark is about, and inventing a sixth shape for a window
-        // that is normally a few hundred milliseconds would add a state to a five-state vocabulary
-        // for something nobody would see.
-        if status.running != .running { return .bridgeNotRunning }
-        if status.identified == .notEstablished { return .nothingAnswered }
-        return .allThreeHold
-    }
 
     /// The menu for a given moment.
     ///

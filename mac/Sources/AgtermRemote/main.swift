@@ -52,9 +52,38 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// bridge, so the two cannot disagree about where the socket is.
     private let control = UnixControlClient(stateDirectory: MenuBarApp.stateDirectory)
 
-    /// The panel, as a value. The window above renders it and the clock below advances it; neither
-    /// decides anything.
-    private lazy var panel = PairingPanelModel(control: control, now: Date.init)
+    /// **Every control-socket round trip in this app runs here, and nowhere else.**
+    ///
+    /// Serial, so two answers cannot race each other into the menu, and off the main thread because
+    /// each one of them is a blocking call to another process with a five-second ceiling. Driven from
+    /// a one-second timer on the main thread, as the panel is, that is an interface frozen five
+    /// seconds out of six against a bridge that accepts and then stalls — the same hang class
+    /// `BridgeProcess.stop` was rebuilt to remove, one layer up.
+    private let socketWork = DispatchQueue(label: "agterm-remote.control", qos: .userInitiated)
+
+    /// The panel, as a value. The window renders it and the clock advances it; neither decides
+    /// anything, and neither waits for a socket.
+    private lazy var panel: PairingPanelModel = {
+        let model = PairingPanelModel(
+            control: control, now: Date.init,
+            off: { [socketWork] work in socketWork.async(execute: work) })
+        model.onChange = { [weak self] state in
+            // It changed on the socket queue. Everything below this line touches AppKit.
+            DispatchQueue.main.async { self?.panelChanged(to: state) }
+        }
+        return model
+    }()
+
+    /// What the panel showed last, so a redraw is not asked for on a state that has not moved.
+    private func panelChanged(to state: PairingPanelState) {
+        pairing.refreshIfOpen(state)
+        // A phone that walked through the window has proven the address it dialled. This is the
+        // moment that fact becomes true, and the menu says it.
+        if case .paired = state {
+            refreshProvenance()
+            rebuildMenu()
+        }
+    }
 
     /// What the bridge last said it holds. **Read from the socket, not remembered from a file**: the
     /// trust store's modification date says a phone once enrolled and keeps saying it after the phone
@@ -117,9 +146,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // the answer lives in a file this process has not looked at yet. Asking afterwards left the
         // menu saying `unproven` under a setup that had been paired for weeks, until something else
         // happened to rebuild it.
-        refreshProvenance()
+        refreshProvenance { [weak self] in self?.rebuildMenu() }
         // The title says what the SYSTEM says, from the first draw: reading it here rather than
-        // assuming false means the menu is never briefly wrong after a relaunch.
+        // assuming false means the menu is never briefly wrong after a relaunch. Drawn now from what
+        // is already stored, and again above when the bridge has answered — the alternative is a
+        // menu bar with nothing in it until a socket replies.
         rebuildMenu()
         watchForTermination()
         // **The one window that opens without being asked for**, and only while the three things do
@@ -148,19 +179,40 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// unproven, whatever the file's date says. When it cannot — the bridge is not running, which is
     /// most of the time — the file is still the best answer available and nothing here pretends
     /// otherwise.
-    @discardableResult
-    private func refreshProvenance() -> Date? {
-        if let paired = try? control.status().paired {
-            pairedPhones = paired
-            if paired.isEmpty { return AddressPreference.recordEnrolment(at: nil) }
+    /// **Asked on the socket queue, applied on the main one.** It was a blocking round trip called
+    /// from a five-second timer on the main thread, so a bridge that accepted and then said nothing
+    /// froze the menu bar for five seconds out of every five.
+    ///
+    /// The file is read here too, and that half is cheap: one `stat`.
+    private func refreshProvenance(then finished: (@MainActor () -> Void)? = nil) {
+        socketWork.async { [weak self] in
+            guard let self else { return }
+            let paired = try? control.status().paired
+            let enrolment = EnrolmentRecord.recordedAt(inStateDirectory: Self.stateDirectory)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let paired { self.pairedPhones = paired }
+                    // An empty list from a bridge that answered outranks the file's date. Nothing else
+                    // does: when the bridge cannot be asked - which is most of the time, because it is
+                    // not running - the file is the best answer available.
+                    self.applyProvenance(paired?.isEmpty == true ? nil : enrolment)
+                    finished?()
+                }
+            }
         }
-        return AddressPreference.recordEnrolment(
-            at: EnrolmentRecord.recordedAt(inStateDirectory: Self.stateDirectory))
     }
 
+    /// The synchronous half, so the rule stays in one place. Never touches the socket.
+    @discardableResult
+    private func applyProvenance(_ enrolment: Date?) -> Date? {
+        AddressPreference.recordEnrolment(at: enrolment)
+    }
+
+    /// **Reads what is stored; does not go and ask.** It used to call `refreshProvenance`, which is a
+    /// blocking round trip — and this is called from inside window construction. The five-second timer
+    /// below owns the asking, and it redraws this pane when the answer moves.
     private func onboardingNow() -> Onboarding {
-        refreshProvenance()
-        return Onboarding(
+        Onboarding(
             // Named for the socket in the design document; what this app may look at is the running
             // application. See `AgtermPresence` - the socket is on the far side of a boundary this
             // app does not cross.
@@ -211,13 +263,18 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let before = AddressPreference.provenAt()
-                self.refreshProvenance()
-                guard AddressPreference.provenAt() != before else { return }
-                self.rebuildMenu()
-                // The pane on screen is about to be wrong for the same reason the menu was.
-                if self.onboarding.isOpen {
-                    self.onboarding.show(
-                        self.onboardingNow(), field: AddressField(AddressPreference.read()))
+                let phones = self.pairedPhones
+                self.refreshProvenance { [weak self] in
+                    guard let self else { return }
+                    // Nothing is redrawn unless an answer moved — including the paired list, which is
+                    // what the menu's Unpair item is made of.
+                    guard AddressPreference.provenAt() != before || self.pairedPhones != phones else { return }
+                    self.rebuildMenu()
+                    // The pane on screen is about to be wrong for the same reason the menu was.
+                    if self.onboarding.isOpen {
+                        self.onboarding.show(
+                            self.onboardingNow(), field: AddressField(AddressPreference.read()))
+                    }
                 }
             }
         }
@@ -314,8 +371,16 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     /// Ask the bridge for a code and draw whatever came back — including a refusal, which is a
     /// sentence on the panel rather than an empty square.
+    /// **The address is read here, at the press, and travels with the mint.**
+    ///
+    /// Not from the bridge's command line, which was set when it was started and is not revisited when
+    /// the owner saves a new address. That was the whole of the second half of this defect: the app
+    /// said *your phone will dial X* and the code beside it said Y, with nothing anywhere restarting
+    /// the bridge to reconcile them.
     private func mintACode() {
-        panel.open()
+        let address = (try? AddressPreference.read().get())?.displayed ?? ""
+        pairing.address = address
+        panel.open(advertising: address)
         pairing.show(panel.state)
     }
 
@@ -333,16 +398,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // reference rather than from the callback's own argument keeps this on the main actor,
                 // which is where every other line of this closure already is.
                 guard let self, self.pairing.isOpen else { return self?.stopThePanelClock() ?? () }
-                let before = self.panel.state
+                // Returns at once. The round trip is on the socket queue and the redraw arrives
+                // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
+                // nothing at all.
                 self.panel.tick()
-                guard self.panel.state != before else { return }
-                self.pairing.refreshIfOpen(self.panel.state)
-                // A phone that walked through the window has proven the address it dialled. This is
-                // the moment that fact becomes true, and the menu says it.
-                if case .paired = self.panel.state {
-                    self.refreshProvenance()
-                    self.rebuildMenu()
-                }
             }
         }
         // Menus and modal alerts run their own run-loop mode; without this the code on screen would
@@ -362,8 +421,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func closePairing() {
         stopThePanelClock()
         panel.close()
-        refreshProvenance()
-        rebuildMenu()
+        refreshProvenance { [weak self] in self?.rebuildMenu() }
     }
 
     /// **Unpairing, with the cost said before the press takes effect.**
@@ -386,21 +444,31 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
-        do {
-            try control.unpair(fingerprint: phone.fingerprint)
-            pairedPhones = []
-            // The address stops being proven in the same act. See `refreshProvenance`.
-            refreshProvenance()
-            notify(
-                "That phone is unpaired.",
-                "It can no longer connect. Pair it again from this menu when you want it back.")
-        } catch {
-            // Never silent. The bridge refuses a fingerprint it does not hold rather than shrugging,
-            // precisely so this can say something true instead of reporting a removal that did not
-            // happen.
-            notify("That phone was not unpaired.", "\(error)")
+        // On the socket queue, like everything else that dials the bridge. The alert that follows is
+        // AppKit, so it comes back to the main thread to be raised.
+        socketWork.async { [weak self] in
+            guard let self else { return }
+            var refusal: Error?
+            do { try control.unpair(fingerprint: phone.fingerprint) } catch { refusal = error }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let refusal {
+                        // Never silent. The bridge refuses a fingerprint it does not hold rather than
+                        // shrugging, precisely so this can say something true instead of reporting a
+                        // removal that did not happen.
+                        self.notify("That phone was not unpaired.", "\(refusal)")
+                        return self.rebuildMenu()
+                    }
+                    self.pairedPhones = []
+                    // The address stops being proven in the same act. See `refreshProvenance`.
+                    self.refreshProvenance { self.rebuildMenu() }
+                    self.rebuildMenu()
+                    self.notify(
+                        "That phone is unpaired.",
+                        "It can no longer connect. Pair it again from this menu when you want it back.")
+                }
+            }
         }
-        rebuildMenu()
     }
 
     /// The arrival port as text for the box: empty when it follows the dial port, because empty is
@@ -609,10 +677,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// and the model is given the system's answer rather than our memory of it.
     private func rebuildMenu() {
         // **The supervisor's own state, not a translation of it.** This used to be mapped onto a
-        // three-way `BridgeStatus.Running` built out of a placeholder address and the words `not
-        // checked` — a shape with no measurement behind it — and every translation lost a case. Two
-        // of the five now change what is pressable: `.starting` is the window between spawning a
-        // child and that child announcing a bound listener, and `.stopping` is the kill on its way.
+        // three-way running state built here out of a placeholder address and the words `not
+        // checked` — a shape with no measurement behind it, since retired — and every translation
+        // lost a case. Two of the five now change what is pressable: `.starting` is the window
+        // between spawning a child and that child announcing a bound listener, and `.stopping` is
+        // the kill on its way.
         item?.menu = menu(
             paired: pairedPhones,
             hasAddress: AddressPreference.read().isSuccess,
