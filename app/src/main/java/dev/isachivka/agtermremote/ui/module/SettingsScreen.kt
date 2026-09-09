@@ -30,11 +30,8 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
  *
  * ### What was here until 2026-07-31, and why it is gone rather than hidden
  *
- * A switch per module, turning tiles off. The owner asked for it to be deleted:
- *
- * > *"те настройки которые ты сделал которые включают выключают какие-то модули которых на самом деле
- * > не существует — не нужна. Все модули которые есть в приложении должны отображаться на главной
- * > странице."*
+ * A switch per module, turning tiles off. The owner asked for it to be deleted: settings that turn
+ * modules on and off are not wanted, and every module the app has should simply be shown.
  *
  * They are right, and the reason is the one that removed `eof` from the key allowlist the same day:
  * **a preference nothing honours is worse than no preference.** Eight of those tiles are placeholders
@@ -58,13 +55,13 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
 fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    // REQ-0009. Still a slot rather than pairing state and six callbacks, so this file keeps knowing
+    // Still a slot rather than pairing state and six callbacks, so this file keeps knowing
     // nothing about pairing.
     //
-    // REQ-0009 section 4 called this placement PROVISIONAL, on the grounds that pairing configures a
-    // feature which did not exist yet and its eventual home was beside the terminal. Deleting the
-    // modules section settles it the same way: pairing is not a section of this screen any more, it is
-    // the screen.
+    // The placement was called provisional once, on the grounds that pairing configures a feature
+    // which did not exist yet and its eventual home was beside the terminal. Deleting the modules
+    // section settles it the same way: pairing is not a section of this screen any more, it is the
+    // screen.
     pairingSection: (@Composable () -> Unit)? = null,
     /**
      * The styled-screen switch: null hides the section (a preview, a test), otherwise its state.

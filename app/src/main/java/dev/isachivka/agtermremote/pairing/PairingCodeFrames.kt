@@ -11,7 +11,7 @@ import com.google.zxing.PlanarYUVLuminanceSource
  * QR decoder wants. Converting it to a `Bitmap` and then to ARGB pixels would allocate two more copies
  * of every frame, thirty times a second, to throw away the colour immediately afterwards.
  * `PlanarYUVLuminanceSource` is in the zxing jar this app already ships, and it takes the plane as it
- * arrives. **The camera is what REQ-0019 buys; the decoder was already paid for.**
+ * arrives. **The camera is what the live route buys; the decoder was already paid for.**
  *
  * ### Row stride is the whole reason this is a separate, tested function
  *

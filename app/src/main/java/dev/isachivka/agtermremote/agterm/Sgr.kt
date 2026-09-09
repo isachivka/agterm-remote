@@ -16,7 +16,8 @@ package dev.isachivka.agtermremote.agterm
  * ### What this is not
  *
  * Not a terminal emulator. There is no cursor, no grid, no scrolling region; the text is drawn in
- * reading order exactly as a plain screen is, with colours attached. REQ-0010 owns anything beyond that.
+ * reading order exactly as a plain screen is, with colours attached. Anything beyond that belongs to a
+ * real terminal emulator.
  *
  * ### Palette
  *

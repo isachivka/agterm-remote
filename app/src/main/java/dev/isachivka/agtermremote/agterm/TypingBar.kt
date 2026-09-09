@@ -67,24 +67,24 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
  * sends one named key from the bridge's closed set — this screen cannot compose a sequence, and
  * neither can the layer beneath it.
  *
- * ### One row of them, not three — REQ-0028
+ * ### One row of them, not three
  *
  * The bar carried **fifteen** cells in three rows for a month, and after two weeks of daily use the
- * owner reported that eight of them had never once been pressed: *"я ни разу, буквально ни разу не
- * использовал Ctrl-A, Ctrl-E, Backspace, стрелочки"*. Three rows of keys, more than half of them dead,
+ * owner reported that eight of them had never once been pressed - not once, in two weeks: Ctrl-A,
+ * Ctrl-E, Backspace and the arrows. Three rows of keys, more than half of them dead,
  * standing on the axis a phone has least of — and the terminal above is `weight(1f)`, so every one of
  * those rows was taken directly out of the output the owner is trying to read.
  *
  * They are **folded, not deleted**. [KEYS_UNDER_THE_FOLD] is one tap away behind the ellipsis, which is
- * the owner's own word for it: *"спрятать часть кнопок под троеточие, чтобы они как бы приподнимали
- * панель"*. A key nobody presses is worth a tap; a key that is gone is a bug report.
+ * the owner's own idea: hide some of the keys behind an ellipsis that lifts the panel when it is
+ * tapped. A key nobody presses is worth a tap; a key that is gone is a bug report.
  *
  * The arithmetic, on the owner's phone — 448dp wide, so 424dp inside this bar's padding:
  *
  * | | rows | height | terminal lines it costs | one key |
  * |---|---|---|---|---|
- * | Before REQ-0028 | 3 | 148dp | 7.4 | 78.4dp |
- * | REQ-0028, folded | 1 | 44dp | 2.2 | 47.75dp |
+ * | Before the fold | 3 | 148dp | 7.4 | 78.4dp |
+ * | Folded | 1 | 44dp | 2.2 | 47.75dp |
  * | **Now, folded (the normal state)** | **1** | **44dp** | **2.2** | **65.7dp** |
  * | Now, unfolded | 3 | 148dp | 7.4 | 80dp |
  *
@@ -92,7 +92,7 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
  * puts between its children. A terminal line is `TerminalBox`'s 20sp `LINE_HEIGHT_SP`. **The normal
  * state gives the terminal back 104dp, which is 5.2 lines of the owner's session.**
  *
- * **The last column is what REQ-0029 changed.** REQ-0028 bought those lines by putting eight cells in
+ * **The last column is what the overpull changed.** The fold bought those lines by putting eight cells in
  * a row and shrinking every key 39%, and that shrink was the one thing it shipped unverified. Moving
  * `PgUp` and `PgDn` off the bar — they have a gesture now, see [TerminalPull] — leaves six cells and
  * **65.7dp a key, back above Material's 48dp minimum**, with the height saving untouched.
@@ -109,7 +109,7 @@ fun TypingBar(
     onSendText: (String) -> Unit,
     onSendKey: (String) -> Unit,
     /**
-     * Types a command and then presses Return — the Claude button, REQ-0013.
+     * Types a command and then presses Return — the Claude button.
      *
      * Separate from [onSendText] because the two acts are separate calls, ordered, with the Return
      * sent only if the text landed. Defaulted so a preview or a test that does not care reads as it
@@ -119,7 +119,7 @@ fun TypingBar(
     onPickFile: () -> Unit,
     modifier: Modifier = Modifier,
     /**
-     * What is in the field — REQ-0046. Beside [state] rather than inside it, so a key going out or a
+     * What is in the field. Beside [state] rather than inside it, so a key going out or a
      * report coming back leaves the owner's text exactly where it was.
      */
     draft: String = "",
@@ -129,7 +129,7 @@ fun TypingBar(
     // **A card, and the terminal ends where it begins.** design/v1 gives the bar a raised container
     // with 28dp top corners so the output above it has a visible edge rather than running under a row
     // of controls. Appearance only: nothing about what this bar DOES changed with it - see the note
-    // on singleLine below, and REQ-0010 4.3.
+    // on singleLine below.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -139,7 +139,7 @@ fun TypingBar(
     ) {
         // **A refusal about the text says so HERE, above the field, with the text still in it.**
         //
-        // REQ-0017. This used to be a full-screen error that replaced the terminal and the session
+        // This used to be a full-screen error that replaced the terminal and the session
         // list and listed our internal key names, for a person who had pasted a message out of a chat
         // app. A no about what they sent is not the connection breaking, so it costs one line beside
         // the thing they can edit and nothing else.
@@ -187,8 +187,8 @@ fun TypingBar(
                 onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f).testTag(TAG_TYPING_FIELD),
                 // **Still single line, and this is the one line of this file nobody may change
-                // casually.** PR #84 put a multiline field here and the owner reverted the lot -
-                // *"с полем тоже куча багов, откатывай изменения"*. The design describes how the bar
+                // casually.** PR #84 put a multiline field here and the owner reverted the lot, on
+                // the grounds that the field had brought a pile of bugs with it. The design describes how the bar
                 // LOOKS; it does not reopen what it does.
                 singleLine = true,
                 // A terminal is not prose. Autocorrect turning `cd` into `CD`, or capitalising the
@@ -280,7 +280,7 @@ fun TypingBar(
         // height unpredictable at the moment they are reaching for it.
         //
         // (An earlier comment here said the saveable variant was BANNED by a source scan. That scan
-        // enforced a rule the owner never set, and it is gone - REQ-0046. `remember` stays for the
+        // enforced a rule the owner never set, and it is gone. `remember` stays for the
         // reason above, not because anything forbids the alternative.)
         //
         // Not hoisted into AgtermViewModel beside `closedWorkspaces`, which is the other fold state
@@ -422,8 +422,8 @@ private fun KeyCellButton(
                 // **Tint UNSPECIFIED, and that is load-bearing.** `Icon` tints with
                 // LocalContentColor by default, which here is the key label colour - it would
                 // silently repaint Anthropic's #D97757 the same grey as the letters beside it. The
-                // owner asked for the logo to look like the logo: *"оставлять оранжевым прямо чтобы
-                // был как оригинальный"*. The colour lives in the drawable; see its header.
+                // owner asked for the logo to look like the logo, in its own orange rather than
+                // repainted. The colour lives in the drawable; see its header.
                 is KeyCell.Macro -> Icon(
                     painter = painterResource(cell.icon),
                     contentDescription = stringResource(cell.description),
@@ -459,7 +459,7 @@ private val KeyShape = RoundedCornerShape(14.dp)
  * This was `Pair<String?, Int>`, where the string is **a name the bridge's key allowlist must
  * accept**. `internal/keys` holds a closed map and `keys.Key` refuses anything outside it by design.
  *
- * REQ-0013 adds a cell that types a command and presses Return. Giving it a name like `"claude"` would
+ * One cell types a command and presses Return. Giving it a name like `"claude"` would
  * put a string in that position which the bridge will refuse — and the refusal would arrive as a
  * keystroke that silently does nothing, with the reason four layers away in a Go error nobody holding
  * the phone can read. Two cases cannot be crossed, and the `when` that renders them is exhaustive, so
@@ -486,7 +486,7 @@ internal sealed interface KeyCell {
 }
 
 /**
- * **The five that stay on screen, in the order a hand reaches for them — REQ-0028, REQ-0029.**
+ * **The five that stay on screen, in the order a hand reaches for them.**
  *
  * These are the cells the owner did NOT name when they reported, after two weeks of daily use, which
  * buttons they had never pressed — less `pageup` and `pagedown`, which left the bar when the overpull
@@ -494,14 +494,14 @@ internal sealed interface KeyCell {
  *
  * Five, because the fold's own cell makes six, and six is what makes each key **65.7dp** wide instead
  * of the 47.75dp that eight across bought. That number is the whole reason this row got shorter: it
- * was the one thing flagged as unverified on REQ-0028 and the one thing a thumb would find first.
+ * was the one thing flagged as unverified and the one thing a thumb would find first.
  */
 internal val KEYS_ON_THE_BAR: List<KeyCell> = listOf(
     KeyCell.Key("escape", R.string.agterm_key_escape),
     KeyCell.Key(ENTER_KEY, R.string.agterm_key_enter),
     KeyCell.Key("tab", R.string.agterm_key_tab),
     KeyCell.Key("interrupt", R.string.agterm_key_interrupt),
-    // *"я хочу кнопку Клод ... вводится команда claude_yolo и нажимается enter"* - REQ-0013. It is
+    // The Claude button, asked for by name: it types the alias and presses Return. It is
     // pressed once per session rather than once per minute, and it stays on the bar anyway: it is the
     // control that STARTS the thing this app exists to talk to, and a person opening the bar on a
     // fresh session should not have to go looking for it.
@@ -514,9 +514,8 @@ internal val KEYS_ON_THE_BAR: List<KeyCell> = listOf(
 /**
  * **The ten behind the ellipsis. Hidden — not deleted, and the difference is the whole rule.**
  *
- * Reported by the owner on 2026-08-21, from two weeks of using the thing daily: *"я ни разу, буквально
- * ни разу не использовал Ctrl-A, Ctrl-E, Backspace, стрелочки, ну прям вообще"*. Seven of these are
- * theirs by name. The eighth is `killline` — ^U — and that one is a judgement rather than a report: it
+ * Reported by the owner on 2026-08-21, from two weeks of using the thing daily: he had not once
+ * pressed Ctrl-A, Ctrl-E, Backspace or the arrows. Seven of these are theirs by name. The eighth is `killline` — ^U — and that one is a judgement rather than a report: it
  * is the last member of the line-editing family whose other three they named, and a line-editing key
  * on a bar whose owner does no line editing is a cell spent on nothing. **If they press it, it comes
  * back to the front row; that is a label change, not a release.**
@@ -534,7 +533,7 @@ internal val KEYS_ON_THE_BAR: List<KeyCell> = listOf(
  * widest key the bar has ever had — and these are the keys reached for least often, so they are the
  * ones that can afford the space.
  *
- * Unfolded the bar is three key rows, which is what it was before REQ-0028. Folded — the state it
+ * Unfolded the bar is three key rows, which is what it was before the fold. Folded — the state it
  * opens in, every time — it is one.
  */
 internal val KEYS_UNDER_THE_FOLD: List<List<KeyCell>> = listOf(
@@ -580,7 +579,7 @@ internal val KEY_ROWS: List<List<KeyCell>> = listOf(KEYS_ON_THE_BAR) + KEYS_UNDE
 /**
  * A key cell's vertical padding, and the reason it is a named constant now.
  *
- * A row's height is this twice plus a 20sp label — 44dp — and REQ-0028's whole claim is arithmetic
+ * A row's height is this twice plus a 20sp label — 44dp — and the fold's whole claim is arithmetic
  * over that number: three rows to one gives the terminal 104dp, which is 5.2 of `TerminalBox`'s 20sp
  * lines. A literal `12.dp` in two places is a claim nobody can grep for.
  */
@@ -604,7 +603,7 @@ const val TAG_TYPING_CLOSE = "agterm_typing_close"
 const val TAG_TYPING_KEY = "agterm_typing_key_"
 
 /**
- * The Claude button, REQ-0013.
+ * The Claude button.
  *
  * It replaces `TAG_TYPING_KEY_RESERVED`, which named the empty Spacer in this cell. Checked before
  * removing rather than after: `grep` found exactly one use of that tag, its own `testTag` call, so no
@@ -615,7 +614,7 @@ const val TAG_TYPING_KEY = "agterm_typing_key_"
  */
 const val TAG_TYPING_MACRO = "agterm_typing_macro"
 /**
- * The ellipsis, REQ-0028 — the cell that brings [KEYS_UNDER_THE_FOLD] out and puts them back.
+ * The ellipsis — the cell that brings [KEYS_UNDER_THE_FOLD] out and puts them back.
  *
  * Its own tag rather than a key name, for the same reason the macro has one: it presses nothing on the
  * owner's laptop. It is the only control on this bar that changes the bar's own height.

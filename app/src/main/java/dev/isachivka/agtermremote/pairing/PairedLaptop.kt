@@ -7,9 +7,9 @@ import java.io.IOException
 /**
  * The laptop this phone is paired with, on disk.
  *
- * ### Why this is stored when REQ-0006 says nothing is
+ * ### Why this is stored when nothing else is
  *
- * REQ-0006 forbids persisting a reachability verdict, in any form, and this writes a file. The two
+ * Persisting a verdict about a service is forbidden, in any form, and this writes a file. The two
  * are not in tension and the distinction is worth stating because a later reader will otherwise see a
  * rule being bent.
  *

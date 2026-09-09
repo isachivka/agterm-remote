@@ -5,11 +5,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * The recalibration reporting itself — REQ-0033.
+ * The recalibration reporting itself.
  *
  * The owner reached for the long press on 2026-08-25 with a stuck fit and could not tell it had done
- * anything: *"анимацию надо сделать чтоб я понял когда сработало, ну или там нотификацию, хоть
- * что-то."*
+ * anything, and asked for some sign that it had fired - an animation, a notification, anything at
+ * all.
  *
  * **The trap this is written around:** a recalibration that lands on the same column count changes
  * nothing on screen. So feedback keyed on the terminal reflowing would report success only in the

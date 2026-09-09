@@ -18,13 +18,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The pane toggle — REQ-0032, corrected by REQ-0034, and reversed by REQ-0035.
+ * The pane toggle.
  *
  * ### What this file used to assert, and why the assertion turned around
  *
  * It asserted that a session with no second pane has **no toggle at all**, on the absent-not-disabled
- * ruling. The owner then specified that tapping right should CREATE the pane when there is none:
- * *"если сессия есть мы её показываем, если её нет мы её создаём и потом показываем"*.
+ * ruling. The owner then specified that tapping right should CREATE the pane when there is none.
  *
  * Absent-not-disabled is untouched — it is a rule about controls that can do nothing. This control can
  * always do something on any session, so the condition it was gated on stopped existing. The tests

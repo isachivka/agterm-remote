@@ -50,7 +50,7 @@ internal class PinnedTrust(
      * Byte-exact, and then the dates.
      *
      * **The dates are the half that is easy to leave out, and leaving it out fails silently in the
-     * good direction.** REQ-0005 measured why: PKIX does not validate a trust anchor's own validity,
+     * good direction.** It was measured: PKIX does not validate a trust anchor's own validity,
      * and a pinned self-signed certificate *is* its own anchor — so nothing checks `NotAfter` unless
      * this does. Without it the identity outlives its stated lifetime, `NotAfter` becomes decorative,
      * nothing forces rotation, and everything keeps working so nothing ever reveals it.
@@ -116,7 +116,7 @@ internal class PinnedTrust(
      * This is not an unreachable branch dressed as coverage: the platform calls it, and an empty
      * array is the correct answer. There are no accepted *issuers* because there is no issuer in this
      * design at all — each side self-signs and pins the other's exact bytes. Returning the pinned
-     * certificate here would describe it as a CA, which is the thing REQ-0008 §5 says must not exist.
+     * certificate here would describe it as a CA, which is the thing the trust model says must not exist.
      */
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }

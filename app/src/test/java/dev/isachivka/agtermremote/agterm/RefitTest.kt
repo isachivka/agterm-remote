@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 /**
- * Re-applying the fit when the geometry changes — REQ-0041.
+ * Re-applying the fit when the geometry changes.
  *
  * His case: he moves from a session with a split to one without. The window was sized for a pane and
  * the pane is now the whole terminal, so the fit no longer describes what he is looking at.

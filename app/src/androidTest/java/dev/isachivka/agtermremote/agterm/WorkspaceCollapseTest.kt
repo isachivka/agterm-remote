@@ -23,8 +23,7 @@ import org.junit.Test
 /**
  * Folding a workspace, and the memory it must not fight.
  *
- * The owner asked for this — *"в меню сессий сделай чтобы разделы можно было 'сворачивать'"* — and the
- * risk is not that folding fails to fold. It is that folding changes the rows on screen, the restore
+ * The owner asked for this, and the risk is not that folding fails to fold. It is that folding changes the rows on screen, the restore
  * is keyed on the rows on screen, and the list therefore jumps under their thumb every time they press
  * a header. That is what [collapsingDoesNotMoveTheListUnderTheirThumb] is for; the rest is the feature.
  *
@@ -72,7 +71,7 @@ class WorkspaceCollapseTest {
                         onListAnchor = { anchor = it },
                         closedWorkspaces = closed,
                         onClosedWorkspaces = { closed = it },
-                        laptop = "10.0.0.1",
+                        laptop = "203.0.113.5",
                     )
                 }
             }

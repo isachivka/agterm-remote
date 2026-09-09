@@ -3,8 +3,7 @@ package dev.isachivka.agtermremote.agterm
 /**
  * Where the session list was, so returning to it puts them back rather than at the top.
  *
- * *"если я открываю какую-то сессию а потом возвращаюсь к списку сессий то scroll был там где я его
- * оставил"*.
+ * Opening a session and coming back to the list must leave the scroll where it was left.
  *
  * ### Why an ANCHOR and not an index
  *

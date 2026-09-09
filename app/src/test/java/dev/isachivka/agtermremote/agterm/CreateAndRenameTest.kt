@@ -13,7 +13,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 /**
- * Creating and renaming, REQ-0011, held where it can actually be run.
+ * Creating and renaming, held where it can actually be run.
  *
  * The emulator is dead and `androidTest` only compiles, so every rule here that could live on the JVM
  * does. What is left for a device is whether a tap lands on a pixel; what is here is whether the rules
@@ -117,11 +117,11 @@ class CreateAndRenameTest {
         assertEquals("the bridge's cap is 64 runes", 64, MaxLabelRunes)
     }
 
-    /** Counted in code points, so a Cyrillic name gets the same allowance as an English one. */
+    /** Counted in code points, so a Greek name gets the same allowance as an English one. */
     @Test
     fun `the cap counts characters and not bytes`() {
-        assertNull(labelProblem("я".repeat(MaxLabelRunes)))
-        assertEquals(LabelProblem.TooLong, labelProblem("я".repeat(MaxLabelRunes + 1)))
+        assertNull(labelProblem("π".repeat(MaxLabelRunes)))
+        assertEquals(LabelProblem.TooLong, labelProblem("π".repeat(MaxLabelRunes + 1)))
     }
 
     @Test
@@ -411,7 +411,7 @@ class CreateAndRenameTest {
     /**
      * **A half-created workspace is kept, not rolled back.**
      *
-     * REQ-0011 refused this shape because a failure between the two calls left an empty workspace the
+     * This shape was refused because a failure between the two calls left an empty workspace the
      * bridge could not describe and was not allowed to delete. Both halves are now false — the wire
      * publishes workspaces and the owner can delete one — so the honest outcome is to keep it, say the
      * create did not finish, and leave it on screen where a long press removes it.
@@ -460,7 +460,7 @@ class CreateAndRenameTest {
         assertNull(sessions.renaming.value)
     }
 
-    // --- the Claude button's macro, REQ-0013 ------------------------------------------------------
+    // --- the Claude button's macro ------------------------------------------------------
 
     /**
      * A connection that records what was asked of it and can be told to refuse the first call.
@@ -595,16 +595,16 @@ class CreateAndRenameTest {
         // **MutationNote has no Succeeded case at all**, which is the mechanism rather than the habit:
         // there is nowhere to put a success, so nobody can add one by reflex.
         //
-        // The count is pinned so that growing this enum is a deliberate act. It caught REQ-0012 adding
-        // DeleteFailed, REQ-0035 adding PaneFailed, REQ-0037 adding FitRefused and REQ-0041 adding
-        // NeedsFit - and the names are asserted rather than the number alone, since a count says
+        // The count is pinned so that growing this enum is a deliberate act. It caught the additions of
+        // DeleteFailed, PaneFailed, FitRefused and NeedsFit one at a time - and the names are asserted
+        // rather than the number alone, since a count says
         // nothing about what was added.
         assertEquals(7, MutationNote.entries.size)
         assertEquals(
             listOf("None", "CreateFailed", "RenameFailed", "DeleteFailed", "PaneFailed", "FitRefused", "NeedsFit"),
             MutationNote.entries.map { it.name },
         )
-        // **The stated invariant was "every case here is a FAILURE", and REQ-0041 broke it.** Corrected
+        // **The stated invariant was "every case here is a FAILURE", and NeedsFit broke it.** Corrected
         // rather than quietly stepped past, because a guard whose prose no longer describes what it
         // guards is worse than no guard.
         //

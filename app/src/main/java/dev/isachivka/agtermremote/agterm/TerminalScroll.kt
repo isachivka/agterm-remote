@@ -80,8 +80,8 @@ object TerminalScroll {
      * what hides that prompt.
      *
      * **The trigger is generalised because the defect was.** The owner hit it twice: first with the
-     * IME, then with our own typing bar - *"когда нажимаю type, снизу появляются наши контролы и
-     * оверлапят часть Клода"*. Same viewport change, different thing taking the space, so it is the
+     * IME, then with our own typing bar, whose controls come up from the bottom and cover part of
+     * the output. Same viewport change, different thing taking the space, so it is the
      * same rule rather than a second piece of scrolling logic that can disagree with this one.
      *
      * The terminal really does shrink rather than being covered - `windowSoftInputMode` is
@@ -148,7 +148,7 @@ object TerminalScroll {
      *    the view follows the bottom. **This is the half they reported as working.**
      *  - the keyboard then opens while the bar is already up, `true -> true`, **the key does not
      *    change, the effect never runs, and nothing scrolls.** This is the half they reported as
-     *    broken: *"когда открывается андроид клава - это сломано"*.
+     *    broken: the Android keyboard opening.
      *
      * One boolean OR-ing two independent events cannot express *the second one also happened*. So the
      * events are kept apart, and the pair is what the screen keys on - `(false, true)` and

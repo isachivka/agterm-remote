@@ -88,8 +88,7 @@ class AgtermSessionsTest {
      * [settled] waits for the state to leave `Loading`, and that happens *inside* the fetch: the
      * listing replaces the screen, and only then does the successful attempt write
      * `LinkNote.Reconnected`. A test that asserted the note after `settled()` was reading a value
-     * the fetch had not reached yet, and it failed roughly one run in three — recorded in
-     * `docs/qa/flaky-tests.md` on 2026-08-02 after three sightings.
+     * the fetch had not reached yet, and it failed roughly one run in three, over three sightings.
      *
      * The fix is the barrier, not the assertion. `refresh()` hands back its `Job`; joining it means
      * the round is over and every write it makes has happened. The poller and the healer are
@@ -186,7 +185,7 @@ class AgtermSessionsTest {
      * `reason` is what the owner reads; `detail` is what agterm said, kept for the person debugging
      * and shown small, under the button. A state that dropped `detail` would leave the screen unable
      * to offer the evidence at all, and a state that put it in `reason` would put it back on the
-     * headline — which is the bug of 2026-08-12. See PLAN-0023.
+     * headline — which is the bug of 2026-08-12.
      */
     @Test
     fun `a refusal keeps our words and the far end's apart`() = runBlocking {
@@ -521,7 +520,7 @@ class AgtermSessionsTest {
     }
 
     /**
-     * **A refusal about the TEXT does not take the screen away.** REQ-0017.
+     * **A refusal about the TEXT does not take the screen away.**
      *
      * The owner pasted a message from a chat app, pressed send, and the terminal, the session list
      * and the input bar were replaced by a full-page error listing our internal key names. Nothing
@@ -557,7 +556,7 @@ class AgtermSessionsTest {
         )
     }
 
-    // --- The draft has a life of its own - REQ-0046 -------------------------------------------------
+    // --- The draft has a life of its own ------------------------------------------------------------
 
     private val sessionA = "11111111-1111-4111-8111-111111111111"
     private val sessionB = "22222222-2222-4222-8222-222222222222"
@@ -591,9 +590,9 @@ class AgtermSessionsTest {
     }
 
     /**
-     * **The bug the owner reported.** *"если я введу что-то в поле ввода а затем long прокруткой
-     * проскролю терминал то поле ввода очистится"* - the overpull sends PgUp as a key, and a key used
-     * to go through the state that carried no draft.
+     * **The bug the owner reported:** text in the input field, an overpull to scroll the terminal,
+     * and the field came back empty. The overpull sends PgUp as a key, and a key used to go through
+     * the state that carried no draft.
      */
     @Test
     fun `a key press leaves the draft where it was`() = runBlocking {
@@ -737,7 +736,7 @@ class AgtermSessionsTest {
     }
 
     /**
-     * **The pasted message now goes through, and it goes through as a paste.** REQ-0017.
+     * **The pasted message now goes through, and it goes through as a paste.**
      *
      * The bug the owner reported, as the test that would have caught it: a multi-line draft used to
      * be refused at the boundary and cost them their text. It is now sent in the field whose meaning

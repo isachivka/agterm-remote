@@ -9,12 +9,12 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * The folded-workspace file — REQ-0031. **What comes out the other side is ids and nothing else**,
+ * The folded-workspace file. **What comes out the other side is ids and nothing else**,
  * asserted against the bytes on disk rather than against the API that wrote them.
  *
  * (This used to open by calling the store "the one door in the package that writes to disk" and
- * pointing at `NothingPersistedTest`. That test enforced a rule the owner never set; both are gone,
- * REQ-0046. The id-only shape is still worth pinning on its own merits.)
+ * pointing at `NothingPersistedTest`. That test enforced a rule the owner never set; both are gone.
+ * The id-only shape is still worth pinning on its own merits.)
  */
 class CollapsedWorkspacesStoreTest {
 

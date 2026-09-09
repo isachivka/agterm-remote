@@ -7,7 +7,7 @@ import java.io.File
  *
  * ### Deleting the writer does not delete what it wrote
  *
- * Until REQ-0019 the scan route asked the system camera to photograph the laptop's screen into
+ * The scan route once asked the system camera to photograph the laptop's screen into
  * `files/pairing/incoming/scan.jpg`. **A phone that ran that build may be holding that photograph
  * right now** — a picture containing the laptop's address and certificate — and removing the code
  * that produced it changes nothing about the file. Someone had to notice, and this is the noticing.

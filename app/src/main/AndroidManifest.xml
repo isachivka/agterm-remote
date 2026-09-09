@@ -15,7 +15,7 @@
       It is here because a live viewfinder reads frames in OUR process. The route it replaces needed
       no permission precisely because the capture happened inside the system camera app, and that
       route did not work: on 2026-08-09 the owner could not pair by camera at all, and the pairing was
-      carried by the file route. REQ-0019 argues the trade rather than assuming it.
+      carried by the file route.
 
       What this costs, stated: a dialog the owner sees, can refuse, and can revoke later. So refusal
       is a supported state and not an error - see CameraAccess - and choosing a FILE never triggers

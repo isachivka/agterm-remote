@@ -25,10 +25,9 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
 /**
  * Pairing, as a section of Settings.
  *
- * **The placement is provisional and REQ-0009 §4 says why.** Pairing configures a feature that does
- * not exist yet, so its eventual home is beside the terminal — the way the token screen hangs off
- * Updates rather than sitting on the launcher. It is here because there is no parent to hang it from
- * today and this is reachable and cheap to move.
+ * **Settings is where it lives, and that is settled rather than provisional.** It was called
+ * provisional while pairing configured a feature that did not exist yet; the terminal exists now, and
+ * pairing is not a section of the settings screen any more so much as the reason that screen is there.
  *
  * The composable is stateless and takes [PairingState] as a value, so every state is reachable from a
  * preview and from a test without a camera, a laptop, or a paired phone.
@@ -56,7 +55,7 @@ fun PairingSection(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // Exhaustive, so a new state has to decide what it looks like rather than silently render
-        // nothing - the house rule since REQ-0005.
+        // nothing, which is the house rule.
         when (state) {
             PairingState.NotPaired -> Unpaired(onScan, onChoose, R.string.pairing_none_body, camera)
             PairingState.NotAPairingCode -> Unpaired(onScan, onChoose, R.string.pairing_not_a_code, camera)

@@ -17,9 +17,8 @@ import org.junit.Test
  *
  * ### What was broken, in their words
  *
- * *"стоп, фичи 2 - сделать подскролл когда я нажму кнопку клавиатуры в шапке и появится подвал - она
- * работает. вторая когда открывается андроид клава - это сломано"*. Two features: the header control
- * bringing up the bar, which worked, and the Android keyboard, which did not.
+ * Two features, reported as one working and one broken: the header control bringing up the bar,
+ * which scrolled as it should, and the Android keyboard opening, which did not.
  *
  * The cause was a `LaunchedEffect` keyed on `ime > 0 || barOpen`. The bar set it true; the keyboard
  * arriving left it true; the key never changed, so the effect never ran a second time. **One boolean

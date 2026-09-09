@@ -76,9 +76,8 @@ fun AgtermHost(
     val mutation by sessions.mutation.collectAsStateWithLifecycle()
 
     // **Refresh whenever the list BECOMES VISIBLE**, which is entry and the return from a session as
-    // one event rather than two call sites that must both remember. The owner:
-    // *"нужно обновлять его каждый раз когда я вижу список сессий - в том числе когда я перехожу из
-    // сессии назад к списку"*.
+    // one event rather than two call sites that must both remember. The owner asked for the listing
+    // to be refreshed every time he sees it, the return from a session included.
     //
     // This replaced `LaunchedEffect(model)`, which fired once per ViewModel - so returning from a
     // session, which remounts nothing, left them looking at a listing as old as when they opened it.
@@ -93,7 +92,7 @@ fun AgtermHost(
     // The platform's picker, as with pairing: no permission, no dependency, and the owner already knows
     // how it works. `OpenMultipleDocuments` rather than `GetContent` because it gives stable URIs we
     // can read the display name from, which is the basename the bridge sanitises - and *multiple*
-    // since REQ-0048, because one pick per photograph was the whole complaint. The list comes back in
+    // because one pick per photograph was the whole complaint. The list comes back in
     // the order he tapped, and that is the order the paths take in the box.
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {

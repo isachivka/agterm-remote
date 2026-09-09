@@ -17,8 +17,8 @@ data class WorkspaceGroup(
  *
  * ### What the owner asked for
  *
- * *"у листа есть иерархия и я ее хочу видеть"* — agterm's tree is one level, workspaces holding
- * sessions, and the phone was rendering it flat. The bridge had been walking that tree all along and
+ * The list has a hierarchy and the owner wanted to see it. agterm's tree is one level, workspaces
+ * holding sessions, and the phone was rendering it flat. The bridge had been walking that tree all along and
  * throwing the structure away.
  *
  * **Seeing it is the whole request.** No collapsing, no reordering, no drag and drop: those are

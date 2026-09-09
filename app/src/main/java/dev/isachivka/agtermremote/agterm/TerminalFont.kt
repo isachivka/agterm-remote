@@ -42,10 +42,10 @@ import dev.isachivka.agtermremote.R
  * italic)` picks the real one. All four advance **600/1000 = 0.6000 em**, so a bold word is exactly
  * as wide as the plain one beside it and the grid holds through a status line.
  *
- * ### The fallback is unchanged — JuliaMono, REQ-0015
+ * ### The fallback is unchanged — JuliaMono
  *
  * JetBrains Mono lacks some of what Claude draws — its chrome ⏺ ⏵ ⎿ ※ ✅ ⏸ was measured against
- * Menlo in `docs/qa/req-0015-glyph-measurement.md`, and the design is the same for any primary: a
+ * Menlo over 40 sessions of real output, and the design is the same for any primary: a
  * **monospaced** symbols font sits ahead of the platform chain, consulted only for codepoints the
  * primary lacks, so nothing the primary draws can move. JuliaMono advances 0.6000 em for every glyph
  * it has, which against JetBrains Mono's 0.6000 is not a rounding question any more: the two are the
@@ -144,7 +144,7 @@ fun terminalTypeface(context: Context): Typeface? = try {
     Typeface.CustomFallbackBuilder(primary)
         .addCustomFallback(symbols)
         // No setSystemFallback call, and that is not an omission: the platform chain stays on the
-        // end by REQ-0015 Decision 3, and passing "" or "sans-serif" here was measured to produce
+        // end by decision, and passing "" or "sans-serif" here was measured to produce
         // exactly the same typeface anyway.
         .build()
 } catch (unparseable: Exception) {

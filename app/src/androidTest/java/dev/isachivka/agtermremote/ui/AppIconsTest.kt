@@ -27,14 +27,14 @@ class AppIconsTest {
     fun everyGlyphTheDesignUsesIsBundled() {
         // 26 from design/v0's markup and its MODULES array, once the device chrome (signal, wifi,
         // battery) and the dropped "What will live here" checkbox are removed - plus network_check,
-        // which REQ-0005's module needed and the design never drew, plus the ones design/v1's two
+        // which a module needed and the design never drew, plus the ones design/v1's two
         // terminal screens added. A count is weak on its own; it is here so that deleting a drawable
         // and its AppIcons entry together still fails rather than passing quietly.
-        // 35 since REQ-0013 added the Claude mark. The bump is the deliberate act this count exists to
+        // 35 since the Claude mark was added. The bump is the deliberate act this count exists to
         // force: adding a glyph fails here until somebody says how many there should be.
-        // 36 since REQ-0029 replaced the overpull's green label with a checkmark - the first glyph in
+        // 36 since the overpull's green label became a checkmark - the first glyph in
         // this set that was drawn here rather than converted from Material Symbols.
-        // 38 since REQ-0032's pane pair, which are drawn here too but from a different source again:
+        // 38 since the pane pair, which are drawn here too but from a different source again:
         // measured off a screenshot of agterm's own toolbar, so the phone shows the owner the picture
         // his laptop already shows him.
         val expected = 38

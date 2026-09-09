@@ -48,7 +48,8 @@ import java.util.concurrent.Executors
 /**
  * A live viewfinder that reads the laptop's screen, which is what the owner asked for.
  *
- * > *"но идеально было бы чтобы оно сканилось как нормальные человеческие qr в камере"* — 2026-08-09
+ * Asked for on 2026-08-09: the code should be read through the camera, the way any ordinary QR code
+ * is.
  *
  * ### The camera is bought; the decoder is not
  *
@@ -77,7 +78,7 @@ import java.util.concurrent.Executors
  * ### None of this is executed by any test in this repository
  *
  * As of 2026-08-09 there is no device to run it on. [PairingCodeFramesTest] covers the frame seam and
- * nothing covers the rest. PLAN-0019's verification section is where that is recorded, and it is not
+ * nothing covers the rest. That is recorded as a verification hole, and it is not
  * softened here.
  */
 @Composable

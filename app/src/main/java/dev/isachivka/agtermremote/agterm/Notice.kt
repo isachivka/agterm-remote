@@ -88,7 +88,7 @@ sealed interface Notice {
     data object DeleteFailed : Notice
 
     /**
-     * The second pane could not be opened — REQ-0035.
+     * The second pane could not be opened.
      *
      * **Said because the alternative is a button that appears not to work.** The owner taps once for
      * the right pane. If the laptop refuses, or the link is gone, or a listing taken afterwards still
@@ -102,12 +102,12 @@ sealed interface Notice {
     data object PaneFailed : Notice
 
     /**
-     * The laptop could not work out the width — REQ-0037.
+     * The laptop could not work out the width.
      *
      * **This replaced a full-screen error, and that is the whole of it.** On 2026-08-26 a calibration
      * declined and the owner's terminal, session list and input bar were replaced by a page-filling
      * English sentence about *probe widths* — addressed to us, lifted out of a log, with nothing in it
-     * he could act on. REQ-0017 abolished exactly that shape for pasted text; the fit path had grown
+     * he could act on. Exactly that shape was abolished for pasted text; the fit path had grown
      * it back.
      *
      * **A fit that will not measure is not the link breaking.** The bridge answered, his session is
@@ -118,7 +118,7 @@ sealed interface Notice {
     data object FitRefused : Notice
 
     /**
-     * This session's shape has never been fitted, and nothing was measured for it — REQ-0041.
+     * This session's shape has never been fitted, and nothing was measured for it.
      *
      * **The only thing the automatic re-apply ever puts on screen.** Switching to a session whose
      * geometry the laptop has not measured could have started a calibration; a calibration is a dozen
@@ -131,12 +131,12 @@ sealed interface Notice {
     data object NeedsFit : Notice
 
     /**
-     * A recalibration finished, and this is what the laptop measured — REQ-0033.
+     * A recalibration finished, and this is what the laptop measured.
      *
      * ### Why it exists at all
      *
-     * The owner could not tell the long press had done anything: *"анимацию надо сделать чтоб я понял
-     * когда сработало, ну или там нотификацию, хоть что-то."*
+     * The owner could not tell the long press had done anything, and asked for some sign that it had
+     * fired - an animation, a notification, anything at all.
      *
      * **And the terminal reflowing is not feedback.** A recalibration that lands on the same column
      * count changes nothing on screen, so anything keyed on the picture changing reports success only
@@ -168,7 +168,7 @@ enum class MutationNote {
     DeleteFailed,
 
     /**
-     * The pane toggle asked for the right pane and did not get it — REQ-0035.
+     * The pane toggle asked for the right pane and did not get it.
      *
      * **The first member of this enum produced by the SESSION screen rather than the list**, which is
      * why the precedence note in [noticeFor] stopped being hypothetical the day this was added. See
@@ -177,7 +177,7 @@ enum class MutationNote {
     PaneFailed,
 
     /**
-     * The laptop declined to measure the width — REQ-0037. See [Notice.FitRefused].
+     * The laptop declined to measure the width. See [Notice.FitRefused].
      *
      * **The second member produced by the session screen**, after [PaneFailed]. Both sit in the header
      * a few dp apart, which is why the precedence in [noticeFor] stopped being hypothetical.
@@ -185,7 +185,7 @@ enum class MutationNote {
     FitRefused,
 
     /**
-     * A session was opened whose geometry has never been fitted — REQ-0041. See [Notice.NeedsFit].
+     * A session was opened whose geometry has never been fitted. See [Notice.NeedsFit].
      *
      * **Not a failure**, unlike every other member here. It is the one case where the automatic path
      * has something worth saying, and it says it where the other fit notes live.
@@ -208,7 +208,7 @@ fun noticeFor(
      */
     mutation: MutationNote = MutationNote.None,
     /**
-     * The column count a just-finished recalibration reported, or null — REQ-0033.
+     * The column count a just-finished recalibration reported, or null.
      *
      * Above typing and below the connection. It is the newer event and the one the owner deliberately
      * asked for, so a keystroke report from before he reached for the escape hatch is the stale one;
@@ -229,14 +229,14 @@ fun noticeFor(
     // the other" - and then, in the same breath, that "cannot happen" is exactly the kind of claim
     // that stops being true when a later screen does both.
     //
-    // REQ-0035 is that later screen. The pane toggle sits in the header above the typing bar, so a
+    // The pane toggle is that later screen. It sits in the header above the typing bar, so a
     // failed pane and an outstanding keystroke are one tap apart on the same screen. The rule was
     // already here and already right, which is the whole return on having written it down instead of
     // letting the answer be whichever branch got typed first.
     //
     // Mutation is above typing because it is the newer event: a typing report describes a keystroke
     // from before they reached for the control.
-    // **Mutation now sits ABOVE the measurement, and that order changed with REQ-0035.**
+    // **Mutation now sits ABOVE the measurement, and that order changed with the pane toggle.**
     //
     // It used to be below. A recalibration is a report that something the owner asked for HAPPENED; a
     // mutation note is a report that something he asked for did NOT. When both are outstanding the

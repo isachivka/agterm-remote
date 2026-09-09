@@ -87,7 +87,7 @@ class TypingCopyTest {
             fields.sorted() == listOf("Composing.notice"),
         )
 
-        // **`notice` arrived on 2026-08-09 and it is a CASE, never text.** REQ-0017 Decision 3: a
+        // **`notice` arrived on 2026-08-09 and it is a CASE, never text.** A
         // refused send puts the owner's words back in Composing, and the sentence explaining why is
         // chosen from a closed set in the resource file. Two fields, so a message can never be
         // assembled out of what they typed - which is this file's whole subject.

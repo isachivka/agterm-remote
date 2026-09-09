@@ -16,7 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The ellipsis, and the two claims REQ-0028 rests on that a JVM test cannot make.
+ * The ellipsis, and the two claims the folded key bar rests on that a JVM test cannot make.
  *
  * ### What this is for
  *

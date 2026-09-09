@@ -35,12 +35,11 @@ sealed interface RenameTarget {
 }
 
 /**
- * The command the Claude button runs, REQ-0013.
+ * The command the Claude button runs.
  *
- * The owner asked for it by name: *"когда я нажимаю на эту кнопку - вводится команда claude_yolo и
- * нажимается enter"*. It is **their own shell alias** — this app does not know what it does, does not
- * check it, and does not invent variations of it. On 2026-09-05 the alias changed and so did this:
- * *"кнопка claude_yolo → её нужно переделать в просто claude, так как я сделал другой алиас"*.
+ * The owner asked for it by name: the button types a command and presses Return. It is **their own
+ * shell alias** — this app does not know what it does, does not check it, and does not invent
+ * variations of it. On 2026-09-05 the alias changed from `claude_yolo` to `claude`, and so did this.
  *
  * A named constant rather than a literal in a composable, so the one thing this button actually sends
  * is readable without opening a UI file, and so it cannot be quietly edited into something else while
@@ -58,9 +57,8 @@ const val CLAUDE_COMMAND = "claude"
 const val ENTER_KEY = "enter"
 
 /**
- * The pause between a draft landing and the Return that follows it — REQ-0046, the owner's *"с
- * небольшой задержкой между событиями"*. Long enough for the far end to have taken the text before the
- * key arrives; short enough that the pair still reads as one press.
+ * The pause between a draft landing and the Return that follows it. Long enough for the far end to
+ * have taken the text before the key arrives; short enough that the pair still reads as one press.
  */
 const val ENTER_AFTER_TEXT_MS = 150L
 
@@ -72,9 +70,8 @@ const val DRAFT_WRITE_DELAY_MS = 300L
  *
  * ### Why this is a case and not a `deletable: Boolean`
  *
- * The owner's design: *"чтобы удалить нужно будет сделать длинное нажатие и затем нажать удалить - мы
- * тогда confirmation не нужен"*. **The two deliberate acts ARE the confirmation**, which is why there
- * is no confirm dialog anywhere in this feature.
+ * The owner's design: a long press, then a press on delete. **The two deliberate acts ARE the
+ * confirmation**, which is why there is no confirm dialog anywhere in this feature.
  *
  * But the modal has four entry points and only two are long presses — creating a workspace or a
  * session also opens it, so the owner can name what they just made. **On that path the deliberate
@@ -122,7 +119,7 @@ data class RenameRequest(
  * exact string the resource's own comment called a bug.
  *
  * That case is reachable in one gesture: the owner closes the last session in a workspace, then
- * long-presses its header. It is also where a half-created workspace lands, since REQ-0012 keeps one
+ * long-presses its header. It is also where a half-created workspace lands, since the app keeps one
  * whose first session failed.
  *
  * **A resource that is silently never selected is the kind of green nothing checks** — lint raised
@@ -240,8 +237,8 @@ sealed interface AgtermUiState {
  * ### Why this exists, and why it is a predicate rather than a call site
  *
  * The list used to refresh exactly once per ViewModel — `LaunchedEffect(model)` in `AgtermHost` — so
- * the owner's report was precisely right: *"список сессий сейчас обновляется только когда я выхожу на
- * home и возвращаюсь"*. **Returning from an open session remounts nothing**: `stopWatching` sets
+ * the owner's report was precisely right: the list only refreshed when he left for the launcher and
+ * came back. **Returning from an open session remounts nothing**: `stopWatching` sets
  * `watching = null` on the same state and the list is drawn again from the listing it already held, so
  * what they came back to was as old as the moment they left. Leaving to Home and returning worked only
  * because that destroys the ViewModel.
@@ -282,12 +279,12 @@ fun showsList(state: AgtermUiState): Boolean = when (state) {
  * ### What is kept, and where
  *
  * The selection, the screen text and the connection live here, in memory, and die with the process.
- * The owner's DRAFTS are the exception since REQ-0046: one per session, held here while the process
+ * The owner's DRAFTS are the exception: one per session, held here while the process
  * lives and written to disk through [DraftStore] shortly after every edit, so a prompt typed on the
  * phone survives a key press, a session switch and the process being killed in a pocket.
  *
- * There used to be a paragraph here saying nothing may be persisted or logged, citing REQ-0009. The
- * owner never set that rule; it was withdrawn on 2026-09-06 (REQ-0046). Failures still carry a
+ * There used to be a paragraph here saying nothing may be persisted or logged. The
+ * owner never set that rule; it was withdrawn on 2026-09-06. Failures still carry a
  * [WireFailure] rather than a message, because a type is what the copy branches on.
  */
 class AgtermSessions(
@@ -319,7 +316,7 @@ class AgtermSessions(
      */
     private val styled: () -> Boolean = { false },
     /**
-     * Where drafts go between processes — REQ-0046. Null keeps them in memory only, which is what a
+     * Where drafts go between processes. Null keeps them in memory only, which is what a
      * test wants and what the preview gets.
      */
     private val drafts: DraftStore? = null,
@@ -329,7 +326,7 @@ class AgtermSessions(
 ) {
 
     /**
-     * **The pane the owner is looking at, and the only place it is decided — REQ-0032.**
+     * **The pane the owner is looking at, and the only place it is decided.**
      *
      * ### One value, two questions
      *
@@ -352,7 +349,7 @@ class AgtermSessions(
      * nothing in a buffer it did not come from — the same reasoning `TerminalScroll.onSessionOpened`
      * applies to a scroll offset.
      *
-     * ### This paragraph used to claim more than the code did, and that is the whole of REQ-0034
+     * ### This paragraph used to claim more than the code did
      *
      * It said a session **whose split has gone** also resets to [Pane.Left]. That is true of a pane
      * DESTROYED — `session split close` on the Mac — because the next read is refused with `no split
@@ -367,7 +364,7 @@ class AgtermSessions(
     private val _pane = MutableStateFlow(Pane.Left)
 
     /**
-     * Which pane he was reading in each session, so coming back returns him to it — REQ-0042, ONE.
+     * Which pane he was reading in each session, so coming back returns him to it, ONE.
      *
      * ### Why this exists now and did not before
      *
@@ -427,10 +424,10 @@ class AgtermSessions(
     /**
      * Shows the other pane, which changes what is read AND what is typed, because they are one value.
      *
-     * **One button, two states — REQ-0035.** The owner: *"если сессия есть мы её показываем, если её
-     * нет мы её создаём и потом показываем"*.
+     * **One button, two states.** If the pane is there it is shown; if it is not, it is created and
+     * then shown.
      *
-     * ### The two directions are still not symmetrical, and REQ-0042 did not make them so
+     * ### The two directions are still not symmetrical
      *
      * Going back to the LEFT pane is local and instant **for what the phone shows**. Every session has
      * that pane, reading it cannot fail, and the icon moves at once.
@@ -440,7 +437,7 @@ class AgtermSessions(
      *
      * ### Both directions now maximize the pane on his Mac
      *
-     * *"при переключении мы держим их фуллскрин"*. The maximize is the LAST step in both, and in the
+     * Switching holds both panes full screen. The maximize is the LAST step in both, and in the
      * left direction it deliberately happens AFTER the icon has moved: what the phone reads is already
      * correct, and his Mac's layout catching up a round trip later is not something the icon should
      * wait on. A failure there earns a note and keeps his terminal — the part he asked for happened.
@@ -455,7 +452,7 @@ class AgtermSessions(
      *
      * **This is not a defect being routed around**, and it is deliberately not fixed by making the
      * poll carry pane existence: the screen reply is one `session.text` call, and telling it about
-     * panes would mean a tree round trip on every poll — REQ-0008 measured that polling is where this
+     * panes would mean a tree round trip on every poll, and polling was measured to be where this
      * app's cost lives, and 95% of those polls convey nothing. A tap is a human action a few times an
      * hour. **It can afford a question the poll cannot.**
      *
@@ -507,18 +504,18 @@ class AgtermSessions(
     }
 
     /**
-     * Shows one pane at the full width of the terminal area on his Mac — REQ-0042, TWO.
+     * Shows one pane at the full width of the terminal area on his Mac, TWO.
      *
      * Returns whether it worked, so the caller can decide what to do about a failure. **The two callers
      * decide differently and that is the point**: a tap he made is owed an answer, and a session switch
-     * is not — the REQ-0041 rule, carried here as a parameter rather than as care.
+     * is not — carried here as a parameter rather than as care.
      *
      * ### It is never sent to a session with no split
      *
      * agterm refuses that with `session has no split`, measured. A session with one pane is ALREADY
      * showing it at full width, so sending anyway would turn the commonest case there is into a
      * refusal — and on the initiated path that refusal takes his terminal away, which is exactly the
-     * shape REQ-0037 had to undo. The two callers each establish that a second pane exists before
+     * shape that had to be undone once. The two callers each establish that a second pane exists before
      * calling: the toggle by asking the laptop, the switch by reading the row it was handed.
      */
     private suspend fun maximize(sessionId: String, pane: Pane, initiated: Boolean): Boolean {
@@ -576,7 +573,7 @@ class AgtermSessions(
     val typing: StateFlow<TypingState> = _typing.asStateFlow()
 
     /**
-     * The draft of the session on screen — REQ-0046.
+     * The draft of the session on screen.
      *
      * **Separate from [typing] on purpose.** While the draft was a field of `Composing`, every
      * transition out of that state — a key sent, a report shown, a report dismissed — came back with
@@ -673,7 +670,7 @@ class AgtermSessions(
      * flow. A test does need it, and the reason is a defect this returned nothing while hiding: the
      * screen leaves `Loading` *inside* the fetch, and the recovery note is written afterwards, so
      * "the state stopped being Loading" is not "the refresh has finished". A test that used the
-     * first as a barrier for the second raced it — see `docs/qa/flaky-tests.md`, 2026-08-02.
+     * first as a barrier for the second raced it, one run in three.
      */
     fun refresh(): Job = scope.launch { refreshNow() }
 
@@ -703,7 +700,7 @@ class AgtermSessions(
                 _state.value = AgtermUiState.Loading
             } else {
                 // The spinner, over the list they are already looking at - which stays put, per
-                // REQ-0012: a refresh must not blank a list that is showing.
+                // A refresh must not blank a list that is showing.
                 _state.value = showing.copy(refreshing = true)
             }
             withConnection {
@@ -748,14 +745,13 @@ class AgtermSessions(
         var made = ""
         mutate(
             onFailure = MutationNote.CreateFailed,
-            // **Two calls, and the second is what makes the first worth anything.** The owner:
-            // *"если я создаю workspace, то в нём сразу делай одну сессию, потому что сам по себе он
-            // не имеет смысла"*.
+            // **Two calls, and the second is what makes the first worth anything.** A new workspace
+            // gets a session immediately, because on its own it means nothing.
             //
-            // REQ-0011 refused exactly this shape - two socket calls with no transaction, where a
+            // Exactly this shape was refused once - two socket calls with no transaction, where a
             // failure between them leaves an empty workspace the bridge could not describe and was not
             // allowed to delete. **Both halves of that objection are now false.** The wire publishes
-            // workspaces, so an empty one is visible; and REQ-0012 lets the owner delete it. A
+            // workspaces, so an empty one is visible; and the owner can delete it. A
             // half-failure now leaves something they can see and remove.
             block = {
                 made = it.createWorkspace()
@@ -924,7 +920,7 @@ class AgtermSessions(
             val worked = withConnection(block = block)
             if (!worked) _mutation.value = onFailure
 
-            // **The list is refreshed whether it worked or not, and that is REQ-0012 Decision 10.**
+            // **The list is refreshed whether it worked or not.**
             //
             // Creating a workspace is two calls now - the workspace, then its first session - and if
             // the second fails the first has still happened. Returning early would leave that
@@ -953,7 +949,7 @@ class AgtermSessions(
     /**
      * Opens one session's screen and starts polling it.
      *
-     * Polled rather than pushed because the transport has no output event — REQ-0008 established that
+     * Polled rather than pushed because the transport has no output event. It was established that
      * nothing fires when a pane draws, so the choice is between polling and a screen that is a
      * photograph. The digest is what makes it affordable: 95% of idle polls, measured, move no text at
      * all, and the reply to an unchanged screen carries no body.
@@ -963,7 +959,7 @@ class AgtermSessions(
         // Remembered so a heal can put them back in it - see startHealing. In memory only.
         lastWatched = session
         val listed = (_state.value as? AgtermUiState.Sessions)?.sessions ?: return
-        // **A pane does not carry across sessions, but it is remembered PER session** — REQ-0042.
+        // **A pane does not carry across sessions, but it is remembered PER session**.
         //
         // It used to start at Left unconditionally, on the reasoning TerminalScroll.onSessionOpened
         // applies to a scroll offset: a value from a different buffer means nothing here. That is
@@ -983,8 +979,8 @@ class AgtermSessions(
         // This session's own draft, from memory or from disk - never the previous session's.
         _draft.value = heldDrafts.getOrPut(session.id) { drafts?.read(session.id).orEmpty() }
 
-        // **Showing a pane maximizes it, and a session switch is a showing** — REQ-0042, and the same
-        // reading of "при переключении" that REQ-0041 gave the re-applied fit.
+        // **Showing a pane maximizes it, and a session switch is a showing**, and the same
+        // reading the re-applied fit was given.
         //
         // Only when a second pane exists: a session with one pane is already that pane at full width,
         // and agterm refuses the call outright for it. Silent either way — he tapped a row, and
@@ -1054,7 +1050,7 @@ class AgtermSessions(
      * showed nothing. Those are different facts and the copy says different things.
      */
     /**
-     * Types a command and then presses Return — the Claude button, REQ-0013.
+     * Types a command and then presses Return — the Claude button.
      *
      * ### Two calls, ordered, and the second only if the first landed
      *
@@ -1097,10 +1093,8 @@ class AgtermSessions(
         val watching = (_state.value as? AgtermUiState.Sessions)?.watching ?: return
         if (text == null && key == null) return
 
-        // **Return with a draft in the field types the draft first** — REQ-0046. The owner: *"если я
-        // нажимаю enter и у меня в поле ввода что-то есть то мы сначала отправляем текст а потом уже
-        // отправляем enter с небольшой задержкой между событиями"*. Return with an empty field is the
-        // bare key it always was.
+        // **Return with a draft in the field types the draft first**, then sends the key after a
+        // short pause. Return with an empty field is the bare key it always was.
         if (text == null && key == ENTER_KEY) {
             val pending = heldDrafts[watching.id].orEmpty()
             if (pending.isNotEmpty()) {
@@ -1130,8 +1124,8 @@ class AgtermSessions(
      * already been sent is the one arrangement that makes double-sending feel natural. While the send
      * is in flight the text lives in this function's parameter and nowhere else.
      *
-     * **A send that did not happen leaves the text where it was — refused OR failed.** REQ-0017 granted
-     * this for a refusal only; REQ-0046 extends it to a connection that dropped, because from the
+     * **A send that did not happen leaves the text where it was — refused OR failed.** This was granted
+     * for a refusal only; it extends to a connection that dropped, because from the
      * owner's side both are the same event: they pressed send and their words went nowhere. On a
      * refusal the notice says why; on a failure the report does.
      *
@@ -1154,7 +1148,7 @@ class AgtermSessions(
                 },
             ) {
                 // **A draft with a line break in it is a PASTE, and everything else is unchanged.**
-                // REQ-0017: the owner pasted a message out of a chat app and the newline was refused,
+                // The owner pasted a message out of a chat app and the newline was refused,
                 // correctly, because typing one is a Return they did not press. Pasting one is a
                 // different act, so it goes as a different field and the bridge puts it between the
                 // bracketed paste markers.
@@ -1218,7 +1212,7 @@ class AgtermSessions(
 
     /**
      * Sends the picked files, in order, and puts each path the bridge chose **into the draft** as it
-     * lands. One file was the whole of this until REQ-0048; now it is the list of one.
+     * lands. One file was the whole of this once; now it is the list of one.
      *
      * **Nothing is sent to the shell, and that is the point.** The owner presses Enter themselves.
      * Choosing a file must never execute a command — the same reasoning that keeps the bar shut until
@@ -1236,7 +1230,7 @@ class AgtermSessions(
      * the paths that exist on his laptop.
      *
      * The draft is untouched by a file going up: it is neither sent nor cleared, and a refusal leaves
-     * it exactly where it was - REQ-0017 fixed the version that threw it away.
+     * it exactly where it was - the version that threw it away was fixed once already.
      */
     fun sendFiles(files: List<Pair<String, ByteArray>>) {
         if (files.isEmpty()) return
@@ -1290,7 +1284,7 @@ class AgtermSessions(
         // Cleared here rather than on a timer of its own, so every note on that one surface goes away
         // by the same route and none can outlive the others.
         _recalibrated.value = null
-        // **And the mutation note, since REQ-0035 put one on this screen.** Without this the pane note
+        // **And the mutation note, since the pane toggle put one on this screen.** Without this the pane note
         // has no way out: the session screen's auto-expire runs through here, so a note this route did
         // not clear would sit over the terminal until the session was closed - which is precisely the
         // outliving the sentence above rules out. The list screen clears the same field through
@@ -1323,20 +1317,20 @@ class AgtermSessions(
         val watching = (_state.value as? AgtermUiState.Sessions)?.watching ?: return
         scope.launch {
             val ok = withConnection(
-                // **A fit the laptop declines is a note, not a new screen** - REQ-0037. Without this
+                // **A fit the laptop declines is a note, not a new screen**. Without this
                 // the refusal falls to the branch that drops a healthy socket and replaces his
                 // terminal with the bridge's sentence about probe widths. The reason is deliberately
                 // NOT rendered: it is arithmetic addressed to the log, and putting it in front of him
-                // is the defect REQ-0017 removed once already.
+                // is the defect removed once already.
                 onRefusedContent = { _mutation.value = MutationNote.FitRefused },
             ) {
                 // What comes back is the count the LAPTOP measured. Held so the screen shows a number
                 // that was observed rather than one this app computed.
                 // **What the BRIDGE says, adopted whole.** No local flag is set here - see FitState.
-                // **The pane comes from the same field the screen and the keystroke read** — REQ-0036.
+                // **The pane comes from the same field the screen and the keystroke read**.
                 // The fit is FOR the pane he is looking at, so it must be told which one, and it must
                 // be told by the one value that already decides where a read and a press go. A second
-                // source for "which pane" is the REQ-0032 defect waiting to be reintroduced in a third
+                // source for "which pane" is the addressed-pane defect waiting to be reintroduced in a third
                 // place.
                 val answer = it.resize(
                     watching.id, pane, boxWidthDp, characterWidthMilliDp,
@@ -1344,7 +1338,7 @@ class AgtermSessions(
                     recalibrate,
                 )
                 _fit.value = answer
-                // **On the ANSWER, not on anything looking different** - REQ-0033. A recalibration
+                // **On the ANSWER, not on anything looking different**. A recalibration
                 // that lands on the same count changes nothing on screen, so a report keyed on the
                 // picture moving would confirm success only in the cases the owner could already see.
                 // The event is that we asked and the laptop replied.
@@ -1361,7 +1355,7 @@ class AgtermSessions(
      * as "not known yet" rather than as off - see FitState for the bug that rule exists to prevent.
      */
     /**
-     * The column count a just-finished RECALIBRATION reported, or null — REQ-0033.
+     * The column count a just-finished RECALIBRATION reported, or null.
      *
      * **Set only when the owner forced one**, never on an ordinary fit. A note on every press would be
      * chatter about a thing he can already see happen; this exists because the deliberate act is the
@@ -1394,7 +1388,7 @@ class AgtermSessions(
     }
 
     /**
-     * Re-applies a fit the laptop already has, for the geometry now on screen — REQ-0041.
+     * Re-applies a fit the laptop already has, for the geometry now on screen.
      *
      * ### The intent, in his words
      *
@@ -1501,7 +1495,7 @@ class AgtermSessions(
      */
     /**
      * [onRefusedContent] is how a caller says *"and if the laptop refuses what I sent, that is mine
-     * to explain"* — REQ-0017.
+     * to explain"*.
      *
      * **The default throws nothing away and changes no screen**: without a handler a content refusal
      * is simply a false return, exactly as any other failure, minus the connection drop it never
@@ -1510,7 +1504,7 @@ class AgtermSessions(
     private suspend fun withConnection(
         onRefusedContent: (String) -> Unit = {},
         /**
-         * Handles a plain refusal WITHOUT touching the screen — REQ-0041, and only the automatic
+         * Handles a plain refusal WITHOUT touching the screen, and only the automatic
          * re-apply passes one.
          *
          * **The default is unchanged and stays unchanged**: a refusal drops the connection and puts the
@@ -1519,7 +1513,7 @@ class AgtermSessions(
          * On the automatic path he pressed nothing. A bridge too old to understand `cached_only`
          * refuses the whole request — `Decode` disallows unknown fields — and without this that
          * refusal would replace his terminal with an error screen because he tapped a row in a list.
-         * That is the fit refusal taking his screen, one layer up, and REQ-0037 had to undo it once.
+         * That is the fit refusal taking his screen, one layer up, and it had to be undone once.
          */
         onRefused: (() -> Unit)? = null,
         block: (BridgeConnection) -> Unit,
@@ -1594,7 +1588,7 @@ class AgtermSessions(
                 startHealing(e.failure)
                 false
             } catch (e: ContentRefused) {
-                // **The connection is fine and the screen stays exactly where it is.** REQ-0017.
+                // **The connection is fine and the screen stays exactly where it is.**
                 //
                 // This branch is the whole fix for what the owner saw: a complaint about their pasted
                 // text used to fall into the case below, which drops a healthy socket and replaces
@@ -1607,7 +1601,7 @@ class AgtermSessions(
                 onRefusedContent(e.reason)
                 false
             } catch (e: BridgeRefused) {
-                // **A caller that took responsibility for the refusal keeps the screen** — REQ-0041.
+                // **A caller that took responsibility for the refusal keeps the screen**.
                 //
                 // Checked before the pane fallback and before anything is dropped, because a caller
                 // that opted out of the screen has opted out of all of it: the owner pressed nothing,
@@ -1623,14 +1617,14 @@ class AgtermSessions(
                 // the next poll succeed; leaving the pane alone would make it fail forever and read
                 // as the connection being broken, which it is not.
                 //
-                // **Destroyed, not collapsed** — the distinction REQ-0034 turns on. A collapsed pane
+                // **Destroyed, not collapsed** — the distinction the second-pane flag turns on. A collapsed pane
                 // refuses nothing, so this never fires for it, which is correct: it still reads, and
                 // the toggle above it is now present to leave it. The bridge's own sentence still reaches
                 // the owner through the state below - this changes what we ASK for next, not what
-                // they are told happened. REQ-0032.
+                // they are told happened.
                 if (e.detail.contains(NO_SPLIT_PANE)) {
                     _pane.value = Pane.Left
-                    // **The memory agrees with this path rather than fighting it** — REQ-0042. Without
+                    // **The memory agrees with this path rather than fighting it**. Without
                     // this, coming back to the session would ask for the destroyed pane again and land
                     // here again, every time.
                     //
@@ -1649,7 +1643,7 @@ class AgtermSessions(
                 //
                 // What is true, and what the old comment was reaching for: this app does not
                 // DIAGNOSE. It quotes. `reason` is a sentence the BRIDGE wrote for the owner, and
-                // `detail` is the far end's own words kept beside it — see PLAN-0023 and
+                // `detail` is the far end's own words kept beside it, in
                 // [AgtermUiState.Refused]. Nothing here invents a cause, which is the rule the
                 // comment meant to defend.
                 dropConnection()
@@ -1719,7 +1713,7 @@ class AgtermSessions(
         /**
          * How often an open session is re-read.
          *
-         * REQ-0008 measured the digest against 2 Hz. This is slower on purpose: 2 Hz is the rate that
+         * The digest was measured against 2 Hz. This is slower on purpose: 2 Hz is the rate that
          * proves the digest works, not the rate a phone on mobile data should hold. Every unchanged
          * poll is still a round trip even when it carries no text.
          */

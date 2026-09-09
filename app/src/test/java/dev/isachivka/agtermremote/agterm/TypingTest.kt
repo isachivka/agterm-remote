@@ -25,7 +25,7 @@ class TypingTest {
         assertTrue(Typing.isOpen(Typing.open()))
     }
 
-    /** Opening gives a clean composing state. The draft is the sessions' business — REQ-0046. */
+    /** Opening gives a clean composing state. The draft is the sessions' business. */
     @Test
     fun `opening the bar is composing with nothing to report`() {
         assertEquals(TypingState.Composing(), Typing.open())
@@ -119,7 +119,7 @@ class TypingTest {
     }
 
     /**
-     * **Several picked files land as several paths, one space between each - REQ-0048.**
+     * **Several picked files land as several paths, one space between each.**
      *
      * `AgtermSessions.sendFiles` appends each path as it lands, so a batch is [appendPath] applied
      * once per file to the draft the previous one left. The owner picks three photographs and wants
@@ -175,7 +175,7 @@ class TypingTest {
             fields.sorted(),
         )
 
-        // **`notice` is the one exception, and this is its edge.** REQ-0017 Decision 3, granted by
+        // **`notice` is the one exception, and this is its edge.** Granted by
         // the owner on 2026-08-09: a send that did not happen leaves the text where it was, in
         // Composing and nowhere else - never in a notice, never in a log, never on disk, and still
         // cleared on success. The two are separate fields precisely so a message cannot be assembled
@@ -201,7 +201,7 @@ class TypingTest {
     }
 
     /**
-     * **A refused send is composing again, with a notice.** REQ-0017. The draft itself is put back by
+     * **A refused send is composing again, with a notice.** The draft itself is put back by
      * `AgtermSessions`, which still holds the text — see `AgtermSessionsTest`.
      */
     @Test
@@ -241,7 +241,7 @@ class TypingTest {
     }
 
     /**
-     * **The picker path loses drafts too, and it did so before any of this.** REQ-0017.
+     * **The picker path loses drafts too, and it did so before any of this.**
      *
      * `sendFile` reads the draft, sends the file, and on failure sets `Failed` — so a file the laptop
      * refused cost the owner whatever they were composing, for a send that never happened. The same

@@ -20,9 +20,9 @@ import javax.security.auth.x500.X500Principal
  * This phone's own identity: an EC keypair that cannot leave the hardware keystore, and the
  * self-signed certificate the laptop pins.
  *
- * REQ-0008 §5 settled the model; this is its other half. Two self-signed certificates, no certificate
+ * The trust model settled first; this is its other half. Two self-signed certificates, no certificate
  * authority, each side pinning the exact bytes of the other. **The QR carries a certificate, never a
- * signing request** — there is no issuer anywhere in this design, and REQ-0008 ruling 2 is only true
+ * signing request** — there is no issuer anywhere in this design, and the ruling behind it is only true
  * because of that.
  *
  * ### Nothing here ever holds a private key
@@ -39,7 +39,7 @@ import javax.security.auth.x500.X500Principal
  *
  * ### What is proven rather than asserted
  *
- * REQ-0006 proved *nothing is persisted* by asserting the absence of the artefacts rather than by
+ * *Nothing is persisted* was proved by asserting the absence of the artefacts rather than by
  * writing the rule down. The same shape applies here and each property fails independently, so each
  * gets its own assertion: non-exportable and hardware-backed. See `PhoneIdentityTest`.
  *
@@ -57,7 +57,7 @@ object PhoneIdentity {
     /**
      * Twenty years, matching the bridge.
      *
-     * PLAN-0008 open question 2: an expiry on a pinned self-signed pair buys an attacker nothing and
+     * An open question, answered here: an expiry on a pinned self-signed pair buys an attacker nothing and
      * guarantees a day the owner's phone stops working while they are away from the only machine that
      * can fix it.
      */

@@ -8,7 +8,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** The drafts on disk — REQ-0046. One file per session id, gone when the draft is. */
+/** The drafts on disk. One file per session id, gone when the draft is. */
 class DraftStoreTest {
 
     @get:Rule
@@ -46,7 +46,7 @@ class DraftStoreTest {
 
     @Test
     fun `line breaks and non-latin text round-trip`() {
-        val text = "первая строка\nвторая — с тире\n\ttab"
+        val text = "πρώτη γραμμή\nδεύτερη — με παύλα\n\ttab"
         store().write(one, text)
         assertEquals(text, store().read(one))
     }

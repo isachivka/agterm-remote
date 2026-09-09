@@ -3,14 +3,14 @@ package dev.isachivka.agtermremote.pairing
 import java.io.ByteArrayOutputStream
 
 /**
- * Everything the phone needs to reach one laptop, and the reason REQ-0009 §0's parameterisation is
+ * Everything the phone needs to reach one laptop, and the reason the parameterisation is
  * real rather than a claim.
  *
  * **The address is not in this application.** It is not a default, not a build field, not a constant
  * with a comment saying "change me". It arrives in the pairing payload and is stored on the device,
  * so switching from a direct forwarded port to a relay through SugarDaddy is the owner re-minting one
  * payload on the laptop and re-scanning it. No rebuild, no release, and no address ever enters the
- * repository — which is PLAN-0008 ruling 1 holding by construction rather than by anyone remembering
+ * repository — which is a ruling holding by construction rather than by anyone remembering
  * it.
  *
  * [kind] is the one field that is not purely data: a new stream provider is code. It is carried so
@@ -51,7 +51,7 @@ data class ConnectionProfile(
 /**
  * How the mTLS session's bytes are carried.
  *
- * REQ-0009 §0: the mTLS session is identical under every candidate transport and only the byte-stream
+ * The mTLS session is identical under every candidate transport and only the byte-stream
  * provider differs. A direct forward and an outbound relay are the *same* provider with a different
  * address, which is why one entry covers both.
  */

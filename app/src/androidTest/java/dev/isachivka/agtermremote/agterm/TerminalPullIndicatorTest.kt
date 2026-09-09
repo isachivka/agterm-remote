@@ -21,9 +21,8 @@ import org.junit.runner.RunWith
 /**
  * **The checkmark must not move the label. That is the whole of this file.**
  *
- * The owner asked for two things at once and they pull against each other: a mark before the text
- * (*"перед текстом добавим иконку галочки"*) and the text staying where it is (*"он у тебя сейчас
- * центрован, вот это надо сохранить"*).
+ * The owner asked for two things at once and they pull against each other: a mark before the text,
+ * and the text staying exactly where it is.
  *
  * The obvious implementation satisfies the first and quietly breaks the second — reserve a slot for
  * the icon and toggle its visibility, and nothing jumps, but the label sits half an icon right of

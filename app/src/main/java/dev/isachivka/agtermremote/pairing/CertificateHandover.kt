@@ -11,7 +11,7 @@ import java.util.Base64
  *
  * ### Why this exists
  *
- * REQ-0009 finding 1: the phone's certificate reached the laptop only through
+ * The phone's certificate reached the laptop only through
  * `PhoneProvisioningScaffold` and `adb`, which meant **no phone could be paired without a cable and
  * an instrumentation runner**. That harness is the thing this file replaces.
  *

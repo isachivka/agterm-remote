@@ -83,7 +83,7 @@ class PairingSectionScreenshotTest {
      *
      * **NOT RUN as of 2026-08-09.** There is no device: the owner's phone is not ours to touch and no
      * emulator is authorised. It is written now so that it runs the moment one is, and its absence is
-     * recorded in PLAN-0019's verification hole rather than papered over.
+     * recorded as a verification hole rather than papered over.
      */
     @Test
     fun comparingShowsTheAddressItIsAboutToTrust() {
@@ -105,7 +105,7 @@ class PairingSectionScreenshotTest {
     @Test fun paired() =
         capture("pairing-4-paired", PairingState.Paired(profile, fingerprint, phoneFingerprint))
 
-    // The two states REQ-0009 finding 1 added. Both are reachable here without a laptop, a camera or
+    // The two states that separate holding a profile from being able to use it. Both are reachable here without a laptop, a camera or
     // a screen lock, which is the point of keeping PairingSection stateless.
     @Test fun halfDone() = capture(
         "pairing-5-half-done",

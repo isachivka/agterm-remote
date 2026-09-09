@@ -14,7 +14,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * **The acceptance test for REQ-0009 finding 1**, which was agreed as: `PhoneProvisioningScaffold`
+ * **The acceptance test for the phone provisioning itself**, which was agreed as: `PhoneProvisioningScaffold`
  * can be deleted without anything breaking.
  *
  * That harness was the only way a phone ever got an identity, in this project's entire history. It

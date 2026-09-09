@@ -11,8 +11,8 @@
   with NO alpha on purpose. See TerminalBox: this glyph answers "now", and a fraction of it would be
   answering "how far", which is the ramp's job.
 
-  Used by the overpull indicator, REQ-0029, at the owner's word: *"давай не цвет, давай перед текстом
-  добавим иконку галочки"*.
+  Used by the overpull indicator, at the owner's word: a checkmark before the text rather than a
+  colour.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

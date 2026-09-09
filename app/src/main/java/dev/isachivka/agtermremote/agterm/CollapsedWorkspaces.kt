@@ -3,8 +3,8 @@ package dev.isachivka.agtermremote.agterm
 /**
  * Which workspaces the owner has folded shut.
  *
- * *"в меню сессий сделай чтобы разделы можно было 'сворачивать' как в оригинальном agterm"*
- * (2026-07-30).
+ * Asked for on 2026-07-30: the sections of the session list fold shut, the way they do in agterm
+ * itself.
  *
  * ### CLOSED, never open, and that is the load-bearing half
  *
@@ -21,11 +21,11 @@ package dev.isachivka.agtermremote.agterm
  * [groupByWorkspace] and [ListPosition], and the third place in this feature where identity beats
  * position.
  *
- * ### Persisted, by id — REQ-0031
+ * ### Persisted, by id
  *
- * **This said "Not persisted", and the owner overruled it:** *"я не ставил таких требований, можешь
- * хранить такие данные на телефоне"*. The set kept reverting to everything-expanded whenever Android
- * reclaimed the app, and nothing in REQ-0009 ever forbade storing it — that rule is about session
+ * **This said "Not persisted", and the owner overruled it:** he had set no such requirement, and
+ * this data may live on the phone. The set kept reverting to everything-expanded whenever Android
+ * reclaimed the app, and no rule ever forbade storing it — the rule in question is about session
  * names and screen content, and an id is neither.
  *
  * It still lives in the ViewModel while the app runs; what changed is that the ViewModel now seeds it

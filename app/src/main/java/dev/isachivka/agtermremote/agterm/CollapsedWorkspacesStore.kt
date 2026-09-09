@@ -3,14 +3,13 @@ package dev.isachivka.agtermremote.agterm
 import java.io.File
 
 /**
- * The folded workspaces, as a file of ids — REQ-0031.
+ * The folded workspaces, as a file of ids.
  *
- * The owner: *"постоянно сбрасывается на - все открыто"* — the collapsed session list kept reverting
- * to everything expanded, and he wanted it remembered. He was first told the phone was forbidden from
- * storing this and answered *"я не ставил таких требований, можешь хранить такие данные на телефоне"*.
- * He was right, and on 2026-09-06 he withdrew the whole family of rules that answer came from — see
- * REQ-0046. This file used to describe itself as "the only door in the package that writes to disk";
- * there is no such rule and no such test any more. [DraftStore] writes beside it.
+ * The collapsed session list kept reverting to everything expanded, and the owner wanted it
+ * remembered. He was first told the phone was forbidden from storing this, and answered that he had
+ * set no such requirement. He was right, and on 2026-09-06 he withdrew the whole family of rules that
+ * answer came from. This file used to describe itself as "the only door in the package that writes to
+ * disk"; there is no such rule and no such test any more. [DraftStore] writes beside it.
  *
  * ### Only ids fit through
  *

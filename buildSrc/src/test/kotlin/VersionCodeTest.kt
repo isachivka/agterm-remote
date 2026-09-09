@@ -62,7 +62,7 @@ class VersionCodeTest {
 
     @Test
     fun `a malformed version fails rather than guessing`() {
-        listOf("1.2", "1.2.3.4", "", "v1.2.3", "1.2.x").forEach { bad ->
+        listOf("1.2", "127.0.0.1", "", "v1.2.3", "1.2.x").forEach { bad ->
             assertTrue(
                 "expected \"$bad\" to be rejected",
                 runCatching { versionCodeOf(bad) }.exceptionOrNull() != null,

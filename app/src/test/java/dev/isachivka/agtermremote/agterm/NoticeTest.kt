@@ -39,7 +39,7 @@ class NoticeTest {
     }
 
     /**
-     * **A failure the owner caused outranks a measurement that succeeded — REQ-0035.**
+     * **A failure the owner caused outranks a measurement that succeeded.**
      *
      * The order used to be the other way and it did not matter, because a recalibration and a mutation
      * could not be outstanding on the same screen: mutations belonged to the list. The pane toggle put
@@ -132,7 +132,7 @@ class NoticeTest {
      * This asserted that rather than trusting it, "because there is nowhere to put it is exactly the
      * kind of property a later `data class` quietly removes".
      *
-     * ### That later data class arrived — REQ-0033 — and this guard would have missed it
+     * ### That later data class arrived, and this guard would have missed it
      *
      * [Notice.Measured] carries a column count. The old version of this test enumerated five notices by
      * hand, so a sixth simply went unchecked: **the guard would have kept passing while no longer

@@ -9,7 +9,7 @@ import java.io.File
 /**
  * The house rule, as a check rather than as a sentence.
  *
- * **Never assert a cause that cannot be observed.** It has held since REQ-0005 and was held to over
+ * **Never assert a cause that cannot be observed.** It is a house rule, and it was held to over
  * the Immich report, and this feature is where it is hardest: a sleeping laptop, a filtered network
  * and a VPN on the laptop all arrive at the phone as the same silence. Copy that picks one of them is
  * wrong five times out of six and sounds authoritative every time.
@@ -31,7 +31,7 @@ class FailureCopyTest {
     /**
      * The words that name a cause this app cannot see.
      *
-     * REQ-0009 §6 names the first three explicitly: the copy "does not say the network is filtered, it
+     * The first three are named explicitly: the copy "does not say the network is filtered, it
      * does not say the laptop is asleep, and it does not say the VPN is up". The rest are the same
      * mistake in other clothes.
      */

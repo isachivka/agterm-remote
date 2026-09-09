@@ -56,7 +56,7 @@ class BridgeConnectionTest {
 
     /**
      * **THE APP-SIDE VERSION OF THE DEFECT'S TEST.** One pane goes out on the screen request and the
-     * same one on the keystroke — REQ-0032.
+     * same one on the keystroke.
      *
      * agterm resolves an absent pane differently per command: a read gets the on-screen half, a
      * keystroke gets primary. So while the phone sent none, a split session showed one and typed into
@@ -88,7 +88,7 @@ class BridgeConnectionTest {
     }
 
     /**
-     * **A SECOND PANE EXISTS is not the same question as A SPLIT IS ON SCREEN — REQ-0034.**
+     * **A SECOND PANE EXISTS is not the same question as A SPLIT IS ON SCREEN.**
      *
      * ### What shipped in v0.18.0
      *
@@ -108,7 +108,7 @@ class BridgeConnectionTest {
      * property would compile and pass everywhere, and the only thing that can catch the key drifting
      * is a test that names it.
      *
-     * ### It is not the REQ-0032 defect again
+     * ### It is not the addressed-pane defect again
      *
      * Nothing disagreed with itself. The read and the keystroke went to the same pane, the one the
      * owner chose. What a collapsed split removed was REACH: the toggle is composed only when this is
@@ -117,8 +117,8 @@ class BridgeConnectionTest {
      *
      * **An earlier version of this comment said the toggle vanished underneath him mid-session,
      * leaving him on the right pane with no way back. It cannot** — the session row is a snapshot
-     * taken at open and does not change while the screen is up. Entry 15 in
-     * `docs/qa/instruments-that-lied.md`.
+     * taken at open and does not change while the screen is up. The mistake was reading two gates without asking when the
+     * value they read can change.
      */
     @Test
     fun `a session with a second pane decodes from the split key whatever agterm calls it`() {
@@ -195,7 +195,7 @@ class BridgeConnectionTest {
      * On 2026-08-12 the owner's Terminal screen read `failed to read surface buffer` and nothing else
      * — agterm describing its own internals, relayed verbatim to a person. The bridge now writes the
      * message and puts agterm's words in `detail`, so both have to survive the parse or the screen
-     * has only half of what it needs. See PLAN-0023.
+     * has only half of what it needs.
      */
     @Test
     fun `a refusal carries the bridge's words and the far end's separately`() {
@@ -259,7 +259,7 @@ class BridgeConnectionTest {
     }
 
     /**
-     * **A draft with a line break goes as a PASTE; one without goes as typing.** REQ-0017.
+     * **A draft with a line break goes as a PASTE; one without goes as typing.**
      *
      * Asserted on the bytes because this is the whole difference between the owner's chat message
      * landing in their editor and its lines running as commands — and because the phone chooses
@@ -286,7 +286,7 @@ class BridgeConnectionTest {
     }
 
     /**
-     * **The fit request carries the pane, because the fit is FOR the pane** — REQ-0036.
+     * **The fit request carries the pane, because the fit is FOR the pane**.
      *
      * The fit's target is the half of the terminal he is looking at; the window is only the lever that
      * reaches it. Measured on his own machine: a session whose divider sits at 0.286 renders 47 columns
@@ -314,7 +314,7 @@ class BridgeConnectionTest {
     /**
      * **The long press is the only thing that asks for a recalibration, so this asserts the WIRE.**
      *
-     * REQ-0016: the bridge has had a `recalibrate` flag since the fit was built, commented as the
+     * The bridge has had a `recalibrate` flag since the fit was built, commented as the
      * only thing that forces a fresh measurement, and the phone could never send it - which is why a
      * cached fit that had gone wrong could not be corrected from the owner's hand. Asserted on the
      * bytes rather than on a lambda, because a renamed callback can make a UI test pass while sending

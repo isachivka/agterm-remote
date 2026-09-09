@@ -108,6 +108,6 @@ val AppTypography = Typography(
  *
  * [FontFamily.Monospace] resolves to whatever the device calls monospace rather than to Roboto Mono
  * specifically. Bundling the real face is ~170 KB and is deferred until it has been looked at on a
- * device — see PLAN-0004.
+ * device — see
  */
 fun TextStyle.mono(): TextStyle = copy(fontFamily = FontFamily.Monospace)

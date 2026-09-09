@@ -9,7 +9,7 @@ import org.junit.Test
 
 /**
  * The pairing payload is the only place the laptop's address exists, so the codec is what makes
- * REQ-0009 §0 true: switching transport is re-minting this blob, not rebuilding the app.
+ * What keeps switching transport to re-minting this blob rather than rebuilding the app.
  *
  * Everything it carries is public — a certificate and an address. The tests below are about a decoder
  * pointed at a camera, which will be shown arbitrary rubbish as a matter of course and must never
@@ -40,7 +40,7 @@ class ConnectionProfileTest {
     fun `a hostname with non-ascii characters survives`() {
         // Punycode is the usual case, but nothing stops the owner from a UTF-8 host, and a codec that
         // mangled it would fail at connect time with no clue why.
-        val original = profile(host = "лаптоп.local")
+        val original = profile(host = "λάπτοπ.local")
 
         assertEquals(original, ProfileCodec.decode(ProfileCodec.encode(original)))
     }
@@ -130,7 +130,7 @@ class ConnectionProfileTest {
     // --- Size, against the constraint that actually binds -------------------------------------------
 
     /**
-     * A QR code holds 2,953 bytes in its densest mode. REQ-0008 measured a P-256 certificate at 385
+     * A QR code holds 2,953 bytes in its densest mode. A P-256 certificate was measured at 385
      * bytes DER, so the framing is what has to stay small — and it is the reason this is not JSON.
      */
     @Test

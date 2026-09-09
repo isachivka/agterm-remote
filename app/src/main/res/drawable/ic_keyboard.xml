@@ -3,7 +3,7 @@
   Material Symbols Rounded "keyboard", converted from the 24 px SVG Google publishes - see the
   README's third-party assets note. Not ic_keyboard_on: that one is the phone's hand-built toggle with
   a caret, and it says "the bar is open". This says "open the car's keyboard", which the host honours
-  only while parked. REQ-0044.
+  only while parked.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

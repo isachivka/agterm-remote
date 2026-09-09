@@ -12,9 +12,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 /**
- * One button, two states — REQ-0035.
+ * One button, two states.
  *
- * The owner: *"если сессия есть мы её показываем, если её нет мы её создаём и потом показываем"*.
+ * If the pane is there it is shown; if it is not, it is created and then shown.
  *
  * ### The property every test here is about
  *
@@ -84,7 +84,7 @@ class TogglePaneTest {
      *
      * One listing to ask, and no `pane.open`. The reason has changed and the assertion has not: it used
      * to be that revealing a collapsed pane would rearrange his window, which he had not asked for.
-     * REQ-0042 is him asking for exactly that — *"при переключении мы держим их фуллскрин"* — so the
+     * The owner asked for exactly that, so the
      * phone now DOES rearrange it, with `pane.show`.
      *
      * What must still never happen here is a `pane.open`, because that one can start a shell.
@@ -150,7 +150,7 @@ class TogglePaneTest {
     }
 
     /**
-     * **The way back moves the icon at once, and maximizes afterwards** — REQ-0042.
+     * **The way back moves the icon at once, and maximizes afterwards**.
      *
      * This test used to be called `going back to the left pane crosses no wire`, and that sentence
      * stopped being true: showing a pane now maximizes it, in BOTH directions. What survives is the
@@ -176,7 +176,7 @@ class TogglePaneTest {
      *
      * The maximize is refused. What the phone SHOWS is still Left, because every session has that pane
      * and reading it never needed the Mac's agreement — only his window layout did. He gets a note
-     * about the part that failed and keeps the terminal, which is the REQ-0037 rule.
+     * about the part that failed and keeps the terminal, which is the rule a fit refusal already follows.
      *
      * Written as a failure rather than a success because a passing maximize cannot tell "the icon moved
      * on its own" from "the icon moved because the call worked".

@@ -7,7 +7,7 @@ import org.junit.Test
 import kotlin.math.ceil
 
 /**
- * The overpull's decisions, REQ-0029 — every one of them, without a screen.
+ * The overpull's decisions — every one of them, without a screen.
  *
  * The gesture itself needs a finger and an emulator, and this project has neither in CI. What it does
  * not need either is: which key a direction means, when the key is armed, and that the icon the owner
@@ -206,8 +206,8 @@ class TerminalPullTest {
     /**
      * **The checkmark and the keystroke are the same moment.**
      *
-     * The owner could not tell when releasing would fire. A colour was tried and rejected — *"давай не
-     * цвет, давай перед текстом добавим иконку галочки"* — so a tick appears instead. Either way the
+     * The owner could not tell when releasing would fire. A colour was tried and rejected in favour
+     * of a mark before the text, so a tick appears instead. Either way the
      * mark is the only part of this indicator that reports a boolean, alpha being a ramp with no line
      * in it, which makes it worth exactly as much as its agreement with the key. **A tick that shows
      * while nothing would be sent is worse than no mark at all.**
@@ -234,8 +234,8 @@ class TerminalPullTest {
     }
 
     /**
-     * **The finger has to travel further than it did**, which is the whole answer to
-     * *"высокая вероятность ложных срабатываний"*.
+     * **The finger has to travel further than it did**, which is the whole answer to the high rate of
+     * false triggers the owner reported.
      *
      * Asserted in FINGER distance rather than in travel, because that is the number a thumb reports
      * on — the constant names the terminal's movement and the gap between the two is why this shipped
@@ -284,7 +284,7 @@ class TerminalPullTest {
      * **The gesture sends the same two key names the buttons do**, and they are names the bridge
      * accepts.
      *
-     * REQ-0029 moved `PgUp` and `PgDn` under the fold rather than deleting them, so there are now two
+     * `PgUp` and `PgDn` moved under the fold rather than being deleted, so there are now two
      * ways to send each. If these strings drifted from the cells', one route would work and the other
      * would be refused four layers away as a keystroke that silently does nothing — which is exactly
      * the failure `KeyCell` was made a sealed type to prevent.

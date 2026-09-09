@@ -94,11 +94,11 @@ fun AgtermScreen(
     onDraftChange: (String) -> Unit,
     onSendText: (String) -> Unit,
     onSendKey: (String) -> Unit,
-    /** Types a command and then presses Return — the Claude button, REQ-0013. */
+    /** Types a command and then presses Return — the Claude button. */
     onRunMacro: (String) -> Unit = {},
     onPickFile: () -> Unit,
     onDisconnect: () -> Unit,
-    /** The open session's draft — REQ-0046. Beside [typing], not inside it; see TypingBar. */
+    /** The open session's draft. Beside [typing], not inside it; see TypingBar. */
     draft: String = "",
     onPair: () -> Unit,
     onBack: () -> Unit,
@@ -112,7 +112,7 @@ fun AgtermScreen(
     // Which workspaces the owner has folded shut, hoisted for the same reason as the anchor - see
     // CollapsedWorkspaces. Defaulted so a preview or a test that does not care reads as it did before.
     /**
-     * Which pane the terminal is showing, and the control that changes it — REQ-0032.
+     * Which pane the terminal is showing, and the control that changes it.
      *
      * **[paneShown] is the same value the screen was READ from and the same one a keystroke goes
      * into.** It is not a display copy: `AgtermSessions` holds one field, both of its bridge calls
@@ -122,20 +122,20 @@ fun AgtermScreen(
      * Defaulted so a preview or a test that does not care reads exactly as it did before.
      */
     /**
-     * The column count a just-finished recalibration reported, or null — REQ-0033.
+     * The column count a just-finished recalibration reported, or null.
      *
      * Defaulted so a preview or a test that does not care reads exactly as it did before.
      */
     recalibrated: Int? = null,
     paneShown: Pane = Pane.Left,
     /**
-     * One tap, both directions — REQ-0035. Going right may create a pane on the laptop; going left
+     * One tap, both directions. Going right may create a pane on the laptop; going left
      * never touches it. The screen does not know which happened and does not need to: it draws
      * [paneShown], which only moves once the laptop has confirmed the pane is there.
      */
     onTogglePane: () -> Unit = {},
     /**
-     * Re-apply a fit the laptop already has, for the geometry now on screen — REQ-0041.
+     * Re-apply a fit the laptop already has, for the geometry now on screen.
      *
      * **Not a press.** It fires when the session or the pane changes, because the intent he stated is
      * *keep this terminal readable on this screen* rather than a one-shot action attached to a button.
@@ -210,9 +210,9 @@ fun AgtermScreen(
     // of silently invalidating a constant written down elsewhere. Measured on the owner's phone the
     // character is 9.78dp.
     //
-    // Taken at this level since REQ-0041: the fit control needs it and so does the automatic re-apply,
+    // Taken at this level since the fit control needs it and so does the automatic re-apply,
     // and the measurement lives in TerminalFont so the instrumentation can assert THAT integer rather
-    // than a second copy of the arithmetic — REQ-0015 Decision 5.
+    // than a second copy of the arithmetic.
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val family = TerminalFontFamily
@@ -331,8 +331,8 @@ fun AgtermScreen(
             //
             // Only on the list, and only when there is something to fold.
             // **A workspace is created from the list header, beside collapse-all**, which is where the
-            // owner asked for it: *"где-то ещё отдельно должна быть кнопочка создания нового
-            // workspace"*. Unlike collapse-all it is shown even when the list is empty - that is
+            // owner asked for a control of its own. Unlike collapse-all it is shown even when the list is
+            // empty - that is
             // precisely when they most need to make one.
             if (watching == null) {
                 IconButton(
@@ -367,13 +367,13 @@ fun AgtermScreen(
                 // how wide this phone is, and vim, htop and every table-printing program lay
                 // themselves out for it. A control rather than something done on connect - their
                 // window is theirs, and they are sitting at it.
-                // **Always present — REQ-0035, and this is a reversal of REQ-0032.**
+                // **Always present, and this is a reversal.**
                 //
                 // It was composed only when the session had a second pane, on the absent-not-disabled
                 // ruling. That ruling is unchanged and stopped applying here: a control is absent when
                 // it can do NOTHING, and this one can always do something. There is always a left
-                // pane, and a right one can always be brought into existence — the owner: *"если её
-                // нет мы её создаём и потом показываем"*.
+                // pane, and a right one can always be brought into existence: if it is not there, it is
+                // created and then shown.
                 //
                 // So there is no third state to draw and no screenshot to wait for. The control has
                 // exactly the two pictures it has always had.
@@ -386,7 +386,7 @@ fun AgtermScreen(
                 // real machine, so the bar stays shut until this is pressed. An input that is always
                 // focused is one a pocket can type into.
                 // **A toggle, and an icon, to match the control beside it.** The owner asked for a
-                // "переключатель" - press to bring the bar up, press again to put it away - and for
+                // switch - press to bring the bar up, press again to put it away - and for
                 // it to look like the fit control rather than being the one text button in a row of
                 // icons. Two controls in one header that behave differently teach that neither can
                 // be trusted to behave like the other.
@@ -631,9 +631,8 @@ fun AgtermScreen(
                     // whether they were following when this arrived, not whether the new content
                     // happens to leave them near its end.
                     LaunchedEffect(state.screen) {
-                        // **A PgUp lands at the BOTTOM of the page it brought back** - REQ-0029, the
-                        // owner: *"когда я вверх кручу надо чтобы скролл опускался вниз ... чтобы я
-                        // типа бесшовно читал"*. The bottom of the earlier screen is the line
+                        // **A PgUp lands at the BOTTOM of the page it brought back**, so that
+                        // scrolling up reads seamlessly. The bottom of the earlier screen is the line
                         // immediately before the top of where he just was, so landing there continues
                         // the text without a seam. PgDn needs nothing: it is already handled by
                         // `wasAtBottom` below.
@@ -698,7 +697,7 @@ fun AgtermScreen(
                             modifier = Modifier.fillMaxSize().testTag(TAG_BOX),
                             vertical = terminalVertical,
                             horizontal = terminalHorizontal,
-                            // **The same callback the key bar's own PgUp and PgDn use.** REQ-0029
+                            // **The same callback the key bar's own PgUp and PgDn use.** The overpull
                             // replaced two buttons with a gesture; it did not add a second way for a
                             // keystroke to reach the laptop, and the folded buttons still work.
                             onPageKey = sendKeyAndLand,
@@ -708,10 +707,10 @@ fun AgtermScreen(
                         // describes a moment that has passed, and a card about it sitting over the
                         // terminal for the rest of the evening would be chrome, not news.
                         // One surface, two sources, precedence decided in one pure function.
-                        // **The session screen passes `mutation` now** - REQ-0035 gave it one to
+                        // **The session screen passes `mutation` now** - the pane toggle gave it one to
                         // report. Before this it had no mutation of its own and left the argument
                         // at its default.
-                        // **The switch re-applies, and this is where it is triggered** — REQ-0041.
+                        // **The switch re-applies, and this is where it is triggered**.
                         //
                         // Keyed on the session, the pane, AND on having a measurement: `boxWidthDp`
                         // starts at zero and is filled by the box's own layout, so an effect keyed
@@ -755,9 +754,8 @@ fun AgtermScreen(
                     // typing report here in the first place.
                     Box(modifier = Modifier.weight(1f)) {
                         // **Pull down to refresh what is on screen.** The owner asked for the standard
-                        // pattern - *"жест pull-down: вытягивается loader и всё обновляется"* - and
-                        // this is the same Material3 component HomeScreen already uses, so the gesture
-                        // means one thing in this app.
+                        // pattern - the loader is drawn out and everything reloads - and this is the
+                        // Material3 component for it, so the gesture means one thing in this app.
                         //
                         // On the LIST only. The open session has its own scroll in both axes and polls
                         // every tick anyway; a pull there would fight the terminal and duplicate a
@@ -844,9 +842,9 @@ private fun FitWidthToggle(
     // divided by 10.84 - Menlo's advance ratio at 18sp, never checked against this screen and left
     // behind by the step-down to 16. Two guesses in series, cached against, so every layout edit we
     // shipped discarded the calibration. Measured on the owner's phone the character is 9.78dp.
-    // **The measurement moved up one level and nothing about it changed** — REQ-0041. It is taken in
+    // **The measurement moved up one level and nothing about it changed**. It is taken in
     // [AgtermScreen] now because the automatic re-apply needs the same number and computing it twice
-    // would be two copies of one measurement, which is the shape REQ-0015 Decision 5 rules against.
+    // would be two copies of one measurement, which is the shape ruled against.
 
     // **Why the control is off, in the owner's words, when it is off.**
     //
@@ -856,7 +854,7 @@ private fun FitWidthToggle(
     //
     // Costs nothing to ignore, one glance to read: a line under the control, only while it is
     // disabled, naming the specific reason rather than "unavailable".
-    // **TWO conditions, and until 2026-08-26 they were one — REQ-0033.**
+    // **TWO conditions, and until 2026-08-26 they were one.**
     //
     // The comment below this used to say it correctly and the code did not honour it: *"nothing to
     // send until the box has measured itself once, and nothing to TOGGLE until the laptop has said
@@ -867,7 +865,7 @@ private fun FitWidthToggle(
     // state it exists for**: something has gone wrong, replies are not landing, `_fit` is still at its
     // initial `enabled = null` — which is also where `release()` puts it — and the one control that
     // could break the deadlock is grey. The owner reached for it on 2026-08-25 with a stuck fit and
-    // found nothing: *"мне сегодня очень не хватало его."*
+    // found nothing there.
     //
     // The hold needs NOTHING from the laptop's current answer. It does not toggle; it means "measure
     // it again anyway", and the only thing it requires is that this phone knows its own two numbers.
@@ -903,7 +901,7 @@ private fun FitWidthToggle(
         modifier = Modifier
             .height(40.dp)
             .testTag(TAG_FIT_TO_PHONE)
-            // **A long press forces a recalibration, REQ-0016.** Not a new gesture: this app already
+            // **A long press forces a recalibration.** Not a new gesture: this app already
             // teaches hold-to-do-the-deliberate-thing for rename and delete, and this is the same
             // shape - the tap is the ordinary thing, the hold says measure it again anyway.
             //
@@ -1053,7 +1051,7 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
             container = MaterialTheme.colorScheme.surfaceContainerHigh
             content = MaterialTheme.colorScheme.onSurfaceVariant
         }
-        // **The recalibration reporting itself, REQ-0033.** Neutral colours: it is news, not an alarm
+        // **The recalibration reporting itself.** Neutral colours: it is news, not an alarm
         // and not a success worth a green card - the owner asked it to measure and it measured.
         //
         // The COUNT is the whole point. It is the one fact that says what the recalibration concluded,
@@ -1114,7 +1112,7 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
             content = MaterialTheme.colorScheme.onErrorContainer
         }
         // The icon is still on the left because nothing here moves it optimistically, so this note is
-        // what tells him the tap did not take rather than that the app ignored it - REQ-0035.
+        // what tells him the tap did not take rather than that the app ignored it.
         Notice.PaneFailed -> {
             title = R.string.agterm_notice_pane_failed_title
             body = R.string.agterm_notice_pane_failed_body
@@ -1122,7 +1120,7 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
             container = MaterialTheme.colorScheme.errorContainer
             content = MaterialTheme.colorScheme.onErrorContainer
         }
-        // **One line, where the other fit notes live** - REQ-0037. This used to replace the whole
+        // **One line, where the other fit notes live**. This used to replace the whole
         // screen with the bridge's own sentence about probe widths.
         Notice.FitRefused -> {
             title = R.string.agterm_notice_fit_refused_title
@@ -1131,7 +1129,7 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
             container = MaterialTheme.colorScheme.errorContainer
             content = MaterialTheme.colorScheme.onErrorContainer
         }
-        // **Not an error, and drawn like one would be a lie** - REQ-0041. Nothing went wrong: this
+        // **Not an error, and drawn like one would be a lie**. Nothing went wrong: this
         // session's shape has simply never been measured, and he is being invited to press.
         Notice.NeedsFit -> {
             title = R.string.agterm_notice_needs_fit_title
@@ -1189,7 +1187,7 @@ private fun NoticeCard(notice: Notice?, onDismiss: () -> Unit) {
  *
  * **The address, never a name.** The mock says `MacBook-Pro-Igor`; the phone holds no name for the
  * laptop, only the host it dials — see the [AgtermScreen] parameter. Drawing a name would be
- * inventing a fact about the owner's machine, which is the rule [copyFor] has held since REQ-0005.
+ * inventing a fact about the owner's machine, which is the rule [copyFor] has always held.
  *
  * The dot is green because this composable is only reached from [AgtermUiState.Sessions] — the laptop
  * answered, and that is an observation rather than an assumption. Every other state draws its own
@@ -1407,9 +1405,8 @@ private fun RenameDialog(
                 }
                 // **Delete lives here, and this is the owner's own design.**
                 //
-                // *"чтобы удалить нужно будет сделать длинное нажатие и затем нажать удалить - мы
-                // тогда confirmation не нужен"* - the long press and this press are the two deliberate
-                // acts, so there is no confirmation dialog anywhere in this feature.
+                // A long press, then this press: the two deliberate acts ARE the confirmation, so there
+                // is no confirmation dialog anywhere in this feature.
                 //
                 // It is drawn INSIDE the body rather than beside Rename in the button row, and that is
                 // deliberate: the destructive action does not sit where a confirm button sits, and it
@@ -1491,7 +1488,7 @@ private fun WorkspaceHeader(
             .clip(if (open) CardTopShape else CardShape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             // The design lifts an OPEN header a shade above the card it sits on. `#252118` is not in
-            // the palette and its nearest role is; see REQ-0010 4.6 on why four near-duplicate hexes
+            // the palette and its nearest role is; four near-duplicate hexes
             // did not join ui/theme.
             .then(if (open) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)
             // **Long press renames, tap folds.** One dialog reached from four places rather than a
@@ -1755,7 +1752,7 @@ internal const val TAG_RENAME_FIELD = "agterm_rename_field"
 internal const val TAG_RENAME_CONFIRM = "agterm_rename_confirm"
 internal const val TAG_RENAME_DELETE = "agterm_rename_delete"
 
-/** Pull-to-refresh, on the session list only — never on the open session. REQ-0014. */
+/** Pull-to-refresh, on the session list only — never on the open session. */
 internal const val TAG_LIST_PULL_REFRESH = "agterm_list_pull_refresh"
 /** A group's session count, which a folded group still shows. */
 internal const val TAG_GROUP_COUNT = "agterm_group_count"
@@ -1768,19 +1765,19 @@ internal const val TAG_CONNECTED_DOT = "agterm_connected_dot"
 internal const val TAG_CONNECTED_TO = "agterm_connected_to"
 /** The one-line note under the header saying what the fit is doing. */
 /**
- * Which pane the phone is showing, and the control that changes it — REQ-0032.
+ * Which pane the phone is showing, and the control that changes it.
  *
  * ### It is agterm's own picture, and that is the whole design
  *
  * A rounded window with one half solid and the other hollow. **The owner recognises it from his
- * laptop** — *"смотри как классно сделано в оригинальном agterm, небольшая иконочка где визуализированы
- * панели и подсвечена активная"* — and the phone showing him the same picture is most of the value.
+ * laptop**, where agterm draws the same small pane indicator with the active half lit, and the phone
+ * showing him that picture is most of the value.
  * Measured off his screenshot rather than approximated; see the drawables' headers.
  *
  * ### What it replaced, and why that was wrong
  *
- * A segmented `[ Left | Right ]` pair, 116dp of the header. His complaint was not the words but the
- * size: *"ты сделал огромную штуковину она закрывает название"*. It covered the session name.
+ * A segmented `[ Left | Right ]` pair, 116dp of the header. The complaint was not the words but the
+ * size: it covered the session name.
  *
  * The pair was chosen over a pictogram on a prediction that a small glyph would not read — reasoned
  * from him having rejected a low-contrast armed state days earlier. **The inference was right about
@@ -1795,9 +1792,9 @@ internal const val TAG_CONNECTED_TO = "agterm_connected_to"
  * than two pills and an icon. **48dp against the pair's 116dp: the session name gets 68dp back**, and
  * is now 48dp worse off than before this feature existed rather than 116dp.
  *
- * ### Never absent — REQ-0035
+ * ### Never absent
  *
- * It was composed only for a session that already had a second pane. Two rulings moved it: REQ-0034
+ * It was composed only for a session that already had a second pane. Two rulings moved it: the first
  * corrected WHICH condition that was, and then the owner removed the condition altogether by
  * specifying that tapping right creates the pane when there is none.
  *
@@ -1818,7 +1815,7 @@ private fun PaneToggle(
         // **The requested pane is not passed up, and that is the point.** This used to send
         // `if (it) Right else Left`, which made the press an instruction. It is a request now: going
         // right may have to create a pane first, and [shown] moves only once the laptop says one is
-        // there. A control that set its own state here would light before the pane existed - REQ-0035.
+        // there. A control that set its own state here would light before the pane existed.
         onCheckedChange = { onTogglePane() },
         modifier = modifier.testTag(TAG_PANE_TOGGLE),
     ) {
@@ -1838,7 +1835,7 @@ private fun PaneToggle(
 }
 
 /**
- * The pane toggle, REQ-0032. **Always composed since REQ-0035**, on every session — the instrumented
+ * The pane toggle. **Always composed**, on every session — the instrumented
  * test that asserted its absence is now the test that asserts it is there whatever the session holds.
  *
  * One tag, because the control is one icon now. The segmented pair it replaced had a tag per half.

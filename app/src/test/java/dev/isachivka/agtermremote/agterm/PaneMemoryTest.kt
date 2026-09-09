@@ -12,7 +12,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 /**
- * The phone remembers which pane he was reading, per session — REQ-0042, ONE.
+ * The phone remembers which pane he was reading, per session, ONE.
  *
  * ### Why a memory is needed at all now
  *
@@ -136,9 +136,9 @@ class PaneMemoryTest {
     }
 
     /**
-     * **Opening a session maximizes the pane it opens on** — REQ-0042, TWO, on the switch path.
+     * **Opening a session maximizes the pane it opens on**, TWO, on the switch path.
      *
-     * The same reading of *"при переключении"* that REQ-0041 gave the re-applied fit: a session switch
+     * The same reading the re-applied fit was given: a session switch
      * is a switch.
      */
     @Test
@@ -197,7 +197,7 @@ class PaneMemoryTest {
     /**
      * **Coming back to a session never creates a pane.**
      *
-     * A tap on the toggle may start a shell — that is REQ-0035 and it is his gesture. Tapping a row in
+     * A tap on the toggle may start a shell, and that is the owner's own gesture. Tapping a row in
      * a list is not, and a shell appearing on his laptop because of it is the surprise
      * `IntentApplyIfKnown` exists to prevent, one feature over.
      */

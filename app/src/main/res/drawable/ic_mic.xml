@@ -2,7 +2,7 @@
 <!--
   Material Symbols Rounded "mic", converted from the 24 px SVG Google publishes - see the README's
   third-party assets note. The car's microphone button: the map action strip below the terminal
-  allows no titles, so this glyph is the whole label. REQ-0044.
+  allows no titles, so this glyph is the whole label.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

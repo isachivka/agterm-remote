@@ -23,7 +23,7 @@ import org.junit.runner.RunWith
  *
  * The owner asked to copy text out of a session. The whole change is a `SelectionContainer` around
  * the terminal's `Text`, so Android's own selection takes over: their handles, their magnifier, their
- * menu, their Copy. Nothing of ours. REQ-0026.
+ * menu, their Copy. Nothing of ours.
  *
  * The question that had to be answered before building it was whether selection would take a gesture
  * the terminal needs, because the terminal scrolls on drag in **both** axes and selection also drags.

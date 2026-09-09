@@ -150,11 +150,11 @@ class TerminalFontRendersTest {
         }
     }
 
-    // ---- REQ-0015: the six the primary does not have, and the chain that supplies them ----
+    // ---- The six the primary does not have, and the chain that supplies them ----
 
     /**
      * The six codepoints Claude draws that the primary lacks, measured over 40 sessions of real output
-     * against Menlo — `docs/qa/req-0015-glyph-measurement.md` — and re-checked against JetBrains Mono
+     * against Menlo, and re-checked against JetBrains Mono
      * 2.304's cmap with fontTools on 2026-09-05: it has none of the six either.
      */
     private val theSixThePrimaryLacks = listOf(
@@ -306,7 +306,7 @@ class TerminalFontRendersTest {
     }
 
     /**
-     * **The trade of REQ-0015 Decision 3, asserted rather than described.**
+     * **The fallback trade, asserted rather than described.**
      *
      * Characters neither bundled font has still reach the platform and draw a real glyph, at
      * platform widths — 1.0 em for CJK, 1.2451 em for emoji. That is content beating grid, and it is

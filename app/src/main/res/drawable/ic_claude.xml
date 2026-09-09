@@ -20,8 +20,8 @@
   next to.
 
   **The brand colour is KEPT, and this is a decision rather than an oversight.** The owner, on being
-  shown the alternative: *"оставлять оранжевым прямо чтобы был как оригинальный."* It is the logo, and
-  it should look like the logo.
+  shown the alternative, asked for it to stay orange, the way the original is. It is the logo, and it
+  should look like the logo.
 
   So #D97757 is baked into `fillColor` here rather than left to a tint, **and the call site must not
   tint it** — `Icon` applies `LocalContentColor` by default, which would silently repaint it the

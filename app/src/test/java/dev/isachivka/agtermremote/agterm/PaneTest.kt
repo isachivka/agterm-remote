@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The pane the phone addresses — REQ-0032, and the silent defect it was written for.
+ * The pane the phone addresses, and the silent defect it was written for.
  *
  * agterm resolves an absent pane **differently for the two commands**: a read gets the on-screen half,
  * a keystroke gets primary. Measured over its control socket on 2026-08-25. So while the phone named

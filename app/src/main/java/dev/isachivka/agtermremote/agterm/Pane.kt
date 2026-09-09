@@ -1,7 +1,7 @@
 package dev.isachivka.agtermremote.agterm
 
 /**
- * Which half of a split session the phone is addressing — REQ-0032.
+ * Which half of a split session the phone is addressing.
  *
  * ### Why this exists as a type
  *

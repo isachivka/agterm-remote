@@ -5,8 +5,8 @@ package dev.isachivka.agtermremote.agterm
  *
  * ### The bug
  *
- * *"если я нахожусь в сессии и использую жест назад стандартный андроидовский то меня выбрасывает на
- * хоумскрин а не назад к списку сессий"*. The back arrow in the header did the right thing and the
+ * The system back gesture, used inside a session, threw the owner out to the launcher instead of
+ * back to the session list. The back arrow in the header did the right thing and the
  * system gesture left the app, because the screen held a notion of where the owner was that Android
  * knew nothing about: the app-level [BackStack] sees one agterm destination, and an open session is a
  * place *inside* it.

@@ -16,7 +16,7 @@ import java.io.File
 /**
  * The private key must never leave the keystore — not to a file, not to a backup, not into a log.
  *
- * REQ-0006 proved *nothing is persisted* by asserting the absence of the artefacts rather than by
+ * *Nothing is persisted* was proved by asserting the absence of the artefacts rather than by
  * writing the rule down, and this is the same shape. Three properties, each failing independently, so
  * each gets its own assertion.
  *

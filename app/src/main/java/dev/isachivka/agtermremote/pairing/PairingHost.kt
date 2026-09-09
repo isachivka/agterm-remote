@@ -34,14 +34,14 @@ import androidx.core.content.ContextCompat
  * needed no permission did not work.** On 2026-08-09 the owner could not pair by camera at all, and
  * the pairing was carried by the file route.
  *
- * REQ-0019 re-measured against the real classpath: `camera-compose` is 21 new artifacts, against
+ * Re-measured against the real classpath: `camera-compose` is 21 new artifacts, against
  * `camera-view`'s 37 with Guava and AppCompat inside the difference. The decoder is unchanged and
  * costs nothing — see [PairingCodeFrames].
  *
  * ### Two ways in, neither privileged
  *
- * **Scanning is what the owner asked for**: *"чтобы оно сканилось как нормальные человеческие qr в
- * камере"*. [PairingViewfinder] reads frames continuously; the permission is requested when it opens
+ * **Scanning is what the owner asked for**: the code should be read through the camera, the way any
+ * ordinary QR code is. [PairingViewfinder] reads frames continuously; the permission is requested when it opens
  * and nowhere else.
  *
  * **The file route stays, and reaching it never asks for anything.** `PairingCode`'s argument is

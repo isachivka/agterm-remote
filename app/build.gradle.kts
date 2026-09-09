@@ -55,7 +55,7 @@ android {
                 //
                 // v3 is off by default in AGP and has to be asked for. Every release up to and
                 // including 0.32.0 therefore carried v2 ALONE - measured with apksigner, not
-                // assumed - and DEBT-0001 read that absence as either a decision or a toolchain
+                // assumed - and it was read as either a decision or a toolchain
                 // default. It was neither: nobody had written this line. It matters because v3 is the
                 // only scheme carrying a signing certificate LINEAGE, which is Android's sole
                 // mechanism for ever replacing a signing key on an app that is already installed.
@@ -75,7 +75,7 @@ android {
                 // v4 stays off, and that one IS a choice. It is not a stronger v3 - it is a detached
                 // .idsig file beside the .apk, for incremental install over adb. Turning it on would
                 // put a second file in the release that a phone browser has no idea what to do with,
-                // and REQ-0003 hands a single .apk to the installer.
+                // and a single .apk is what an installer is handed.
                 enableV3Signing = true
             }
         }
@@ -158,7 +158,7 @@ dependencies {
     // The token is validated against the API on entry, and iteration 3 downloads a release asset.
     // OkHttp rather than HttpURLConnection because GitHub's asset endpoint redirects to S3, and
     // OkHttp drops the Authorization header on a cross-host redirect - handing our token to a
-    // third-party host is the exact leak REQ-0003 is about.
+    // third-party host is the exact leak that mattered.
     implementation(libs.zxing.core)
     // The camera, and only the camera. zxing above decodes the frames it produces, so nothing here is
     // a second reader - PlanarYUVLuminanceSource takes the Y plane directly. camera-compose supplies
@@ -176,7 +176,7 @@ dependencies {
     // Every status code and header combination the validator maps, served over a real socket.
     // Test-only: it is never on the .apk's classpath.
     testImplementation(libs.okhttp.mockwebserver)
-    // Certificates minted in-process, so REQ-0005's four TLS states are proven against real
+    // Certificates minted in-process, so the four TLS states are proven against real
     // handshakes rather than asserted from a reading of the OkHttp source. Test-only.
     testImplementation(libs.okhttp.tls)
     // Only so the JVM tests can exercise the org.json parsing the app does on the platform's own
@@ -204,10 +204,10 @@ dependencies {
 //
 //   BackupRulesTest      - remove the backup exclusion, and it still reported success. It guards the
 //                          rule that the update token never reaches Google's cloud backup, which is
-//                          one of the two properties REQ-0003 is built on. Skippable since then.
+//                          one of the two properties the updater was built on. Skippable since then.
 //   WindowBackgroundTest - change the colour literal, and it still reported success. It guards the
 //                          window background that made the app flash white on every cold start in
-//                          REQ-0004.
+//
 //
 // Both report success by not executing, which is indistinguishable from success at the point anyone
 // reads the board - the failure this project has now hit six times.

@@ -110,7 +110,7 @@ fun ColourRoles(modifier: Modifier = Modifier) {
  * Public for the same reason as [ColourRoles]. The last two lines are the ones with a question
  * hanging over them: [FontFamily.Monospace] resolves to whatever the device calls monospace, and
  * whether that is close enough to the Roboto Mono the design specifies is a judgement to make by
- * looking at it on hardware — see PLAN-0004.
+ * looking at it on hardware — see
  */
 @Composable
 fun TypeScale(modifier: Modifier = Modifier) {

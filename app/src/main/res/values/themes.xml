@@ -4,7 +4,7 @@
       The platform theme, which matters for exactly one frame: the one the system draws before
       Compose has drawn anything.
 
-      This inherited android:Theme.Material.Light.NoActionBar until REQ-0004 - a LIGHT parent under
+      This inherited android:Theme.Material.Light.NoActionBar once - a LIGHT parent under
       an app that is now dark on every screen. Measured on an API 37 device rather than assumed: the
       decor view's background was #FAFAFA, so every cold start painted a white window and then
       replaced it with #15120C as soon as Compose caught up. Nobody specified that flash; it was

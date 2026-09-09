@@ -250,7 +250,7 @@ class PairingSequenceTest {
         val (pixels, w, h) = codeFor(profile())
         val comparing = seq.onImage(pixels, w, h) as PairingState.Comparing
 
-        // Was `is Paired` until REQ-0009 finding 1. Confirming stores the laptop and nothing more:
+        // Was `is Paired` once. Confirming stores the laptop and nothing more:
         // the laptop still has no idea this phone exists, so the honest next state is the half-done
         // one. The assertion this test exists for - that confirming is what writes - is unchanged.
         val next = seq.onFingerprintConfirmed(comparing)
@@ -323,7 +323,7 @@ class PairingSequenceTest {
         assertNull(store().read())
     }
 
-    // --- REQ-0009 finding 1: "paired" must mean three things, not one -----------------------------
+    // --- "paired" must mean three things, not one ------------------------------------------------
 
     @Test
     fun `confirming the laptop does not claim the laptop knows this phone`() {

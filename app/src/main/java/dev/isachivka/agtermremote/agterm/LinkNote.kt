@@ -15,7 +15,7 @@ package dev.isachivka.agtermremote.agterm
  *
  * **The second is a fabrication.** It is the agent's state, and nothing in this app can observe
  * whether some Claude in some session is waiting on anybody. `SessionsPresentation` has held that rule
- * since REQ-0005 — *the copy must not assert a cause the app cannot observe* — and a new surface does
+ * throughout — *the copy must not assert a cause the app cannot observe* — and a new surface does
  * not get a new rule. So this type is connection state and nothing else, and there is no way to
  * express a note about something the phone did not see.
  *

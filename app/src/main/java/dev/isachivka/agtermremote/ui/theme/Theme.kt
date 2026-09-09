@@ -113,7 +113,7 @@ private val AppColorScheme = darkColorScheme(
  *
  * No `darkTheme` parameter, no `isSystemInDarkTheme()`, no dynamic colour. The design commits to one
  * palette, and a light theme assembled by inverting it would be a screen nobody has ever looked at,
- * shipped to whoever happens to have the system setting the other way. REQ-0004 puts a light theme
+ * shipped to whoever happens to have the system setting the other way. A light theme is
  * out of scope and the README says so, which is a more honest answer than half-supporting one.
  *
  * Dynamic colour is out for the same reason twice over: the design's amber is the app's identity,

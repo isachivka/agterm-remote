@@ -2,7 +2,7 @@
 <!--
   Material Symbols Rounded "view_list", converted from the 24 px SVG Google publishes - see the
   README's third-party assets note. The car's way back to the session list: the navigation template
-  has no header and no back arrow of its own, so the list is a button on the map strip. REQ-0044.
+  has no header and no back arrow of its own, so the list is a button on the map strip.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

@@ -3,9 +3,9 @@ package dev.isachivka.agtermremote.agterm
 import java.io.File
 
 /**
- * The owner's unsent drafts, one file per session, in the app's private storage — REQ-0046.
+ * The owner's unsent drafts, one file per session, in the app's private storage.
  *
- * *"потерять промт введённый сюда очень страшно"*: a prompt typed on a phone is minutes of work, and
+ * Losing a prompt typed into the phone is the thing the owner feared most: it is minutes of work, and
  * the process being killed in a pocket used to cost it. So a draft is written shortly after every
  * edit and read back when the session is opened again, until the owner sends it or erases it.
  *

@@ -24,8 +24,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * **This layer trusts the router's certificate by ordinary public-CA validation, and nothing else.**
  * The client is unmodified: platform trust store, platform hostname verifier, no exceptions. Measured
- * on-device rather than assumed — the chain reaches ISRG Root X1 on Android's own store, recorded in
- * `docs/qa/bridge-preconditions.md`.
+ * on-device rather than assumed: the chain reaches ISRG Root X1 on Android's own store.
  *
  * The *inner* decision — which laptop this actually is — is not made here and must never be. It is
  * the pinned mTLS above, terminating on the laptop. Collapsing the two would make the pinning
@@ -195,7 +194,7 @@ class WebSocketStream private constructor(
          * Everything else is [WireFailure.CannotReach], including cases this code could easily
          * *appear* to tell apart. A DNS failure, a refused connection, a dropped route and a TLS
          * failure are four different exception types and the same fact from here: **the laptop is not
-         * answering and this app cannot observe why.** That rule has held since REQ-0005 and through
+         * answering and this app cannot observe why.** That rule has held throughout, and through
          * the Immich report, and an arm that matched on exception type while returning the same value
          * would read as a considered classification and classify nothing — preserved by the next
          * person as a distinction that never existed.

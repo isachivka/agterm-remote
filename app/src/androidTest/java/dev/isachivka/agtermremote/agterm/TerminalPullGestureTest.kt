@@ -14,7 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The overpull as a gesture, REQ-0029 — the half `TerminalPullTest` cannot reach.
+ * The overpull as a gesture — the half `TerminalPullTest` cannot reach.
  *
  * ### What is asserted here and not there
  *

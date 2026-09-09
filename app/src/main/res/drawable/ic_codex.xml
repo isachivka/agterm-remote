@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  OpenAI's mark - their own knot, converted from their SVG. Not a redraw. REQ-0045.
+  OpenAI's mark - their own knot, converted from their SVG. Not a redraw.
 
   Source:  https://cdn.oaistatic.com/assets/favicon-o20kmmos.svg  (the favicon chatgpt.com serves)
   Fetched: 2026-09-06, HTTP 200, content-type image/svg+xml, 4541 bytes, raw.
@@ -15,7 +15,7 @@
   file above. The background rect is dropped; it is the favicon's tile, not the mark.
 
   **This one is monochrome and tinted at the call site**, unlike ic_claude.xml. The owner asked for the
-  Claude mark to keep its colour - *"оставлять оранжевым прямо чтобы был как оригинальный"* - and said
+  Claude mark to keep its colour - orange, the way the original is - and said
   nothing about this one; OpenAI's own dark-mode rendering is white on near-black, which is what this
   app's palette produces when the icon is tinted `onSurface`. So it is white here, like every glyph but
   Claude's, and the tile passes the ordinary tint.

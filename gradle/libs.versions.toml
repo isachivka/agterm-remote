@@ -25,7 +25,7 @@ okhttp = "5.4.0"
 # that unit tests compile against is stubs that throw, so the JVM tests need a real implementation.
 # The device test parses the same fixture against the platform's own copy.
 json = "20260719"
-# REQ-0009 iteration 1, and the whole dependency cost of pairing: one artifact.
+# The whole dependency cost of pairing: one artifact.
 #
 # Decode only, pure Java, no Android wrapper, no Play Services, no network. Its POM declares one
 # dependency and that one is test-scoped, so the runtime transitive count is zero - verified with a
@@ -35,7 +35,7 @@ json = "20260719"
 #
 # zxing also drives the LIVE path and buys nothing to do it: PlanarYUVLuminanceSource takes a camera
 # frame's Y plane directly, so the decoder is the same one the file route has always used. The camera
-# is what REQ-0019 buys; the decoder was already paid for.
+# is what the live route buys; the decoder was already paid for.
 zxing = "3.5.4"
 
 # The note that used to sit above rejected CameraX at "+17 without camera-view, +39 with it". Those
@@ -45,7 +45,7 @@ zxing = "3.5.4"
 #
 #   CameraX + camera-compose   21 new,  4.71 MB   <- taken
 #   CameraX + camera-view      37 new, 10.50 MB      Guava 2.92 MB and AppCompat 1.07 MB inside it
-#   ML Kit, model bundled      22 new, 12.47 MB      unbought; a named escalation in REQ-0019
+#   ML Kit, model bundled      22 new, 12.47 MB      unbought; the named escalation if zxing fails
 #
 # camera-compose is 5 artifacts and 0.41 MB more than bare CameraX and supplies CameraXViewfinder,
 # which owns the SurfaceRequest lifecycle - so there is no AndroidView, no hand-rolled SurfaceProvider

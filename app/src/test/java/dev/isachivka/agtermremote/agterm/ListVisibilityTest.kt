@@ -17,7 +17,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * REQ-0014: the list refreshes when it becomes visible, and on a pull.
+ * The list refreshes when it becomes visible, and on a pull.
  *
  * The trigger is an effect keyed on [showsList], and the failure mode of keying an effect on derived
  * state is an infinite loop — the fetch flips the key, which runs the effect, which fetches. That

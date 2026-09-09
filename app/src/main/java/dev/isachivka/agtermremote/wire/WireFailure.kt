@@ -3,13 +3,13 @@ package dev.isachivka.agtermremote.wire
 /**
  * Why the phone could not talk to the laptop.
  *
- * **A type, not a message.** REQ-0009 §6's copy has to say *re-pair* for one of these and *your
+ * **A type, not a message.** The copy has to say *re-pair* for one of these and *your
  * laptop is not answering* for another, and it cannot make that distinction from a string. Iteration
  * 3 branches on this exhaustively.
  *
  * The distinction that costs the most to get wrong is [NotPinned] and [CertificateExpired] against
  * everything else. Those two mean *the identity is wrong and the owner must act*; the rest mean *the
- * laptop is not answering and the app cannot say why* — a rule this project has held since REQ-0005
+ * laptop is not answering and the app cannot say why* — a rule this project has held throughout
  * and held to over the Immich report.
  */
 sealed interface WireFailure {

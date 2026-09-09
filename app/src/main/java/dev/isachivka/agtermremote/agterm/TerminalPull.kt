@@ -9,7 +9,7 @@ import kotlin.math.min
  *
  * ### Where this comes from
  *
- * `PgUp` and `PgDn` were two of the eight cells on the key bar, and REQ-0028 had just established that
+ * `PgUp` and `PgDn` were two of the eight cells on the key bar, and it had just been established that
  * the bar's width is the scarce thing. The owner's replacement, in his words: the terminal *travels a
  * little further than it should under the finger, the way pull-to-refresh does*; an icon fades in
  * inside the padding that opens up; release at full opacity sends the key, release short of it sends
@@ -57,7 +57,7 @@ object TerminalPull {
      *
      * ### 0.3 since 2026-08-22, down from 0.5, and this is the lever chosen against false triggers
      *
-     * The owner: *"сейчас высокая вероятность ложных срабатываний"*. The cause is inherent rather than
+     * The owner reported a high rate of false triggers. The cause is inherent rather than
      * a defect — he flicks to scroll, the flick runs out of content mid-gesture, and the remainder of
      * his own movement becomes pull. The only lever against that is distance.
      *
@@ -105,7 +105,7 @@ object TerminalPull {
      * **The previous value was the opposite, and it came from reading the nested-scroll API.** It was
      * asserted by a test, described in a requirement, reviewed, and shipped, and every one of those
      * was a restatement of the same unmeasured premise. One pull of a real finger outranked all of it.
-     * See `docs/qa/instruments-that-lied.md` entry 13: **documentation is not measurement.**
+     * **Documentation is not measurement.**
      *
      * A named function rather than an inline `< 0`, so there is exactly one place where this fact
      * lives and exactly one thing to change if a future platform version moves it.
@@ -196,7 +196,7 @@ object TerminalPull {
     /**
      * **Whether letting go now would send the key — the one boolean this gesture has.**
      *
-     * The owner: *"вообще не очевидно в какой момент я отпущу и пошлётся команда"*. Alpha is a ramp and
+     * It was not obvious at which moment letting go would send the key. Alpha is a ramp and
      * a ramp has no line in it; a person watching something fade in cannot see the instant it crossed.
      * So the label turns green, and green is driven from HERE.
      *

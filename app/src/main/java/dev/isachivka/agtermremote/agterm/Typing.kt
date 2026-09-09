@@ -3,12 +3,12 @@ package dev.isachivka.agtermremote.agterm
 /**
  * What the input bar is showing, as a value.
  *
- * ### The draft is not here — REQ-0046
+ * ### The draft is not here
  *
  * Until 2026-09-06 [Composing] carried the draft, and every transition out of it — sending a key,
  * reporting a result, dismissing the report — came back with an empty one. So pressing Esc, an arrow,
- * or overpulling the terminal into PgUp wiped whatever the owner had typed: *"если я введу что-то в
- * поле ввода а затем long прокруткой проскролю терминал то поле ввода очистится"*. The draft now lives
+ * or overpulling the terminal into PgUp wiped whatever the owner had typed - text in the field, an
+ * overpull to scroll the terminal, and the field came back empty. The draft now lives
  * in `AgtermSessions`, per session and on disk, and this type says only what MODE the bar is in.
  *
  * ### The draft is not terminal content and must never be drawn as if it were
@@ -39,7 +39,7 @@ sealed interface TypingState {
      * comment.
      *
      * [notice] is a sentence the input bar shows above the field, and it is **null almost always**.
-     * It exists for one case, REQ-0017: the laptop refused what was sent because of what the text
+     * It exists for one case: the laptop refused what was sent because of what the text
      * IS, so the owner is back here with their words intact and needs to know why.
      */
     data class Composing(val notice: Notice? = null) : TypingState
@@ -126,7 +126,7 @@ object Typing {
     fun failed(): TypingState = TypingState.Failed
 
     /**
-     * The laptop refused what was sent, because of what the text is. REQ-0017.
+     * The laptop refused what was sent, because of what the text is.
      *
      * Back to composing with a notice; the draft itself is restored by the caller, who still has the
      * text. The notice is chosen from what the phone can see in the text, never by reading the

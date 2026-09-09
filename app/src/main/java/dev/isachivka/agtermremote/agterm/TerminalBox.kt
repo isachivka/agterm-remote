@@ -105,13 +105,13 @@ import kotlin.math.roundToInt
  *
  * No cursor, no selection model, no zoom, no anchoring, no scrollback virtualisation. The transport
  * cannot supply the first two — `session.text` returns plain text by design — and the rest belong to
- * a terminal emulator, which is REQ-0010 and not this. PLAN-0009 names this box staying plain as the
+ * a terminal emulator, which this is not. This box staying plain is the
  * acceptance criterion, because the temptation to start that milestone early lands here.
  *
  * **Colour is the one exception, and it is opt-in.** Since 2026-09-05 the owner can ask, in Settings,
  * for each pane to be read through its zmx daemon instead of `session.text`; the bridge then sends
  * SGR, and [styled] hands the text to [Sgr] before it is drawn. Off, this box is exactly what it was.
- * `docs/qa/why-the-terminal-has-no-colour.md` records the other route, inside agterm itself.
+ * The other route to colour is inside agterm itself, and is not this app's to take.
  */
 @Composable
 fun TerminalBox(
@@ -134,7 +134,7 @@ fun TerminalBox(
     onMeasured: (Double) -> Unit = {},
     /**
      * Sends one key when the terminal is overpulled past the threshold — `pageup` or `pagedown`, and
-     * nothing else. REQ-0029, and see [TerminalPull] for the direction, which is settled.
+     * nothing else. See [TerminalPull] for the direction, which is settled.
      *
      * Defaulted to nothing so a preview or a test that does not care reads as it did before, and so
      * this box still has exactly one job when nobody wires it up.
@@ -185,7 +185,7 @@ fun TerminalBox(
             val usable = if (constraints.hasBoundedWidth) maxWidth.value.toDouble() else 0.0
             LaunchedEffect(usable) { onMeasured(usable) }
 
-            // **The overpull, REQ-0029.** All of the deciding is in TerminalPull, which is a pure
+            // **The overpull.** All of the deciding is in TerminalPull, which is a pure
             // object with unit tests; what is here is the three things only a composition can do -
             // collect the deltas the scrollers refused, move the content, and draw the icon.
             val thresholdPx = with(LocalDensity.current) {
@@ -253,8 +253,8 @@ fun TerminalBox(
             }
             val progress = TerminalPull.progress(pull.value, thresholdPx)
             if (progress > 0f) {
-                // **The words, not a chevron** - the owner: *"вместо иконочки со стрелочкой просто
-                // будем рисовать pgup pgdn чтобы было предельно понятно что происходит"*.
+                // **The words, not a chevron** - the owner asked for `pgup` and `pgdn` to be drawn
+                // instead of an arrow, so that what is about to happen is unmistakable.
                 //
                 // A chevron has to be interpreted, and it can mean three different things: the key
                 // that will fire, the way the content is about to move, or the way the finger went.
@@ -306,7 +306,7 @@ fun TerminalBox(
                 // available to the finger and Android's own machinery does the rest. So: no handles
                 // of ours, no magnifier, no floating menu, no copy button. All of that exists in the
                 // platform, behaves the way every other app behaves, and is what their thumb already
-                // knows. REQ-0026.
+                // knows.
                 //
                 // **Why this wraps the Text and not the scrolling Box.** The handles belong to the
                 // text, not to the viewport: a container around the scrollers would put selection
@@ -359,8 +359,8 @@ fun TerminalBox(
  * ### Two channels, and they must not leak into each other
  *
  * [alpha] is the ramp and answers *how far*. [armed] is a boolean and answers *now*. The owner ruled
- * out a colour for the second — *"давай не цвет, давай перед текстом добавим иконку галочки"* — and
- * ruled on how it must behave: *"она или полностью видна, или полностью не видна."*
+ * out a colour for the second, asking for a checkmark before the text instead, and ruled on how it
+ * must behave: it is either fully visible or not visible at all.
  *
  * **So the checkmark is not drawn at all unless armed, and its tint carries no alpha.** Not "drawn at
  * alpha 1", which would be the same picture by a route that a later edit could quietly turn into a
@@ -373,7 +373,7 @@ fun TerminalBox(
  *
  * ### The checkmark must not move the label, and the label stays centred
  *
- * *"он у тебя сейчас центрован, вот это надо сохранить."* Both halves of that, and the obvious fix
+ * The label is centred today and must stay centred. Both halves of that, and the obvious fix
  * satisfies one while quietly breaking the other: reserving a permanent slot for the icon means
  * nothing moves, and the label then sits half an icon right of centre for ever.
  *
@@ -501,7 +501,7 @@ private const val CHECK_DP = 16
 private const val CHECK_GAP_DP = 4
 
 /**
- * The overpull indicator, REQ-0029.
+ * The overpull indicator.
  *
  * Present only while a pull is in progress, so an instrumented test can assert that an ordinary scroll
  * never brings it into existence — which is the claim that the gesture cannot fire by accident.

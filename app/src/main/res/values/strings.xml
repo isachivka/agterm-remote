@@ -115,7 +115,7 @@
       in. There is no safe conditional version - nothing here can know a prompt is a password prompt.
     -->
     <!--
-      What the owner reads when the laptop refuses their text, REQ-0017.
+      What the owner reads when the laptop refuses their text.
 
       **Written for the person, not for the API.** The bridge answers with byte offsets and the names
       of every key in its allowlist - killline, linestart, lineend - and that sentence filled their
@@ -168,7 +168,7 @@
     <string name="agterm_key_left">←</string>
     <string name="agterm_key_right">→</string>
     <!--
-      **`^C` rather than `Ctrl-C`, and the same for `^A`, `^E`, `^U` below — REQ-0028.**
+      **`^C` rather than `Ctrl-C`, and the same for `^A`, `^E`, `^U` below.**
 
       Not a taste change; it is what makes the bar one row. The cells share the width equally, so the
       WIDEST label sets how many fit: `Ctrl-C` measures six monospace characters against `Enter`'s
@@ -182,14 +182,14 @@
     <string name="agterm_key_backspace">⌫</string>
     <string name="agterm_key_clear">Ctrl-L</string>
     <!--
-      Ctrl-E took Ctrl-D's place on the bar on 2026-07-31: *"ctrl+d кстати я вообще не знаю что зачем -
-      можешь убрать ctrl+e лучше"*. Ctrl-D is gone from the bridge's allowlist too, not merely from
+      Ctrl-E took Ctrl-D's place on the bar on 2026-07-31, at the owner's request: he did not know what
+      Ctrl-D was for. It is gone from the bridge's allowlist too, not merely from
       here, so there is no string for it any more either.
     -->
     <string name="agterm_key_lineend">^E</string>
     <!--
-      The third row, asked for by name on 2026-07-31: *"добавь эти две кнопки делай новый row: pgup
-      pgdown ctrl+a ctrl+u + one empty space for some extra button"*.
+      The third row, asked for by name on 2026-07-31: PgUp, PgDn, Ctrl-A and Ctrl-U, plus one empty
+      space for a later key.
 
       PgUp and PgDn are what scroll Claude's transcript from the phone. Measured rather than assumed:
       a Claude session has no terminal scrollback at all, so reading screen plus scrollback returns
@@ -204,7 +204,7 @@
     <string name="agterm_key_linestart">^A</string>
     <string name="agterm_key_killline">^U</string>
     <!--
-      The Claude button, REQ-0013. A content description rather than a label, because the cell draws
+      The Claude button. A content description rather than a label, because the cell draws
       the logo instead of text.
 
       It says what pressing it DOES. A screen reader announcing "Claude" would name a shape; the
@@ -212,9 +212,9 @@
     -->
     <string name="agterm_macro_claude">Start Claude</string>
     <!--
-      The fold, REQ-0028. It draws an ellipsis — the owner's own word, *"спрятать часть кнопок под
-      троеточие"* — so these two are content descriptions, not labels: a screen reader saying "ellipsis"
-      would announce a shape.
+      The fold. It draws an ellipsis - the owner's own idea, hiding some of the keys behind one - so
+      these two are content descriptions, not labels: a screen reader saying "ellipsis" would announce
+      a shape.
 
       They name what is behind the fold rather than the direction it moves, because "more" and "less"
       describe a control while "the keys for editing a line" describes what the owner is looking for.
@@ -227,9 +227,8 @@
       specific reason rather than reporting that something is unavailable.
     -->
     <!--
-      The recalibration reporting itself, REQ-0033. The owner could not tell the long press did
-      anything: *"анимацию надо сделать чтоб я понял когда сработало, ну или там нотификацию, хоть
-      что-то"*.
+      The recalibration reporting itself. The owner could not tell the long press did anything, and
+      asked for some sign that it had fired.
 
       **The count is the message.** A recalibration that lands on the same width changes nothing on
       screen, so "measured again" on its own is indistinguishable from nothing having happened. The
@@ -239,7 +238,7 @@
     <string name="agterm_notice_measured_body">Your laptop reports %1$d columns.</string>
     <string name="agterm_fit_why_unmeasured">Width control: waiting for the terminal to be measured</string>
     <!--
-      **Was "waiting for the laptop to say if it is on", which described a dead control** - REQ-0033.
+      **Was "waiting for the laptop to say if it is on", which described a dead control**.
       In this state the toggle has nothing to toggle between, but measuring again is still possible and
       is exactly what the owner wants when things are stuck. So the line names the action instead of
       the obstacle, and the tap does that action rather than nothing.
@@ -247,7 +246,7 @@
     <string name="agterm_fit_why_no_answer">Your laptop has not said if the fit is on. Press Fit to measure again.</string>
     <string name="agterm_fit_label">Fit</string>
     <!--
-      The pane toggle, REQ-0032. **Descriptions, not labels** - the control is an icon now, and the icon
+      The pane toggle. **Descriptions, not labels** - the control is an icon now, and the icon
       carries the state by drawing it.
 
       They were the words "Left" and "Right" on a segmented pair, which cost 116dp of a header the owner
@@ -258,7 +257,7 @@
       the destination would be the chevron ambiguity again, in the one place nobody would notice it - a
       screen reader cannot see the glyph that resolves it.
     -->
-    <!-- REQ-0035: the right pane may not exist yet, and this press is what brings it into being. Said
+    <!-- The right pane may not exist yet, and this press is what brings it into being. Said
          plainly, because a screen reader user gets no glyph and no laptop to look at. -->
     <string name="agterm_pane_left_a11y">Showing the left pane. Switch to the right one, opening it on your laptop if there is none.</string>
     <string name="agterm_pane_right_a11y">Showing the right pane. Switch to the left one.</string>
@@ -271,8 +270,8 @@
       disabled-reason line above is the honest thing to say then.
     -->
     <!--
-      **The hint rides free, REQ-0033.** The owner did not know when to use the long press - *"я сейчас
-      даже не понимаю в какой момент на кнопку нажимать"* - and a hint on a line of its own would have
+      **The hint rides free.** The owner did not know at which moment to reach for the long press,
+      and a hint on a line of its own would have
       cost about 16dp on the axis he has spent a week reclaiming. He removed exactly such a standing
       line once already, the arrow-key note, for exactly that reason.
 
@@ -308,11 +307,11 @@
     <string name="agterm_notice_no_change_title">No change on screen</string>
     <string name="agterm_notice_failed_title">Not delivered</string>
     <!--
-      Creating and renaming, REQ-0011. Each names the ACTION, because a failed create leaves the list
+      Creating and renaming. Each names the ACTION, because a failed create leaves the list
       exactly as it was and silence is indistinguishable from a press that was ignored.
 
       Neither body says WHY. From a phone, a laptop that is asleep, a filtered network and a bridge
-      that is restarting are the same silence, and the house rule since REQ-0005 is that the copy says
+      that is restarting are the same silence, and the house rule is that the copy says
       what was observed and never guesses between causes. Neither body carries the name either — the
       same rule that keeps session names and screen contents out of every message here.
     -->
@@ -332,7 +331,7 @@
     <string name="agterm_rename_too_long">A name can be %1$d characters.</string>
     <string name="agterm_rename_control">A name cannot contain a control character.</string>
     <!--
-      Delete, REQ-0012, inside the rename modal that a long press opens. There is no confirmation
+      Delete, inside the rename modal that a long press opens. There is no confirmation
       dialog: the long press and this press are the owner's own two deliberate acts.
 
       The workspace copy carries the SESSION COUNT because agterm takes every session inside a
@@ -360,7 +359,7 @@
     <string name="agterm_notice_delete_failed_title">Not deleted</string>
     <string name="agterm_notice_delete_failed_body">Your laptop did not confirm it. Nothing was removed.</string>
     <!--
-      REQ-0035. The icon has NOT moved, which is the fact this note exists to explain: without it, a
+      The icon has NOT moved, which is the fact this note exists to explain: without it, a
       tap that failed looks exactly like a tap the phone ignored, and the tap he would repeat is the
       one that starts a shell. Says what is still true rather than what went wrong, because the app
       does not know which of refuse, drop or vanish happened and must not guess.
@@ -368,14 +367,14 @@
     <string name="agterm_notice_pane_failed_title">Still on the left pane</string>
     <string name="agterm_notice_pane_failed_body">Your laptop did not open the second pane.</string>
     <!--
-      REQ-0037. Replaces a full-screen error that carried the bridge's own sentence about probe
+      Replaces a full-screen error that carried the bridge's own sentence about probe
       widths - addressed to us, out of a log, and nothing he could act on. Says what is true of HIS
       terminal: it did not change. The arithmetic stays in the bridge's log where it belongs.
     -->
     <string name="agterm_notice_fit_refused_title">Width unchanged</string>
     <string name="agterm_notice_fit_refused_body">Your laptop could not work out the width this time. Your window is as it was.</string>
     <!--
-      REQ-0041. NOT an error: this session's shape has never been measured, and measuring it moves his
+      NOT an error: this session's shape has never been measured, and measuring it moves his
       window about for several seconds, which must not happen because he tapped a row in a list. Says
       what to do rather than what went wrong, because nothing did.
     -->

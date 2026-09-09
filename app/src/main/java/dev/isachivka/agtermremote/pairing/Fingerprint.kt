@@ -6,7 +6,7 @@ import java.security.cert.X509Certificate
 /**
  * The SHA-256 of a certificate's DER, formatted for a person to compare against another screen.
  *
- * This is the authenticity mechanism for pairing, and the only step in REQ-0008 or REQ-0009 that
+ * This is the authenticity mechanism for pairing, and the only step in the whole design that
  * depends on a human. Both certificates are public, so neither leg of the exchange needs to be
  * private — it needs the owner to be sure they pinned the certificate they meant to. They read this
  * off the laptop and off the phone and check that it is the same string.

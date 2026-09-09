@@ -12,7 +12,7 @@ import dev.isachivka.agtermremote.R
  * while `compose-ui` moved to 1.11.4, and unpacking its 11,105 classes shows `deployed_code` and
  * `hard_drive` are simply not in it. The design is drawn in Material *Symbols*, which has moved on
  * from Material *Icons* — so 35 MB would have bought 24 of these 26 and left two to hand-author
- * anyway. See PLAN-0004.
+ * anyway. See
  *
  * Named for the glyph rather than for the use, deliberately. `Back` and `Key` would read better at
  * the call site right up until the moment somebody has to check one against the design, and the
@@ -53,21 +53,21 @@ object AppIcons {
     @DrawableRes val UnfoldLess = R.drawable.ic_unfold_less
     @DrawableRes val UnfoldMore = R.drawable.ic_unfold_more
 
-    /** Both create controls, REQ-0011. What is created is said by the label, not by the glyph. */
+    /** Both create controls. What is created is said by the label, not by the glyph. */
     @DrawableRes val Add = R.drawable.ic_add
 
     /**
-     * The Claude logo, REQ-0013 — Anthropic's own mark, converted from their SVG.
+     * The Claude logo — Anthropic's own mark, converted from their SVG.
      *
      * **The only glyph here that carries its own colour.** Every other icon in this file is white and
-     * tinted at the call site; this one has #D97757 baked in at the owner's word — *"оставлять
-     * оранжевым прямо чтобы был как оригинальный"* — so wherever it is drawn, the tint must be left
-     * unspecified or it will be silently repainted. See the drawable's header.
+     * tinted at the call site; this one has #D97757 baked in at the owner's word, who asked for it to
+     * stay orange rather than be repainted - so wherever it is drawn, the tint must be left
+     * unspecified. See the drawable's header.
      */
     @DrawableRes val Claude = R.drawable.ic_claude
 
     /**
-     * OpenAI's mark, for the Codex half of the limits tile — REQ-0045. Monochrome and tinted like the
+     * OpenAI's mark, for the Codex half of the limits tile. Monochrome and tinted like the
      * Material glyphs, unlike [Claude]: the owner asked for that one to keep its colour and said
      * nothing about this one, and a white knot on this palette is what OpenAI's own dark mode draws.
      */
@@ -99,7 +99,7 @@ object AppIcons {
     @DrawableRes val Extension = R.drawable.ic_extension
 
     /**
-     * The eight modules, which are illustrative and stay that way — REQ-0004. These are the only
+     * The eight modules, which are illustrative and stay that way. These are the only
      * icons here that do not correspond to anything the app can currently do.
      */
     @DrawableRes val Dns = R.drawable.ic_dns
@@ -112,15 +112,15 @@ object AppIcons {
     @DrawableRes val Terminal = R.drawable.ic_terminal
 
     /**
-     * The overpull's armed marker, REQ-0029 — the only glyph here that is **hand-authored rather than
+     * The overpull's armed marker — the only glyph here that is **hand-authored rather than
      * converted**, and its header says so.
      *
-     * It replaced a colour. The owner: *"давай не цвет, давай перед текстом добавим иконку галочки"*.
+     * It replaced a colour: the owner asked for a checkmark before the text instead.
      */
     @DrawableRes val Check = R.drawable.ic_check
 
     /**
-     * The split-pane indicator, REQ-0032 — the only glyphs here **derived from another app's toolbar**.
+     * The split-pane indicator — the only glyphs here **derived from another app's toolbar**.
      *
      * agterm draws this picture on the Mac and the owner reads it instantly; the phone showing him the
      * same one is most of the control's value. Measured from his screenshot rather than approximated —
@@ -134,7 +134,7 @@ object AppIcons {
 
     @DrawableRes val PaneRight = R.drawable.ic_pane_right
 
-    /** REQ-0005's module. The only glyph here that belongs to a tile which does something. */
+    /** A network check. */
     @DrawableRes val NetworkCheck = R.drawable.ic_network_check
 
     /** Glyph name to drawable, for the preview grid and for the test that counts them. */

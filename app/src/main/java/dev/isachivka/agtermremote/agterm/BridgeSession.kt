@@ -8,10 +8,10 @@ package dev.isachivka.agtermremote.agterm
  * there would be a field this app invented about the owner's machine.
  *
  * **This paragraph used to list `splits` among the things dropped, and that is no longer true.**
- * REQ-0032 widened the narrowing by exactly one field, because a feature finally needed it. Corrected
+ * The narrowing widened by exactly one field, because a feature finally needed it. Corrected
  * rather than deleted, because the sentence was the reason nobody looked for a split here.
  *
- * REQ-0034 then changed what that one field REPORTS without adding a second: the bridge reads agterm's
+ * What that one field REPORTS then changed, without a second being added: the bridge reads agterm's
  * surfaces and publishes whether a second pane exists, rather than passing on agterm's `split`, which
  * answers the narrower question of whether both panes are on screen. The narrowing is still one field
  * wide.
@@ -42,7 +42,7 @@ data class BridgeSession(
     val status: SessionStatus = SessionStatus.Idle,
     /**
      * Whether this session has a second pane the phone can address — **on screen or collapsed on the
-     * Mac, either way.** REQ-0034.
+     * Mac, either way.**
      *
      * **What makes the pane toggle exist at all.** False means the control is ABSENT, not disabled —
      * this project ruled on that when the key bar's spare cell was left empty rather than made a dead
@@ -60,9 +60,8 @@ data class BridgeSession(
      * toggle vanished *underneath* him, leaving him on the right pane with no way back. That cannot
      * happen: the row this field lives on is a snapshot taken when the session is opened — see
      * [AgtermSessions.togglePane] — so it does not change while he is looking at the screen. The
-     * defect was real and narrower, and the mistake is logged as entry 15 in
-     * `docs/qa/instruments-that-lied.md`: a failure mode derived from reading two gates, without
-     * asking when the value they read can change.
+     * defect was real and narrower, and the mistake was the same one twice: a failure mode derived
+     * from reading two gates, without asking when the value they read can change.
      *
      * The wire key is still `split` — see the bridge's `api.Session.SplitPane` for why the spelling
      * outlived the meaning.
@@ -76,7 +75,7 @@ data class BridgeSession(
 /**
  * A session's screen, or the news that it has not changed.
  *
- * `Unchanged` is not an empty screen and the difference is load-bearing: REQ-0008 measured that 95%
+ * `Unchanged` is not an empty screen and the difference is load-bearing: it was measured that 95%
  * of idle poll traffic conveys nothing, so the digest exists to avoid moving those bytes. Rendering
  * `Unchanged` as "no output" would put a blank terminal in front of the owner every time their
  * session was quiet — the opposite of what the digest is for.
@@ -131,7 +130,7 @@ data class ScreenUpdate(val text: ScreenText, val fit: FitState)
 data class FitState(val enabled: Boolean?, val columns: Int)
 
 /**
- * What the laptop did with an automatic re-apply — REQ-0041.
+ * What the laptop did with an automatic re-apply.
  *
  * ### Two outcomes, and neither of them is a failure
  *

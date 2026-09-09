@@ -66,7 +66,7 @@ class BridgeConnection private constructor(
                     // **The key is `split` and the field is `splitPane`, deliberately.** The wire name
                     // outlived its meaning: renaming the key would make this phone read nothing from a
                     // Mac app the owner has not updated yet and offer the toggle NEVER, which is worse
-                    // than the defect REQ-0034 fixes. Read the bridge's `api.Session.SplitPane`.
+                    // than the defect that distinction fixes. Read the bridge's `api.Session.SplitPane`.
                     splitPane = it.optBoolean("split"),
                     // `optString` returns "" for a field that is absent, and absent is exactly what
                     // an idle session sends - so the two arrive here as the same thing and both
@@ -187,7 +187,7 @@ class BridgeConnection private constructor(
     fun screen(
         sessionId: String,
         /**
-         * **Required, and deliberately not defaulted** — REQ-0032.
+         * **Required, and deliberately not defaulted**.
          *
          * A default here is how this went wrong in the first place: with no pane named, agterm gives a
          * read the on-screen half and a keystroke primary, so the phone showed one and typed into the
@@ -248,7 +248,7 @@ class BridgeConnection private constructor(
     }
 
     /**
-     * Asks the laptop for this session's right-hand pane, **creating one if there is none** — REQ-0035.
+     * Asks the laptop for this session's right-hand pane, **creating one if there is none**.
      *
      * ### One call, two outcomes, and the reply does not say which
      *
@@ -267,8 +267,8 @@ class BridgeConnection private constructor(
      * ### It starts a process on the owner's Mac
      *
      * The only call in this file that does. There is no confirmation in front of it, which is the
-     * owner's own ruling — *"если сессия есть мы её показываем, если её нет мы её создаём и потом
-     * показываем"* — taken after the mis-tap risk was put to him. **What bounds the damage is the
+     * owner's own ruling - if the pane is there it is shown, and if it is not it is created and then
+     * shown - taken after the mis-tap risk was put to him. **What bounds the damage is the
      * operation rather than a gesture:** it is idempotent, measured, so a repeated mis-tap cannot
      * produce a second shell.
      */
@@ -277,17 +277,17 @@ class BridgeConnection private constructor(
     }
 
     /**
-     * Shows one pane at the full width of the terminal area on his Mac — REQ-0042.
+     * Shows one pane at the full width of the terminal area on his Mac.
      *
-     * The owner: *"при переключении мы держим их фуллскрин"*. Showing a pane maximizes it, both
+     * Switching holds both panes full screen. Showing a pane maximizes it, both
      * directions, and **nothing is restored afterwards** — no undo when he leaves the session, and no
      * putting his split back when the phone stops looking.
      *
      * ### It moves focus on his machine, and that is ordinary
      *
      * Every earlier design here routed around a rule that the phone must never do that. The rule was
-     * invented on this side and he was never asked; when he was, he said *"не было никаких
-     * ограничений, ты их придумал"*. Recorded rather than deleted, because the next person to find a
+     * invented on this side and he was never asked; when he was, he said there had never been any
+     * such restriction. Recorded rather than deleted, because the next person to find a
      * call that moves his focus should know it was authorised.
      *
      * ### A separate verb from [openPane], and not a flag on it
@@ -321,7 +321,7 @@ class BridgeConnection private constructor(
      */
     fun type(
         sessionId: String,
-        /** Required for the same reason as [screen]'s, and it must be the SAME value. REQ-0032. */
+        /** Required for the same reason as [screen]'s, and it must be the SAME value. */
         pane: Pane,
         text: String? = null,
         key: String? = null,
@@ -333,7 +333,7 @@ class BridgeConnection private constructor(
             .put("pane", pane.wire)
         text?.let { request.put("text", it) }
         key?.let { request.put("key", it) }
-        // **Its own field, and the bridge refuses more than one of the three** - REQ-0017. What makes
+        // **Its own field, and the bridge refuses more than one of the three**. What makes
         // a paste different is not how it is sent but what it MEANS: the bridge wraps it in the
         // bracketed paste markers, so the far end puts the line breaks in its editor instead of
         // running them.
@@ -354,8 +354,7 @@ class BridgeConnection private constructor(
      * that stops being true.
      */
     /**
-     * Applies a fit the laptop ALREADY HAS for this geometry, and asks it to measure nothing —
-     * REQ-0041.
+     * Applies a fit the laptop ALREADY HAS for this geometry, and asks it to measure nothing.
      *
      * **The automatic path, and it never calibrates.** A calibration is a dozen resizes over several
      * seconds across a window the owner may not be looking at; starting one because he tapped a row in
@@ -401,7 +400,7 @@ class BridgeConnection private constructor(
         boxWidthDp: Int,
         characterWidthMilliDp: Int,
         marginDp: Int,
-        // **The long press, REQ-0016.** The bridge verifies a cached fit on every apply and corrects
+        // **The long press.** The bridge verifies a cached fit on every apply and corrects
         // itself when the terminal contradicts it; this is the owner saying "measure it again anyway".
         // Self-healing must not be the only escape from a wrong entry - that was the position they
         // were in on 2026-08-06, when the only way out was a text editor on the laptop.
@@ -420,7 +419,7 @@ class BridgeConnection private constructor(
                 .put("box_width_dp", boxWidthDp)
                 // Recorded beside the fit so a human reading that file can see WHY a key changed.
                 .put("margin_dp", marginDp)
-                // **Which half he is looking at, because that is what the fit is FOR** — REQ-0036.
+                // **Which half he is looking at, because that is what the fit is FOR**.
                 //
                 // The fit's target is the pane, not the window. Measured on his own machine: a session
                 // whose divider sits at 0.286 renders 47 columns on the left and 121 on the right, so
@@ -482,7 +481,7 @@ class BridgeConnection private constructor(
             throw WireException(WireFailure.Malformed, e)
         }
         if (!reply.optBoolean("ok")) {
-            // **Two kinds of no, and they are not interchangeable** - REQ-0017. A bridge that says
+            // **Two kinds of no, and they are not interchangeable**. A bridge that says
             // `refusal: "content"` is telling us the laptop is fine and this one request will never
             // work as sent; anything else, including an older bridge that says nothing, means what it
             // always meant. Reading the absence as "content" would be the dangerous direction: a dead
@@ -492,7 +491,7 @@ class BridgeConnection private constructor(
             }
             // `detail` is the far end's own words, present only when `error` is a sentence the BRIDGE
             // wrote. It is carried so it can be findable on the screen without being the screen — see
-            // PLAN-0023, and the day the owner's terminal said "failed to read surface buffer" and
+            // The day the owner's terminal said "failed to read surface buffer" and
             // nothing else.
             throw BridgeRefused(reply.optString("error"), reply.optString("detail"))
         }
@@ -516,7 +515,7 @@ class BridgeConnection private constructor(
          * allows — every line past that is metered data moved to be scrolled past.
          *
          * **This is also the reach of text selection, and that makes it a limit somebody meets rather
-         * than a number in a config.** Since REQ-0026 the terminal's text is selectable, and what a
+         * than a number in a config.** The terminal's text is selectable, and what a
          * finger can select is exactly what this constant fetched: the last 120 lines. More than a
          * screenful, and **not the session's history** — older output is not on the phone to be
          * selected, and no gesture can reach it.
@@ -589,7 +588,7 @@ const val REFUSAL_CONTENT = "content"
  * The laptop is fine; **this request will never work as sent.**
  *
  * A separate type rather than a flag on [BridgeRefused], because the two demand opposite handling and
- * a boolean is something a `catch` can forget to read. REQ-0017: a complaint about the owner's TEXT
+ * a boolean is something a `catch` can forget to read. A complaint about the owner's TEXT
  * used to arrive as [BridgeRefused], which drops the connection and replaces the screen — so pasting
  * a message with a line break in it looked exactly like the laptop falling over.
  *

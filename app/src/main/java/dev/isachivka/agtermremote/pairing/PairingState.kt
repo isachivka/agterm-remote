@@ -5,7 +5,7 @@ package dev.isachivka.agtermremote.pairing
  *
  * Held apart from Compose so the sequence can be tested without a device. The states below are the
  * ones the owner can actually be in, and the one that matters is [Comparing]: **it is the only step
- * in REQ-0008 or REQ-0009 that depends on a human**, and the only one where the app has decoded
+ * in the whole pairing design that depends on a human**, and the only one where the app has decoded
  * something valid and still must not act on it.
  *
  * ### Pairing has two halves and this app can only see one of them
@@ -16,7 +16,7 @@ package dev.isachivka.agtermremote.pairing
  *
  * So there is no state meaning "the laptop has pinned us", because there is no way to know it. What
  * [Paired] means is *this phone has done everything it can*, and the copy says exactly that. Claiming
- * otherwise is the defect REQ-0009 finding 1 was about: a screen reading `Paired` while
+ * otherwise is the defect this state exists to prevent: a screen reading `Paired` while
  * `chooseClientAlias` returned null, because "paired" had been made to mean one stored profile.
  */
 sealed interface PairingState {

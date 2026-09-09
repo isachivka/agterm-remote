@@ -28,11 +28,11 @@ import dev.isachivka.agtermremote.settings.StyledScreenStore
  *
  * A `ViewModel` survives configuration change **in memory**, which is all a scroll offset or a
  * connection needs. What should outlive the process is written to disk by the thing that owns it:
- * the collapsed set through [CollapsedWorkspacesStore] (REQ-0031) and the drafts through
- * [DraftStore] (REQ-0046).
+ * the collapsed set through [CollapsedWorkspacesStore] and the drafts through
+ * [DraftStore].
  *
  * Earlier versions of this comment argued from a rule that nothing about the terminal may be
- * persisted. The owner never set that rule and withdrew it on 2026-09-06 — see REQ-0046. What is and
+ * persisted. The owner never set that rule and withdrew it on 2026-09-06. What is and
  * is not written is decided per feature, on what the owner wants back after the process dies.
  *
  * The scroll offsets stay in memory for their own reason: nobody has asked for a reading position to
@@ -70,7 +70,7 @@ class AgtermViewModel(context: Context) : ViewModel() {
         // Read from disk on every poll — one small file at 2 Hz — so the switch in Settings takes
         // effect on the next reply without this ViewModel and that screen sharing any state.
         styled = { StyledScreenStore(appContext.filesDir.path).read() },
-        // REQ-0046: drafts survive the process, one file per session under filesDir/drafts.
+        // Drafts survive the process, one file per session under filesDir/drafts.
         drafts = DraftStore(appContext.filesDir.path),
     )
 
@@ -106,10 +106,10 @@ class AgtermViewModel(context: Context) : ViewModel() {
      * effect, while this is read during composition and has to recompose the list when it changes. A
      * plain field here would fold a group in memory and leave it drawn open.
      *
-     * ### It is persisted — REQ-0031
+     * ### It is persisted
      *
-     * This said *"never persisted"* once, citing a rule the owner then rejected: *"я не ставил таких
-     * требований, можешь хранить такие данные на телефоне"*. It is written through
+     * This said *"never persisted"* once, citing a rule the owner then rejected - he had set no such
+     * requirement, and this data may live on the phone. It is written through
      * [CollapsedWorkspacesStore] and read back on construction.
      *
      * ### Why it needed persisting rather than re-scoping

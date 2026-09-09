@@ -5,8 +5,8 @@
 -->
 <paths>
     <!--
-      The phone's own certificate, offered to the laptop through the share sheet - REQ-0009 finding 1,
-      which is what removed the adb-and-instrumentation route to pairing.
+      The phone's own certificate, offered to the laptop through the share sheet. It is what removed the
+      adb-and-instrumentation route to pairing.
 
       files-path again, for the same reason: app-internal storage, so nothing else on the phone can
       swap the file between this app writing it and the receiving app reading it. The certificate is
@@ -24,7 +24,7 @@
     <files-path name="pairing" path="pairing/outgoing/" />
     <!--
       There was a `pairing_incoming` entry here, granting the system camera app write access to
-      files/pairing/incoming/scan.jpg. REQ-0019 removed it with the route: the viewfinder reads frames
+      files/pairing/incoming/scan.jpg. It went with the route: the viewfinder reads frames
       in this process, so no other app is handed a place to write and nothing arrives from outside.
 
       One grant fewer. Removing an entry from this file is the only change here that reduces what
