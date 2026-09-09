@@ -55,8 +55,8 @@ public struct PairingCodeCommand: Equatable, Sendable {
     /// The command takes `--host` and `--port` with **no defaults, deliberately**: reusing the listen
     /// address produces a code that pairs and then cannot connect. The app passes both explicitly,
     /// from the stored address, and has no other address to pass.
-    public static func invocation(binary: String, address: DialAddress) -> BridgeSupervisor.Invocation {
-        BridgeSupervisor.Invocation(
+    public static func invocation(binary: String, address: DialAddress) -> CommandInvocation {
+        CommandInvocation(
             executable: binary,
             arguments: ["qr", "--host", address.host, "--port", String(address.port)],
         )

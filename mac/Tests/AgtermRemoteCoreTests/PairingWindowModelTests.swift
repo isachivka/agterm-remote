@@ -98,7 +98,7 @@ struct PairingCodeMakerTests {
         imageExists: Bool = true,
         status: Int32 = 0,
         output: String = "",
-        record: (@Sendable (BridgeSupervisor.Invocation) -> Void)? = nil,
+        record: (@Sendable (CommandInvocation) -> Void)? = nil,
     ) -> PairingCodeMaker {
         PairingCodeMaker(
             binary: "/opt/bin/bridgecert",

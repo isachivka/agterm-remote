@@ -28,11 +28,55 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// handler AND no enabled item, because `MenuModel.items` is given the same set. They cannot come
     /// apart, which is the structural version of the rule the owner met the hard way: on 2026-08-10
     /// every item but Quit was lit and inert.
+    ///
+    /// Start and Stop are in it **only when there is a bridge to start**. Until this change they were
+    /// permanently in it, over a supervisor that asked launchd about a job no installer here creates —
+    /// lit, pressable, and incapable. A missing binary is not a reason to offer the control and
+    /// apologise afterwards; it is a reason for the control to look as dead as it is.
     private var implemented: Set<MenuAction> {
-        [.quit, .showPairingCode, .setAddress, .startAtLogin, .startBridge, .stopBridge]
+        var actions: Set<MenuAction> = [.quit, .showPairingCode, .setAddress, .startAtLogin]
+        if bridge != nil { actions.formUnion([.startBridge, .stopBridge]) }
+        return actions
     }
 
     private let loginItem = LoginItem(service: SystemLoginItem())
+
+    /// The bridge, as a child process. `nil` when the binary is not where it should be — which is a
+    /// state the menu shows by greying two items rather than by failing at the press.
+    ///
+    /// Resolved once, at launch. A menu whose enabled items depended on a file system lookup
+    /// performed on every rebuild would change under somebody mid-press; the three places it looks
+    /// are `BridgeProcess.locate`.
+    private let bridge: BridgeProcess?
+
+    /// The bridge's state directory, and this app's only claim about where the owner's identity
+    /// lives. The bridge requires this and defaults it to nothing on purpose, so somebody has to
+    /// decide — and the app that spawns it is the one holding that answer.
+    static let stateDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appending(path: ".config/agterm-remote")
+
+    override init() {
+        let found = Self.findBridge()
+        bridge = found.map {
+            BridgeProcess(
+                launcher: ChildProcessLauncher(), executable: $0, stateDir: Self.stateDirectory)
+        }
+        super.init()
+        // Every transition rebuilds the menu, on the main thread. The state changes on whatever
+        // thread the child died on, which is never this one.
+        bridge?.onStateChange = { [weak self] state in
+            DispatchQueue.main.async { self?.bridgeChanged(to: state) }
+        }
+    }
+
+    /// Where the bridge is. The order and the reasoning live in `BridgeProcess.locate`, in the
+    /// library, so they are asserted by a test rather than by whoever next reads this file.
+    private static func findBridge() -> URL? {
+        BridgeProcess.locate(
+            resources: Bundle.main.resourceURL,
+            beside: URL(fileURLWithPath: CommandLine.arguments[0]),
+            stateDir: stateDirectory)
+    }
 
     func applicationDidFinishLaunching(_: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -43,14 +87,49 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // The title says what the SYSTEM says, from the first draw: reading it here rather than
         // assuming false means the menu is never briefly wrong after a relaunch.
         rebuildMenu()
+        watchForTermination()
+    }
+
+    /// **The bridge dies with this app, and that is stated three times because two of them fail.**
+    ///
+    /// `applicationWillTerminate` covers Quit and a logout. It does NOT cover `kill`, a crash, or a
+    /// force-quit, and a menu-bar app is killed that way more often than most: nobody sees a window
+    /// disappear, so nobody notices it did not shut down. The `SIGTERM` source covers the kill.
+    /// Neither covers `SIGKILL` or a crash, and nothing running in this process ever can — which is
+    /// why the bridge polls `--parent-pid` and exits on its own when this pid goes. It polls every
+    /// couple of seconds, so a crashed app leaves a bridge alive for up to that long. That is the
+    /// shape of the guarantee, not a hole in it: the alternative is a listener on the port the owner
+    /// deliberately exposed to the internet with no user interface left anywhere that could close it.
+    private func watchForTermination() {
+        // Ignored first, and that ordering is the whole trick: a dispatch source observes a signal
+        // rather than replacing its disposition, so without this the default action terminates the
+        // process before the handler is ever reached.
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.bridge?.stop()
+            // Not NSApp.terminate: a modal alert on screen would swallow it, and something that was
+            // sent SIGTERM has already been told to go rather than asked.
+            exit(0)
+        }
+        source.resume()
+        sigterm = source
+    }
+
+    /// Held so the source outlives the function that made it. A dispatch source with no strong
+    /// reference is cancelled, and the handler above would then never run.
+    private var sigterm: DispatchSourceSignal?
+
+    func applicationWillTerminate(_: Notification) {
+        bridge?.stop()
     }
 
     /// The certificate helper that renders a pairing code. Named once.
     ///
-    /// Like `BridgeSupervisor`, this is the shape the app had before it could speak to the bridge
-    /// directly. The bridge in this repository answers `pair-open` on its control socket, and the task
-    /// that rewrites the supervisor rewrites this with it: a code will be asked for over that socket
-    /// rather than by running a second binary the owner has to have built.
+    /// This is the shape the app had before it could speak to the bridge directly. The bridge in this
+    /// repository answers `pair-open` on its control socket, and the task that builds the pairing
+    /// panel replaces this: a code will be asked for over that socket rather than by running a second
+    /// binary the owner has to have built.
     private var certificateTool: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".config/agterm-bridge/bin/bridgecert").path
@@ -129,15 +208,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
-    private var supervisor: BridgeSupervisor { BridgeSupervisor(run: shell) }
-
     /// **Stop, with the cost said BEFORE the press takes effect.**
     ///
-    /// Stopping cuts any phone connected through the bridge, and unlike a restart there is no
-    /// supervisor bringing it back: `bootout` unloads the job so `KeepAlive` cannot revive it, and the
-    /// Start item is the only way back. The owner confirms that sentence first — afterwards would be
-    /// an apology, not a warning.
+    /// Stopping cuts any phone connected through the bridge, and nothing brings it back: there is no
+    /// supervisor above this app and no job anywhere that outlives it. The Start item is the only way
+    /// back. The owner confirms that sentence first — afterwards would be an apology, not a warning.
     @objc private func stopBridge() {
+        guard let bridge else { return }
         let confirm = NSAlert()
         confirm.messageText = "Stop the bridge?"
         confirm.informativeText =
@@ -149,55 +226,57 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
-        act("Stop") { try self.supervisor.stop() }
+        bridge.stop()
     }
 
-    /// Start, which after a stop means bootstrapping the job back from its plist — `kickstart` alone
-    /// cannot start a job launchd has unloaded.
-    @objc private func startBridge() {
-        act("Start") {
-            let plist = FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: "Library/LaunchAgents/\(BridgeSupervisor.label).plist")
-            if FileManager.default.fileExists(atPath: plist.path) {
-                // Bootstrapping an already-loaded job errors; kickstart is the right verb then. Try
-                // the one that matches the state we are actually in rather than guessing.
-                if self.supervisor.isRunning() { try self.supervisor.start() }
-                else { try? self.supervisor.startAfterStop(plist: plist); try self.supervisor.start() }
-            } else {
-                try self.supervisor.start()
-            }
-        }
-    }
-
-    /// Runs one supervisor action and **reports what launchd says afterwards, not what we asked for**.
+    /// Start it.
     ///
-    /// A refusal becomes a sentence the owner reads. A stop that quietly did nothing is
-    /// indistinguishable from a stop that worked, until they go looking for the process — which is the
-    /// silent-failure shape this whole branch is about.
-    private func act(_ what: String, _ body: () throws -> Void) {
-        do {
-            try body()
-        } catch {
-            notify("\(what) failed.", "launchd refused: \(error)")
-            rebuildMenu()
-            return
+    /// ### The port is the only half of the dial address that is also a local fact
+    ///
+    /// The bridge binds an address; the phone dials a different one, and confusing the two is what
+    /// produced a code that paired and then never connected. So the host is not reused: the bridge is
+    /// bound on every interface, and the stored dial address contributes only its port — the one
+    /// number that has to agree on both sides for a forwarded connection to land here.
+    ///
+    /// Without a stored address there is no port and nothing to bind, so the owner is sent to the
+    /// screen that fixes that instead of being shown a failure.
+    @objc private func startBridge() {
+        guard let bridge else { return }
+        guard case .success(let address) = AddressPreference.read() else {
+            notify(
+                "There is no address yet.",
+                "The bridge listens on the port your phone will dial, and that port comes from the "
+                    + "address you set. Set it first, from this menu.")
+            return openPairing(focusAddress: true)
         }
-        let running = supervisor.isRunning()
-        notify(
-            running ? "The bridge is running." : "The bridge is not running.",
-            running
-                ? "Asked launchd after the change; it reports the job alive."
-                : "Asked launchd after the change; it reports no running job. Start it from this menu.",
-        )
+        do {
+            try bridge.start(listen: "0.0.0.0:\(address.port)", socket: nil)
+        } catch {
+            // A spawn that could not happen at all — the binary vanished between launch and now.
+            notify("The bridge would not start.", "\(error)")
+        }
+    }
+
+    /// **What the bridge did, not what we asked it to do.**
+    ///
+    /// Every transition arrives here, including the ones nobody pressed: a bridge that dies on its
+    /// own backs off, retries, and eventually gives up, and the giving up is the moment the owner has
+    /// to be told. `.starting` and `.running` rebuild the menu silently — an alert per restart would
+    /// be a dialogue box every half second during a failing bind.
+    private func bridgeChanged(to state: BridgeState) {
         rebuildMenu()
+        if case .failed(let sentence) = state {
+            notify("The bridge is not running.", sentence)
+        }
     }
 
     /// Rebuilt after anything that changes what the menu should say. The titles come from the model,
     /// and the model is given the system's answer rather than our memory of it.
     private func rebuildMenu() {
-        // Asked, not assumed: Start and Stop are enabled by what launchd reports, so the menu cannot
-        // offer Stop for a job that is already down.
-        let running = supervisor.isRunning()
+        // Asked, not assumed — and now there is somewhere to ask. The bridge is this app's own child,
+        // so `running` is whether we hold a live pid rather than an opinion we are keeping: the menu
+        // cannot offer Stop for something that is not there.
+        let running = if case .running = bridge?.state { true } else { false }
         item?.menu = menu(
             status: BridgeStatus(
                 address: DialAddress(host: "-", port: 0),
@@ -270,8 +349,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         return alert.runModal() == .alertSecondButtonReturn
     }
 
-    /// One place a process is started, so the allow-list in BoundaryTests has one thing to check.
-    private let shell: BridgeSupervisor.Runner = { invocation in
+    /// Runs the certificate helper and hands back what it said. Short-lived, waited on, and nothing
+    /// like the bridge: that one is spawned and supervised by `ChildProcessLauncher`, which is why
+    /// the two are separate rather than one runner asked to be both.
+    private let shell: CommandRunner = { invocation in
         let task = Process()
         task.executableURL = URL(filePath: invocation.executable)
         task.arguments = invocation.arguments
@@ -325,8 +406,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         case .showPairingCode: #selector(showPairingCode)
         case .setAddress: #selector(setAddress)
         case .startAtLogin: #selector(toggleStartAtLogin)
-        case .startBridge: #selector(startBridge)
-        case .stopBridge: #selector(stopBridge)
+        // Wired only when there is a bridge binary to run. This is the same condition `implemented`
+        // uses and it has to be, because the assertion below holds them to each other: an item with a
+        // handler must be offered, and an item with none must not be lit.
+        case .startBridge: bridge == nil ? nil : #selector(startBridge)
+        case .stopBridge: bridge == nil ? nil : #selector(stopBridge)
         // Not yet built. They are ABSENT from `implemented`, so they are also not enabled - a menu
         // item that looks pressable and is not is the defect the owner met on 2026-08-10.
         default: nil

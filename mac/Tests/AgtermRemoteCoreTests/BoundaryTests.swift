@@ -74,12 +74,18 @@ struct BoundaryTests {
     ///
     /// The list has only ever grown by a line in this file. It began as launchctl alone; the
     /// certificate helper was added so a pairing code could be rendered by the side that owns the
-    /// payload. It also **shrank** by a line: `pin` went with the drag-and-drop certificate handover,
+    /// payload. It has **shrunk** twice: `pin` went with the drag-and-drop certificate handover,
     /// because the phone now proves itself during enrolment and there is no PEM for anybody to carry
-    /// across. A boundary that only ever widens is a boundary nobody is reading.
-    private static let allowedExecutables = ["/bin/launchctl", "bridgecert"]
+    /// across — and `/bin/launchctl` went when the bridge stopped being a launchd job. It was never
+    /// one here: no plist is written in this repository and no installer writes one, so every Start
+    /// and Stop was a request against a label launchd had never heard of. The app holds the bridge as
+    /// a child now, so the process it launches is the bridge itself.
+    ///
+    /// A boundary that only ever widens is a boundary nobody is reading. This one is narrower today
+    /// than it was, and it names the bridge by the same constant the launch uses.
+    private static let allowedExecutables = [BridgeProcess.executableName, "bridgecert"]
 
-    @Test func theOnlyProcessesLaunchedAreLaunchctlAndTheCertificateTool() throws {
+    @Test func theOnlyProcessesLaunchedAreTheBridgeAndTheCertificateTool() throws {
         for source in try sources() {
             for forbidden in ["/bin/sh", "/bin/bash", "/bin/zsh", "-c \"", "system(", "posix_spawn", "NSTask"] {
                 #expect(!source.text.contains(forbidden), "\(source.name) can run a shell (\(forbidden))")
@@ -108,6 +114,44 @@ struct BoundaryTests {
         for destructive in ["pin", "mint", "rotate", "delete"] {
             #expect(!invocation.arguments.contains(destructive), "making a code can run \(destructive)")
         }
+    }
+
+    /// **Starting the bridge names no agterm socket and no agterm verb.**
+    ///
+    /// The bridge's `--socket` flag exists for a non-default control socket, and the app passing
+    /// nothing is what keeps that path out of this process entirely. The argv is asserted rather than
+    /// the source, because this is the one place where a string this app must not know would arrive
+    /// as a value rather than as a literal.
+    @Test func theBridgeIsStartedWithoutBeingToldWhereAgtermIs() throws {
+        let launcher = ArgvOnlyLauncher()
+        let bridge = BridgeProcess(
+            launcher: launcher,
+            executable: URL(fileURLWithPath: "/opt/agterm-remote/agterm-remote-bridge"),
+            stateDir: URL(fileURLWithPath: "/opt/agterm-remote/state"))
+
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        for socket in Self.sockets {
+            #expect(!launcher.arguments.contains { $0.contains(socket) })
+        }
+        for verb in Self.verbs {
+            #expect(!launcher.arguments.contains { $0.contains(verb) })
+        }
+    }
+
+    private final class ArgvOnlyLauncher: ProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _arguments: [String] = []
+        var arguments: [String] { lock.withLock { _arguments } }
+
+        func launch(
+            _: URL, _ arguments: [String], onExit _: @escaping @Sendable (Int32) -> Void,
+        ) throws -> Int32 {
+            lock.withLock { _arguments = arguments }
+            return 4242
+        }
+
+        func terminate(_: Int32) {}
     }
 
     /// The controls. Each detector is shown a violation in code and must see it, and shown the same
