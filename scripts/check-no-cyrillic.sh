@@ -14,6 +14,15 @@
 # rejected all of them would be switched off within a week, and then it would protect nothing. It
 # refuses the Cyrillic blocks and nothing else.
 #
+# EVERY SKIP IS COUNTED AND NAMED. This guard has had four defects and all four were the same
+# shape: it declined to look at a file and said nothing, so the run printed the word that means fine.
+# A path it could not spell, a NUL byte, an encoding it could not decode, a symlink it could not
+# follow - nobody predicted any of them, and nobody could have, because the symptom of each was a
+# clean run. So the accounting is the fix for the family rather than for its members: the summary
+# line says how many files were read and how many were declined, broken down by reason. The fifth
+# member of this family shows up as a number somebody did not expect, on a run that is still green,
+# instead of not showing up at all.
+#
 # WHAT IS TESTED WHERE. The self-test below proves the PATTERN: that it still matches every block and
 # still tolerates their neighbours, checked on every run so a broken pattern can never report a clean
 # tree. It cannot prove the LOOP - which files are read, which are skipped, and which are refused -
@@ -192,19 +201,24 @@ trap - EXIT
 # Tracked files only: a gitignored file is not what this protects, and text has to be tracked to be
 # pushed.
 #
+# `-s`, so every entry arrives with its MODE and its object id. The mode is read from the index
+# rather than from the filesystem, which matters twice: a symlink is a symlink even when it dangles,
+# and a submodule is a gitlink with nothing to open. Deciding what a thing is by whether `[ -f ]`
+# happens to succeed on it was how three separate files ended up unexamined.
+#
 # `-z`, and it is not a nicety. Without it `git ls-files` renders a path containing any byte above
-# ASCII in C-quoted form - "Modal\320\236\320\272\320\275\320\276.swift", quotes and
-# backslash escapes included - because `core.quotePath` defaults to true. That name never matches a
-# file on disk, the `[ -f ]` test below fails, the loop skips the file IN SILENCE, and a source file
-# with a Cyrillic name and a Russian body reported OK. A file named in Russian is the likeliest file
-# in the tree to be written in Russian, so the one path the guard could not see was the one it most
-# needed to. `-z` emits raw bytes with a NUL terminator and no quoting at all.
+# ASCII in C-quoted form - "Modal\320\236\320\272\320\275\320\276.swift", quotes and backslash
+# escapes included - because `core.quotePath` defaults to true. That name never matches a file on
+# disk, the loop skipped the file IN SILENCE, and a source file with a Cyrillic name and a Russian
+# body reported OK. A file named in Russian is the likeliest file in the tree to be written in
+# Russian, so the one path the guard could not see was the one it most needed to.
 #
 # The listing goes to a file rather than a variable: a shell variable cannot hold a NUL byte, so
 # capturing `-z` output in one silently mangles every path.
 listing="$(mktemp)"
-trap 'rm -f "$listing"' EXIT
-if ! git -C "$root" ls-files -z > "$listing"; then
+blob="$(mktemp)"
+trap 'rm -f "$listing" "$blob"' EXIT
+if ! git -C "$root" ls-files -s -z > "$listing"; then
   echo "::error::check-no-cyrillic.sh could not list the tracked files in '$root'."
   echo "    Refusing to report a clean tree on the strength of an empty listing."
   exit 2
@@ -219,10 +233,21 @@ if [ ! -s "$listing" ]; then
 fi
 
 # Extensions whose files are not text and are not expected to be readable. A file with one of these
-# is skipped; anything else this script cannot decode is REFUSED, below. The list is here, in a diff,
-# rather than implied by a heuristic - which is the difference between a decision and an accident.
-binary_extensions="png jpg jpeg gif webp ico icns pdf zip jar apk aab keystore jks p12 woff woff2 \
-ttf otf mp3 mp4 mov so dylib dll a o bin wasm class ser gz bz2 xz zst 7z"
+# is skipped - counted and named in the summary, never in silence; anything else this script cannot
+# decode is REFUSED, below. The list is here, in a diff, rather than implied by a heuristic, which is
+# the difference between a decision and an accident.
+#
+# `plist` is here because a COMPILED plist is binary; an ordinary XML one decodes fine and is scanned
+# like any other text, so listing it costs nothing.
+#
+# `.strings` is deliberately NOT here, and the reason is the whole point of this guard. macOS writes
+# localisation strings in UTF-16, so the first one committed will fail the decode check and somebody
+# will reach for this list - and a localisation file is the likeliest file in any repository to hold
+# Russian. Convert it to UTF-8, which every Apple tool reads; do not teach the guard to look away
+# from the one place the thing it hunts actually lives.
+binary_extensions="png jpg jpeg gif webp bmp tiff heic avif ico icns pdf zip jar aar apk aab tar tgz \
+gz bz2 xz zst 7z dmg keystore jks p12 pfx der cer crt woff woff2 ttf otf mp3 mp4 mov wav webm so \
+dylib dll a o bin wasm class ser plist"
 
 is_binary_asset() { # $1 = path
   local lower extension
@@ -234,38 +259,124 @@ is_binary_asset() { # $1 = path
 }
 
 found=0
-unreadable=0
-skipped=0
-while IFS= read -r -d '' path; do
+refused=0
+read_worktree=0
+read_index=0
+read_link=0
+declined_binary=0
+declined_gitlink=0
+
+# `subject` is what the error line calls the thing that was scanned, because a symlink's blob is a
+# NAME and not a body, and telling somebody there is Cyrillic "in" a symlink sends them looking
+# inside a file that does not have an inside.
+while IFS= read -r -d '' entry; do
+  meta="${entry%%$'\t'*}"
+  path="${entry#*$'\t'}"
+  mode="${meta%% *}"
+  rest="${meta#* }"
+  object="${rest%% *}"
   file="$root/$path"
-  [ -f "$file" ] || continue
+
+  case "$mode" in
+    160000)
+      # A submodule. There is no blob and no file - the gitlink records a commit id in another
+      # repository, which has its own tree and needs its own run of this guard.
+      declined_gitlink=$((declined_gitlink + 1))
+      continue
+      ;;
+    120000)
+      # A SYMLINK, and what is committed is the target's NAME, not whatever it points at.
+      #
+      # Both directions were wrong before this. A link whose target is named in Russian put Cyrillic
+      # straight into the blob, and on a fresh clone where the target is absent the link dangled,
+      # `[ -f ]` failed, and the guard printed OK - reproduced on a real clone. The converse was a
+      # false positive waiting to happen: a link pointing outside the repository was scanned as
+      # though the far end's contents were the committed data, when the committed data is one line
+      # of path.
+      #
+      # Reading the blob answers both, and never follows the link.
+      if ! git -C "$root" cat-file blob "$object" > "$blob" 2>/dev/null; then
+        echo "::error file=$path::this symlink's target could not be read out of the object store"
+        refused=1
+        continue
+      fi
+      # A symlink's target is a path, so it ends without a newline; the scan wants a line.
+      printf '\n' >> "$blob"
+      target="$blob"
+      subject="the name this symlink points at contains Cyrillic"
+      read_link=$((read_link + 1))
+      ;;
+    *)
+      if [ -h "$file" ]; then
+        # The index says regular and the working tree holds a symlink. Following it would read a file
+        # nobody committed, so the committed blob is what gets scanned.
+        git -C "$root" cat-file blob "$object" > "$blob" 2>/dev/null || true
+        target="$blob"
+        subject="Cyrillic text was committed here"
+        read_index=$((read_index + 1))
+      elif [ -f "$file" ]; then
+        if [ ! -r "$file" ]; then
+          # Not "invalid UTF-8" - that was the wrong cause and the wrong sentence. The file may be
+          # perfectly good text; this process cannot open it.
+          echo "::error file=$path::this file could not be opened for reading (check its permissions)"
+          echo "    A file this guard cannot open is not a file it has checked, so the run does not"
+          echo "    go green on it. Restore read permission, or untrack it."
+          refused=1
+          continue
+        fi
+        target="$file"
+        subject="Cyrillic text was committed here"
+        read_worktree=$((read_worktree + 1))
+      else
+        # Tracked, and not in the working tree: staged and then deleted, or a sparse checkout. What
+        # would be pushed is the blob, so the blob is what is scanned. Skipping it was the same
+        # silent hole in a fourth costume.
+        if ! git -C "$root" cat-file blob "$object" > "$blob" 2>/dev/null; then
+          echo "::error file=$path::this file is not in the working tree and its blob could not be read"
+          refused=1
+          continue
+        fi
+        target="$blob"
+        subject="Cyrillic text was committed here"
+        read_index=$((read_index + 1))
+      fi
+      ;;
+  esac
 
   # A file this script cannot decode as UTF-8 is one of two things, and they have opposite answers.
   #
   # An icon is binary: its bytes are not characters, some of them land in these ranges by chance, and
-  # reporting Cyrillic in a PNG is how a guard gets deleted. It is skipped, and the extension that
-  # said so is on a list somebody wrote down.
+  # reporting Cyrillic in a PNG is how a guard gets deleted. It is skipped - counted and named, never
+  # in silence - and the extension that said so is on a list somebody wrote down.
   #
-  # Anything else is text in an encoding this script cannot read - UTF-16, CP1251 - and Russian in
-  # either walks straight through a scan that skips what it cannot decode. Skipping it and printing
-  # OK is the exact failure this file's header warns about: reporting on a fraction of the tree while
-  # claiming to have checked all of it. So it is refused, loudly, and the run does not go green until
-  # somebody decides which of the two it is.
-  if ! iconv -f UTF-8 -t UTF-8 < "$file" >/dev/null 2>&1; then
+  # Anything else is text in an encoding this script cannot read, and Russian in UTF-16 or CP1251
+  # walks straight through a scan that skips what it cannot decode. So it is refused, with BOTH ways
+  # out named: convert it if it is text, list it if it is not. A refusal that offers one answer sends
+  # whoever hits it towards the other one by guessing.
+  if ! iconv -f UTF-8 -t UTF-8 < "$target" >/dev/null 2>&1; then
     if is_binary_asset "$path"; then
-      skipped=$((skipped + 1))
+      declined_binary=$((declined_binary + 1))
       continue
     fi
+    extension="${path##*.}"
+    [ "$extension" = "$path" ] && extension="(none)"
     echo "::error file=$path::this file is not valid UTF-8, so this guard cannot read it"
     echo "    Text in UTF-16 or CP1251 passes an encoding-blind scan untouched, so a file that"
-    echo "    cannot be decoded is never reported as clean. Convert it to UTF-8, or - if it really"
-    echo "    is a binary asset - add its extension to binary_extensions in this script."
-    unreadable=1
+    echo "    cannot be decoded is never reported as clean. One of these two, and they are not"
+    echo "    interchangeable:"
+    echo "      - it is TEXT in another encoding - a macOS .strings file is UTF-16 - so convert it:"
+    echo "            iconv -f UTF-16 -t UTF-8 '$path' > '$path.utf8' && mv '$path.utf8' '$path'"
+    echo "        A localisation file is the likeliest file in any repository to hold Russian. It"
+    echo "        belongs in the scan, not on the list below."
+    echo "      - it is a BINARY asset, in which case add its extension '$extension' to"
+    echo "        binary_extensions in scripts/check-no-cyrillic.sh, where the decision is visible"
+    echo "        in a diff."
+    refused=1
     continue
   fi
 
-  if matches="$(scan "$file")"; then
-    echo "::error file=$path::Cyrillic text was committed here"
+  if matches="$(scan "$target")"; then
+    echo "::error file=$path::$subject"
     # Line numbers, never the matched text. The fragments this exists to catch are the owner's
     # private words, and echoing them into a public CI log would finish the job the commit started.
     echo "$matches" | while IFS= read -r line; do
@@ -275,16 +386,30 @@ while IFS= read -r -d '' path; do
   fi
 done < "$listing"
 
+# --- The accounting ----------------------------------------------------------------------------
+#
+# Printed on every run, pass or fail. This is the fix for the FAMILY the four holes belonged to: a
+# guard that can decline to look at something has to say how many things it declined to look at and
+# why, or its silence about them is indistinguishable from there being none.
+scanned=$((read_worktree + read_index + read_link))
+declined=$((declined_binary + declined_gitlink))
+accounting() {
+  [ "$declined_binary" -ne 0 ] && echo "    declined $declined_binary: binary asset(s), skipped by extension"
+  [ "$declined_gitlink" -ne 0 ] && echo "    declined $declined_gitlink: submodule gitlink(s), which are scanned in their own repository"
+  [ "$read_index" -ne 0 ] && echo "    read $read_index from the index rather than the working tree"
+  [ "$read_link" -ne 0 ] && echo "    read $read_link symlink target name(s) rather than what they point at"
+  return 0
+}
+
 if [ "$found" -ne 0 ]; then
   echo "::error::Every committed file in this repository is English. Cyrillic here is almost always"
   echo "    text carried over from the private repository this project was ported out of - translate"
   echo "    it or delete it, and check the rest of the same file before pushing again."
 fi
-if [ "$found" -ne 0 ] || [ "$unreadable" -ne 0 ]; then
+if [ "$found" -ne 0 ] || [ "$refused" -ne 0 ]; then
+  echo "    scanned $scanned, declined $declined"
+  accounting
   exit 1
 fi
-if [ "$skipped" -ne 0 ]; then
-  echo "OK: no Cyrillic in any tracked file ($skipped binary asset(s) skipped by extension)."
-else
-  echo "OK: no Cyrillic in any tracked file."
-fi
+echo "OK: no Cyrillic in any tracked file (scanned $scanned, declined $declined)."
+accounting
