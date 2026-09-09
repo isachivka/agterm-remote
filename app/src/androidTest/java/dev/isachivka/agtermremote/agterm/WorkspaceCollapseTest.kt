@@ -67,7 +67,7 @@ class WorkspaceCollapseTest {
                         typing = TypingState.Closed,
                         onOpenTyping = {}, onCloseTyping = {}, onDraftChange = {},
                         onSendText = {}, onSendKey = {}, onPickFile = {},
-                        onDisconnect = {}, onPair = {}, onBack = {},
+                        onDisconnect = {}, onPair = {}, onOpenSettings = {},
                         onListAnchor = { anchor = it },
                         closedWorkspaces = closed,
                         onClosedWorkspaces = { closed = it },

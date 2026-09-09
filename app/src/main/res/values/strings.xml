@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Beware of Sugar</string>
+    <!--
+      The launcher label, and the name a Play listing is written around.
+
+      **"Remote for agterm", and not "Agterm Remote".** The second reads as an official agterm
+      product, which this is not: it is a third-party client for somebody else's terminal, and a
+      store listing that implies otherwise is a claim about who made agterm.
+    -->
+    <string name="app_name">Remote for agterm</string>
 
     <!-- Spoken by a screen reader for controls that are an icon and nothing else. -->
     <string name="nav_back">Back</string>

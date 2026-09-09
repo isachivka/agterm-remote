@@ -67,7 +67,7 @@ class PaneToggleTest {
             fit = FitState(enabled = null, columns = 0),
             typing = TypingState.Closed,
             onOpenTyping = {}, onCloseTyping = {}, onDraftChange = {}, onSendText = {}, onSendKey = {},
-            onPickFile = {}, onDisconnect = {}, onPair = {}, onBack = {},
+            onPickFile = {}, onDisconnect = {}, onPair = {}, onOpenSettings = {},
             paneShown = shown,
             onTogglePane = onTogglePane,
         )

@@ -101,7 +101,15 @@ fun AgtermScreen(
     /** The open session's draft. Beside [typing], not inside it; see TypingBar. */
     draft: String = "",
     onPair: () -> Unit,
-    onBack: () -> Unit,
+    /**
+     * Settings, which is where pairing lives.
+     *
+     * **This slot used to be `onBack`, and the swap is the whole of "the terminal is the app".** The
+     * terminal is the root destination now, so there is no parent screen for a back arrow to lead to
+     * - and pairing, which the deleted launcher used to reach through a tile, would otherwise be
+     * reachable only by failing to sign.
+     */
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     // Hoisted from the ViewModel so panning right and then rotating does not drop the owner back to
     // column zero - on the very gesture that gives them more columns to read.
@@ -240,7 +248,11 @@ fun AgtermScreen(
                 onCloseTyping()
             }
             BackWithin.Action.CloseSession -> onCloseSession()
-            BackWithin.Action.LeaveScreen -> onBack()
+            // Unreachable, and deliberately not wired to anything. The handler below is enabled only
+            // while `handles` is true, and the arrow that also calls this is drawn only then - so
+            // "leave the screen" is left to Android, where at the root of the app it means leaving
+            // the app. A branch here would be a second, quieter way out of a screen that has one.
+            BackWithin.Action.LeaveScreen -> Unit
         }
     }
 
@@ -267,18 +279,38 @@ fun AgtermScreen(
             modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                // Back means "out of the session" first and "out of the module" second, so the
-                // owner is never one tap from losing the list they just loaded.
-                // The same function the gesture calls - see goBack above.
-                onClick = goBack,
-                modifier = Modifier.testTag(TAG_BACK),
-            ) {
-                Icon(
-                    painter = painterResource(AppIcons.ArrowBack),
-                    contentDescription = stringResource(R.string.nav_back),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
+            // **Two buttons in one slot, and which one is drawn is the same question the back
+            // gesture asks.** Inside a session, back means "out of the session" and the arrow is the
+            // arrow - the same function the gesture calls, see goBack above. On the list there is
+            // nothing within this screen to come back from, so an arrow would either do nothing or
+            // close the app; the slot carries the way into Settings instead, which is the route the
+            // deleted launcher used to provide and the only way to reach pairing before anything is
+            // paired.
+            //
+            // Asked through `BackWithin.handles`, not through a second condition of its own, so the
+            // button and the gesture cannot disagree about where the owner is.
+            if (BackWithin.handles(typingOpen = typingIsOpen, inSession = watching != null)) {
+                IconButton(
+                    onClick = goBack,
+                    modifier = Modifier.testTag(TAG_BACK),
+                ) {
+                    Icon(
+                        painter = painterResource(AppIcons.ArrowBack),
+                        contentDescription = stringResource(R.string.nav_back),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.testTag(TAG_OPEN_SETTINGS),
+                ) {
+                    Icon(
+                        painter = painterResource(AppIcons.Tune),
+                        contentDescription = stringResource(R.string.settings_title),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
             // **Workspace and session, in ONE row.** The owner asked to see the workspace in the
             // header of an open session; they also asked this morning for the chrome to stop eating
@@ -1740,6 +1772,9 @@ private val BadgeShape = RoundedCornerShape(9.dp)
 
 internal const val TAG_DISCONNECT = "agterm_disconnect"
 internal const val TAG_BACK = "agterm_back"
+
+/** The way into Settings, in the slot the back arrow occupies inside a session. */
+const val TAG_OPEN_SETTINGS = "agterm_open_settings"
 internal const val TAG_LIST = "agterm_list"
 /** The workspace heading rows, so a test can count the structure without reading any name. */
 internal const val TAG_WORKSPACE_HEADING = "agterm_workspace_heading"

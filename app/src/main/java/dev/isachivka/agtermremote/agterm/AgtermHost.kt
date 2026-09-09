@@ -38,7 +38,7 @@ import dev.isachivka.agtermremote.pairing.PhoneIdentity
 @Composable
 fun AgtermHost(
     onPair: () -> Unit,
-    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -127,7 +127,7 @@ fun AgtermHost(
         onPickFile = { runCatching { pickFiles.launch(arrayOf("*/*")) } },
         onDisconnect = { sessions.disconnect() },
         onPair = onPair,
-        onBack = onBack,
+        onOpenSettings = onOpenSettings,
         modifier = modifier,
         // The list's remembered position lives in the ViewModel beside the terminal's, so opening a
         // session and coming back finds it where they left it.

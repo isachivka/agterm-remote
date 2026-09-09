@@ -100,7 +100,9 @@ fun App(modifier: Modifier = Modifier) {
             // Pairing lives in the settings screen, so an identity failure sends the owner there
             // rather than offering a retry that cannot succeed.
             onPair = { stack = stack.push(Screen.Settings) },
-            onBack = { stack = stack.pop() },
+            // The same destination, reached deliberately rather than by failing. Both push rather
+            // than assigning, so back from Settings returns to the terminal either way.
+            onOpenSettings = { stack = stack.push(Screen.Settings) },
             modifier = modifier,
         )
 

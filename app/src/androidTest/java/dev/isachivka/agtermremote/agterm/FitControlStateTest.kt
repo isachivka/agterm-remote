@@ -42,7 +42,7 @@ class FitControlStateTest {
                         fit = fitState,
                         typing = TypingState.Closed,
                         onOpenTyping = {}, onCloseTyping = {}, onDraftChange = {}, onSendText = {}, onSendKey = {},
-                        onPickFile = {}, onDisconnect = {}, onPair = {}, onBack = {},
+                        onPickFile = {}, onDisconnect = {}, onPair = {}, onOpenSettings = {},
                     )
                 }
             }

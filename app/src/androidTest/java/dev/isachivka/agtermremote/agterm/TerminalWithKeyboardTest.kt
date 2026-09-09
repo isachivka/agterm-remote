@@ -76,7 +76,7 @@ class TerminalWithKeyboardTest {
                         draft = draft,
                         onOpenTyping = {}, onCloseTyping = {}, onDraftChange = {}, onSendText = {}, onSendKey = {},
                         onPickFile = {},
-                        onDisconnect = {}, onPair = {}, onBack = {},
+                        onDisconnect = {}, onPair = {}, onOpenSettings = {},
                     )
                 }
             }

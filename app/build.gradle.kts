@@ -1,9 +1,18 @@
 import java.util.Base64
 
-// versionName is the single source of truth for the app's version. release-please will
-// maintain this string (iteration 3); versionCode is a pure function of it, computed by
-// buildSrc/src/main/kotlin/VersionCode.kt and unit-tested there.
-val appVersionName = "0.34.0" // x-release-please-version
+// versionName is the single source of truth for the app's version. versionCode is a pure function of
+// it, computed by buildSrc/src/main/kotlin/VersionCode.kt and unit-tested there.
+//
+// **The trailing `// x-release-please-version` is not a note, it is the mechanism.** release-please
+// rewrites this literal only because that marker is on the line, and this file is listed under
+// `extra-files` in release-please-config.json. Remove either and the bump does not fail - it does
+// NOTHING, silently, and the first anyone hears of it is a release whose app reports the version
+// before it. Both halves are asserted, so neither can be dropped by an edit that looks tidy.
+//
+// It arrived from the private repository reading 0.34.0, which was that project's version and not
+// this one's. This repository's .release-please-manifest.json says 0.1.0, and the two must agree or
+// the first release here would be a downgrade on any phone that had installed a build of this tree.
+val appVersionName = "0.1.0" // x-release-please-version
 
 // Release signing material, resolved once from the environment.
 // null on an ordinary local build, which is left completely unsigned and unaffected.
@@ -220,6 +229,19 @@ dependencies {
 // The cost is that editing any resource re-runs the unit tests. That is the correct trade: a test
 // suite that skips itself is worth less than one that occasionally runs when it did not need to.
 tasks.withType<Test>().configureEach {
+    // The three files `ReleasePleaseTest` reads, for exactly the reason above: it asserts facts that
+    // live in build configuration rather than in the .apk, so without these the release-please
+    // wiring could be broken by an edit and the test would report success by not running - which is
+    // the same silence the bump itself fails with.
+    inputs.file(layout.projectDirectory.file("build.gradle.kts"))
+        .withPropertyName("appBuildFileReadDirectlyByTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.layout.projectDirectory.file("release-please-config.json"))
+        .withPropertyName("releasePleaseConfigReadDirectlyByTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.layout.projectDirectory.file(".release-please-manifest.json"))
+        .withPropertyName("releasePleaseManifestReadDirectlyByTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(layout.projectDirectory.dir("src/main/res"))
         .withPropertyName("appResourcesReadDirectlyByTests")
         // RELATIVE rather than ABSOLUTE: the contents decide the result, not where the checkout is,
