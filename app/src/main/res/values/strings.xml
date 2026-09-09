@@ -1,0 +1,801 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Beware of Sugar</string>
+
+    <!--
+      The launcher.
+
+      The subtitle is a plural rather than a format string because hiding modules moves both
+      numbers, and with every module hidden it reads "1 of 1 module live". The quantity agrees with
+      the total, which is the noun being counted.
+    -->
+    <!--
+      It was a plural counting live tiles against total ones, and it earned that while eight of the
+      ten were illustrative shapes. REQ-0012 deleted those, so it read "2 of 2" - a ratio whose halves
+      are now necessarily equal, which counts nothing anybody wondered about.
+
+      Nothing was invented to replace it. There is nothing left to explain, and `home_footer`
+      ("Modules appear here as they ship") went entirely for the same reason: it described the dashed
+      shapes that are no longer drawn.
+    -->
+    <string name="home_subtitle">homelab</string>
+    <!-- The one tile that does something. Carries the installed version, which is where the owner
+         reads it after an update - see REQ-0002's acceptance. -->
+    <string name="home_updates_installed">%1$s installed</string>
+    <!-- The tile says what the check found, and never says "ready" for a check that failed. -->
+    <string name="home_updates_ready">%1$s installed · %2$s ready</string>
+    <string name="home_updates_current">%1$s installed · up to date</string>
+    <!-- The banner. One line, one hint, and a whole row to tap - no dialog, nothing to dismiss. -->
+    <string name="home_banner_hint">Tap to see what changed</string>
+
+    <!--
+      The eight illustrative modules and their placeholder screen lived here — Servers, Containers,
+      Network, Storage, Media, Smart home, Backups, Logs, plus `module_not_built`, `module_planned`,
+      `module_placeholder_body` and `module_back`.
+
+      All deleted on 2026-07-31 at the owner's request, after a day of using the app: *"убери все
+      модули которых у нас нет"*. REQ-0012 supersedes REQ-0004's illustrative-shapes decision, and the
+      launcher now draws only what exists.
+    -->
+
+    <!--
+      The settings screen.
+
+      `modules_subtitle` lived here and promised that hidden means gone from the launcher rather than
+      greyed out on it. It went with the switches on 2026-07-31: the owner asked for every module in
+      the app to be on the home page, so there is nothing left to promise about hiding.
+    -->
+
+    <!-- Spoken by a screen reader for controls that are an icon and nothing else. -->
+    <string name="nav_back">Back</string>
+    <!--
+      The launcher's header button. It said "Modules" while it opened a screen of module switches;
+      it opens Settings now, so it names Settings. The ROUTE behind it is still "modules" - a route
+      is persisted state and renaming one is a migration for no benefit.
+    -->
+    <string name="modules_open">Settings</string>
+
+    <!--
+      The token screen. Every string that names the repository takes it as a format argument from
+      BuildConfig.GITHUB_REPO, so the slug is written down in exactly one place - the API URL and
+      this copy cannot drift apart, and iterations 2 and 3 inherit the same single source.
+    -->
+    <string name="updates_entry">Update token</string>
+    <string name="updates_title">Updates</string>
+    <string name="updates_open">Updates</string>
+    <string name="updates_installed">Installed: %1$s</string>
+    <string name="updates_check_now">Check now</string>
+    <string name="updates_idle">Not checked yet.</string>
+    <string name="updates_checking">Checking GitHub…</string>
+    <string name="updates_up_to_date">You\'re on the newest release.</string>
+    <string name="updates_available">%1$s is available.</string>
+    <string name="updates_available_short">Update available: %1$s</string>
+    <string name="updates_no_notes">This release came without notes.</string>
+
+    <!--
+      Second lines for the status card. Only the five states the design draws have one; the other
+      eight already say everything they need to in a single sentence, and padding them out with a
+      second would be words for the sake of a layout.
+    -->
+    <string name="updates_idle_body">The app checks once a day when you open it. It never checks in the background.</string>
+    <string name="updates_checking_body">Asking for the newest release of %1$s.</string>
+    <string name="updates_up_to_date_body">Nothing to download. Checked just now.</string>
+    <string name="updates_available_body">Newer than the %1$s you are running.</string>
+    <string name="updates_no_token_body">Add a read-only token and updates carry on by themselves.</string>
+
+    <!-- The row into the token screen, and what it says about the token without showing any of it. -->
+    <string name="updates_token_connected">Connected · checked %1$s</string>
+    <string name="updates_token_missing">Not set — updates cannot be checked</string>
+    <string name="updates_open_token">Open the token screen</string>
+    <string name="updates_no_token">No token yet, so there\'s nothing to check with.</string>
+    <string name="updates_token_unreadable">The saved token couldn\'t be read on this phone.</string>
+    <string name="updates_token_unreadable_body">It\'s still saved. Open the token screen to see why, and whether to wait or paste a new one.</string>
+    <string name="updates_token_unreadable_row">Saved, but couldn\'t be read — open to see why</string>
+    <!--
+      The state iteration 1 could describe but not detect. The token was stored, so GitHub accepted
+      it once - which is what makes "expired" honest here rather than a guess, and REQ-0003 is
+      explicit that this is a normal state rather than an error.
+    -->
+    <string name="updates_token_expired">Your token has expired or been revoked — GitHub accepted it before and doesn\'t now. Paste a new one and updates will carry on.</string>
+    <!-- Download and install. -->
+    <!--
+      Shown before the owner taps Update, not only while downloading. Two dozen megabytes arriving
+      unannounced on mobile data is the kind of surprise this app is meant not to spring.
+    -->
+    <!-- REQ-0050: the Play channel. The GitHub strings below are kept for the path that is hidden
+         and pending removal; nothing draws them. -->
+    <string name="updates_play_checking">Asking Google Play\u2026</string>
+    <string name="updates_play_up_to_date">You\'re on the newest build.</string>
+    <string name="updates_play_up_to_date_body">Google Play has nothing newer on the test track.</string>
+    <string name="updates_play_available">%1$s is available.</string>
+    <string name="updates_play_available_body">Google Play will download and install it, then reopen the app.</string>
+    <string name="updates_play_update">Update now</string>
+    <string name="updates_play_not_forceable">Google Play has it, but won\'t let the app install it from here. Open the Play Store to update.</string>
+    <string name="updates_play_open_store">Open in Google Play</string>
+    <string name="updates_play_in_progress">An update is already being installed.</string>
+    <string name="updates_play_in_progress_body">Google Play is applying it. It finishes on its own.</string>
+    <string name="updates_play_unknown">Google Play couldn\'t say.</string>
+    <string name="updates_play_unknown_body">That is not the same as being up to date. Check that the Play Store is signed in, and try again.</string>
+    <string name="updates_play_failed">Couldn\'t reach Google Play.</string>
+    <string name="updates_play_failed_body">Nothing was changed. Try again when you have a connection.</string>
+    <string name="updates_play_failed_code">Couldn\'t reach Google Play (error %1$d).</string>
+    <string name="updates_play_not_from_play">This build didn\'t come from Google Play.</string>
+    <string name="updates_play_not_from_play_body">Updates now arrive through Google Play, and only a copy installed from there receives them. This one also won\'t appear in Android Auto \u2014 the car only runs apps the Play Store installed. Install from the test track to get both back.</string>
+    <string name="updates_size">This update is %1$s.</string>
+    <string name="updates_download">Update</string>
+    <!--
+      Split into two columns by the design: the label on the left, the figures on the right. The
+      words the owner reads left-to-right are unchanged from REQ-0003, which the QA script quotes.
+    -->
+    <string name="updates_downloading_label">Downloading…</string>
+    <string name="updates_downloaded_of">%1$s of %2$s</string>
+    <string name="updates_cancel">Cancel</string>
+    <string name="updates_ready">Downloaded. Android will ask you to confirm the install.</string>
+    <string name="updates_install">Install</string>
+    <!--
+      Android reports nothing back from its install screen, so declining and confirming-then-changing-
+      your-mind land in the same place. Declining is a normal outcome, so this reads as a standing
+      offer rather than as a failure.
+    -->
+    <string name="updates_ready_again">The update is downloaded and ready whenever you are.</string>
+    <string name="updates_not_allowed">Android needs your permission for this app to install apps. It only asks once.</string>
+    <string name="updates_allow">Open settings</string>
+    <string name="updates_no_asset">That release has no .apk attached, so there\'s nothing to install.</string>
+    <string name="updates_interrupted">The download stopped before it finished. Nothing was installed — try again.</string>
+    <string name="updates_truncated">The download didn\'t arrive intact, so it wasn\'t installed. Try again.</string>
+    <string name="updates_no_space">Not enough space for the update — it needs %1$s. Free some up and try again.</string>
+    <string name="updates_unreadable_release">There\'s a newer release, but its version tag isn\'t one this app can read.</string>
+
+    <string name="token_title">GitHub token</string>
+
+    <!--
+      FLAG_SECURE has been on this screen since REQ-0003; this makes it visible. It exists so that a
+      screenshot coming out black reads as deliberate rather than as the phone misbehaving.
+    -->
+    <string name="token_screenshots_blocked">SCREENSHOTS BLOCKED</string>
+    <string name="token_checked_on">Checked %1$s</string>
+
+    <!--
+      The sentence the owner reads months after this decision was made. It names the exact
+      repository, the exact permission, and where the token goes - so it reads as an explanation
+      rather than a request for credentials.
+    -->
+    <string name="token_intro">Updates for this app come from its own GitHub repository, %1$s, which is private — so it needs a read-only token for that one repository, stored encrypted on this phone and sent to github.com and nowhere else.</string>
+
+    <string name="token_how_title">How do I make one?</string>
+    <string name="token_how_body">github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens.\n\nRepository access: only this repository.\nPermissions: Contents → Read-only.\n\nNothing else is needed.</string>
+
+    <string name="token_field_label">Personal access token</string>
+    <string name="token_paste">Paste</string>
+    <string name="token_save">Save and check</string>
+    <string name="token_checking">Checking with GitHub…</string>
+    <string name="token_replace">Replace</string>
+    <string name="token_remove">Remove</string>
+    <string name="token_back">Back</string>
+
+    <string name="token_saved">Connected to %1$s.</string>
+
+    <!--
+      An expired token and a mistyped one are the same 401 at this point - GitHub says "Bad
+      credentials" for both - so this covers both without accusing the owner of either. REQ-0003 is
+      explicit that an expired token is a normal state, which is why this is a line under the field
+      rather than an error screen.
+    -->
+    <string name="token_not_accepted">GitHub didn\'t accept that token. If it\'s one you made a while ago it may have expired — they do that. Make a new one and paste it again.</string>
+    <string name="token_no_repo_access">That token works, but it can\'t see %1$s. Check it\'s from the account that owns the repository, and that this repository is selected.</string>
+    <string name="token_insufficient_permission">That token can see the repository but not its releases. It needs Contents: Read-only.</string>
+    <string name="token_rate_limited_until">GitHub is rate-limiting this token. Try again after %1$s.</string>
+    <string name="token_rate_limited">GitHub is rate-limiting this token. Try again in a little while.</string>
+    <string name="token_offline">Can\'t reach GitHub. Check your connection and try again.</string>
+    <string name="token_github_unavailable">GitHub returned an error (%1$d). Try again in a bit.</string>
+    <!--
+      REQ-0047. Two sentences for one fact, chosen by the cipher's reading of the failure. Neither says
+      "no token": there IS one, and it is kept. The detail line under them carries the cause and the
+      time it first failed, so the next report names the failure instead of the symptom.
+    -->
+    <string name="token_unreadable">The saved token can\'t be read on this phone any more. It\'s kept, but the key that opened it is gone — paste a new one, or remove it.</string>
+    <string name="token_unreadable_for_now">The saved token couldn\'t be read just now. It\'s kept — this usually clears after an unlock or a restart. If it doesn\'t, paste a new one.</string>
+    <string name="token_unreadable_detail">%1$s · since %2$s</string>
+
+    <!--
+      GitHub accepted the token and the phone would not keep it. The first clause is the load-bearing
+      part: without it the owner goes and mints a replacement token for a problem that was never the
+      token.
+    -->
+    <string name="token_not_stored">That token is good, but this phone wouldn\'t store it. Try again - and if it keeps happening, restart the phone and paste it once more.</string>
+
+    <!--
+      REQ-0005 - can I reach my homelab from here.
+
+      The headline is the owner's own question, in their words. The tile says "Reachability", which
+      is what the screen can prove; the headline says what they came to find out.
+    -->
+    <string name="module_reachability">Reachability</string>
+    <!--
+      On the tile. The colour is the glance; this line is the fact.
+
+      REQ-0004 decided no row needs a legend, and a tile whose only signal is a hue fails that harder
+      than a row does - on the launcher there is nothing to compare it against. So the count is in
+      words, and the content description states the count and never the colour.
+    -->
+    <string name="module_reachability_tagline">What you can reach from this network</string>
+    <string name="reach_tile_not_checked">Not checked yet</string>
+    <string name="reach_tile_checking">Checking…</string>
+    <string name="reach_tile_count">%1$d of %2$d available</string>
+    <string name="reach_tile_description_not_checked">Reachability. Not checked yet.</string>
+    <string name="reach_tile_description">Reachability. %1$d of %2$d services available.</string>
+    <string name="reach_title">Can I reach my homelab from here</string>
+    <string name="reach_subtitle">Remote addresses only. Nothing here logs in.</string>
+    <string name="reach_check_now">Check now</string>
+    <string name="reach_open">Open</string>
+    <string name="reach_latency">%1$d ms</string>
+
+    <!--
+      The summary. It describes the failures observed and never claims the services share
+      infrastructure: over IPv4 they do, but all ten also publish distinct IPv6 addresses and the app
+      cannot know which family the phone used.
+    -->
+    <string name="reach_summary_not_checked">Nothing checked yet.</string>
+    <string name="reach_summary_running">%1$d of %2$d checked so far…</string>
+    <plurals name="reach_summary_reached">
+        <item quantity="one">%1$d of %2$d answered.</item>
+        <item quantity="other">%1$d of %2$d answered.</item>
+    </plurals>
+    <string name="reach_summary_all_answered">All %1$d answered.</string>
+    <!-- The one that turns ten red rows into a single diagnosis. -->
+    <string name="reach_summary_same_layer">Nothing answered, and all %1$d failed in the same way. That points at this network rather than at your services.</string>
+    <string name="reach_summary_mixed">Nothing answered, and they failed in different ways — so there is no single explanation.</string>
+    <string name="reach_summary_router_only">Your router answered every one of these, but nothing is serving them. The connection is fine; the services behind it are not running or not being proxied.</string>
+
+    <!-- Per-row states. Nineteen outcomes, and every one of them says what to do next. -->
+    <string name="reach_not_checked">Not checked</string>
+    <string name="reach_checking">Checking…</string>
+    <string name="reach_up">Reachable</string>
+    <!-- The rule the whole milestone turns on: an auth challenge is proof you got there. -->
+    <string name="reach_up_needs_auth">It asked who you are, which means you reached it.</string>
+    <string name="reach_up_redirect">It sent you to its login page, which means you reached it.</string>
+    <string name="reach_answered_oddly">Reachable, oddly</string>
+    <string name="reach_answered_oddly_detail">Something answered and it was not what this address expects. Worth opening to see.</string>
+
+    <string name="reach_router_answered">Router answered, not the service</string>
+    <string name="reach_router_answered_detail">You reached your router, but nothing is being served for this name. The network is fine — check the service is running and that the proxy rule still exists.</string>
+
+    <string name="reach_gateway_down">Not running</string>
+    <string name="reach_gateway_down_detail">Your router answered and the service behind it did not. Nothing is filtering you: this one is at home.</string>
+    <string name="reach_service_error">Answered with an error</string>
+    <string name="reach_service_error_detail">You reached it and it is unhappy. That is a problem at home, not on this network.</string>
+
+    <string name="reach_no_dns">Name would not resolve</string>
+    <string name="reach_no_dns_detail">This network\'s DNS gave no address for it. Often the first place a filtered network interferes.</string>
+    <string name="reach_refused">Connection refused</string>
+    <string name="reach_refused_detail">Something answered the connection and rejected it outright.</string>
+    <string name="reach_no_connection">Could not connect</string>
+    <string name="reach_no_connection_detail">The address resolved and the connection never opened. The port is blocked, or nothing is listening.</string>
+    <string name="reach_no_answer">No answer</string>
+    <string name="reach_no_answer_detail">Connected and secured, then silence.</string>
+
+    <!--
+      Normative wording, ruled 2026-07-27. Android reports an expired certificate identically to an
+      unknown chain - same exception, same reason, same message - so the app cannot tell interception
+      from expiry and must not pretend to. Loud because it might be interference; honest because it
+      might not be; and it hands the owner the one check that separates them.
+    -->
+    <string name="reach_cert_unverified">Certificate not verified</string>
+    <string name="reach_cert_unverified_detail">Either something is intercepting this connection, or the certificate has expired — the phone cannot tell which. Check the certificate\'s date.</string>
+    <!--
+      Not reachable on Android today, where the state above swallows it. Written anyway so that a
+      platform version which starts reporting expiry properly does not ship a blank row.
+    -->
+    <string name="reach_cert_expired">Certificate has expired</string>
+    <string name="reach_cert_expired_detail">Nothing is intercepting you — the certificate simply lapsed and needs renewing.</string>
+    <string name="reach_handshake_failed">Secure connection blocked</string>
+    <string name="reach_handshake_failed_detail">The connection opened and then the encrypted handshake did not finish. That is what a network blocking by site name looks like.</string>
+
+    <string name="reach_check_failed">Check failed</string>
+    <string name="reach_check_failed_detail">Something went wrong that this app does not have a name for. Worth reporting with a screenshot.</string>
+
+    <!--
+      The ten services with no remote address. Named rather than omitted: a list that silently drops
+      half the estate reads as "these are all my services". No addresses - see ServiceRegistry.
+    -->
+    <string name="reach_lan_title">Not checkable from outside</string>
+    <string name="reach_lan_body">These %1$d have no remote address, so nothing can be said about them from here.</string>
+
+    <!--
+      REQ-0009. Pairing was in Settings "provisionally"; REQ-0011 settled it by deleting the module
+      switches, so pairing is not a section of that screen any more, it is the screen.
+      `settings_modules_section` was the heading over those switches and went with them.
+    -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_terminal_section">Terminal</string>
+    <string name="settings_styled_screen_title">Colours through zmx</string>
+    <string name="settings_styled_screen_body">Read each pane through its zmx daemon (history --vt) so colours and bold reach the phone. Needs Live sessions on in agterm; a pane without a daemon shows plain text as before.</string>
+    <string name="pairing_section">Laptop</string>
+    <string name="pairing_none_title">No laptop paired</string>
+    <string name="pairing_none_body">Pair this phone with your laptop to reach your terminal sessions from it. On the laptop, run bridgecert qr — it saves a pairing code to your Desktop. Open the image, then scan it with this phone or send it over and choose the file.</string>
+    <string name="pairing_scan">Scan the code</string>
+    <string name="pairing_choose_image">Choose an image instead</string>
+    <!--
+      The label when choosing a file is the ONLY way in - no camera, or the permission refused. "Choose
+      an image instead" beside no other option reads as a bug, and this route is not a consolation: it
+      is the only one that has ever completed a pairing here.
+    -->
+    <string name="pairing_choose_image_only">Choose the pairing code image</string>
+    <!--
+      Says what the camera was for and stops. No "open Settings" button - the owner refused on purpose,
+      and asking again in a different shape is the app arguing with them.
+    -->
+    <string name="pairing_camera_refused">Without camera access this app cannot read the code from your laptop\'s screen. You can still pair by choosing the image file.</string>
+    <string name="pairing_not_a_code">That image is not a pairing code. Scan again, or choose a different image.</string>
+    <string name="pairing_viewfinder_title">Point at the code on your laptop</string>
+    <string name="pairing_viewfinder_body">Hold the phone steady. It reads the code by itself — there is nothing to press.</string>
+    <!--
+      Shown only after several seconds of frames with nothing readable in them, and driven by the
+      DECODER not succeeding rather than by how large the code looks on screen. The measurement on
+      2026-08-09 found that a code filling 20% of the frame decoded better under blur than one filling
+      30%, and could not explain why - so "bigger is easier" is exactly the assumption this copy must
+      not be built on. It suggests, it does not instruct.
+    -->
+    <string name="pairing_viewfinder_struggling">Still nothing. Try moving closer, or steadying the phone — or choose the image file instead.</string>
+    <!--
+      Manual only, and only while the viewfinder is open. Nothing turns this on by itself: a torch
+      that lights automatically while a phone is pointed at somebody is a worse surprise than a dark
+      viewfinder. Absent, not disabled, where the device has no flash unit.
+    -->
+    <string name="pairing_viewfinder_torch_on">Turn on the light</string>
+    <string name="pairing_viewfinder_torch_off">Turn off the light</string>
+    <string name="pairing_viewfinder_cancel">Stop scanning</string>
+    <string name="pairing_compare_title">Check this matches your laptop</string>
+    <!--
+      The address is labelled and shown FIRST because it is the only part that can be wrong. Every
+      pairing code this laptop generates carries the same certificate, so the fingerprint matches even
+      when the host does not - and a code built for the wrong host pairs perfectly and then never
+      connects. The copy has to say which of the two answers which question, or the owner checks the
+      one that cannot fail and feels reassured.
+    -->
+    <string name="pairing_compare_address_label">This phone will connect to</string>
+    <string name="pairing_compare_fingerprint_label">Your laptop\'s fingerprint</string>
+    <string name="pairing_compare_body">Check both against your laptop. The fingerprint says the code came from your laptop; the address says where this phone will look for it, and it is the one that can be wrong. If either differs, stop.</string>
+    <string name="pairing_confirm">They match — pair</string>
+    <string name="pairing_reject">They differ — stop</string>
+    <!--
+      A key that still works and will not keep working. The cost is stated in the same breath as the
+      reason, because the owner has already been burned once by a button that replaced their key with
+      no warning at all - after which their laptop refused every connection and the app told them the
+      laptop was not answering.
+    -->
+    <string name="pairing_identity_old_title">This phone\'s key will stop working on its own</string>
+    <string name="pairing_identity_old_body">It was made in a way that expires when the phone locks, which is what kept breaking your connection. A new key fixes that for good. The cost: your laptop will stop recognising this phone until you send it the new certificate and pin it, exactly as you did when you first paired. The fingerprint below is the one your laptop trusts right now.</string>
+    <string name="pairing_identity_old_action">Make a new key and pair again</string>
+    <string name="pairing_identity_dead_title">This phone\'s key will not sign</string>
+    <string name="pairing_identity_dead_body">The key that proves who this phone is has stopped working, so the laptop will refuse it. A new key fixes that, and it ends the current pairing: your laptop trusts the fingerprint below and will not trust the new one until you pin it there. Nothing else on this phone changes.</string>
+    <string name="pairing_identity_dead_action">Make a new key and pair again</string>
+    <string name="pairing_no_lock_title">This phone has no screen lock</string>
+    <string name="pairing_no_lock_body">The key that proves who this phone is can only exist on a phone that locks. Set a PIN, pattern or password in Settings, then come back and pair. This app cannot set one for you.</string>
+    <string name="pairing_half_title">Your laptop does not know this phone yet</string>
+    <string name="pairing_half_body">The laptop is stored on this phone. Now the laptop needs this phone\'s certificate, or it will refuse the connection. Send it while you are still sitting at the laptop.</string>
+    <string name="pairing_half_send">Send the certificate</string>
+    <string name="pairing_half_command">bridgecert pin ~/Downloads/phone-cert.pem</string>
+    <string name="pairing_half_compare">bridgecert prints a fingerprint when it pins. It must match this one — if it does not, it pinned a different file.</string>
+    <string name="pairing_half_done">I have pinned it on the laptop</string>
+    <string name="pairing_paired_title">Paired</string>
+    <string name="pairing_paired_body">This phone holds its own key, generated on the device and never shared. You have sent its certificate to the laptop. Whether the laptop accepted it is something only the laptop knows — your sessions appearing under Terminal is the proof.</string>
+    <string name="pairing_unpair">Forget this laptop</string>
+    <string name="pairing_fingerprint_description">Certificate fingerprint, %1$s</string>
+    <!-- REQ-0009 iteration 3: the session list and the terminal box. -->
+    <string name="module_agterm">Terminal</string>
+    <string name="module_agterm_tagline">Your terminal sessions on the laptop</string>
+    <string name="agterm_title">Terminal</string>
+    <string name="agterm_empty">No sessions are open on your laptop.</string>
+    <string name="agterm_action_retry">Try again</string>
+    <!--
+      For the refusal screen, where the button re-lists the sessions and returns the owner to the
+      list. It said "Try again" until 2026-08-12: it promised to retry the thing that failed and
+      instead abandoned it, on a path where retrying could never work.
+    -->
+    <string name="agterm_action_back_to_sessions">Back to sessions</string>
+    <string name="agterm_action_pair">Pair a laptop</string>
+
+    <!-- The identity is wrong. Each names its own remedy, and they are different machines. -->
+    <string name="agterm_failure_not_pinned">This is not the laptop you paired with. The certificate it presented is a different one. Pair again to trust it.</string>
+    <string name="agterm_failure_certificate_expired">The paired laptop\'s certificate has expired. Create a new one on the laptop, then pair again.</string>
+    <!--
+      The owner's own idea, in their words made into a button: make the laptop the phone's width so
+      the programs re-render themselves, rather than reflowing their output here and destroying every
+      table. The column count is in the label because it is a fact about this screen right now, and it
+      changes when the phone is turned.
+    -->
+    <!--
+      Typing. The status strings are the point of the whole feature's state model: "sent" and
+      "the laptop showed nothing" are DIFFERENT, and neither of them is "failed". An accepted
+      keystroke that produced no output is ordinary - a busy shell, a password prompt, a key vim
+      swallowed - and collapsing it into success or failure manufactures the ambiguity that hides
+      real defects.
+
+      NONE of them takes a format argument, and TypingCopyTest fails if one gains it. They used to
+      print the typed text back: "Sent %1$s - waiting for your laptop". The string naming the
+      password-prompt case was the same string that echoed the characters, so a password the terminal
+      had deliberately hidden was rendered in plain sight in exactly the state a password prompt lands
+      in. There is no safe conditional version - nothing here can know a prompt is a password prompt.
+    -->
+    <!--
+      What the owner reads when the laptop refuses their text, REQ-0017.
+
+      **Written for the person, not for the API.** The bridge answers with byte offsets and the names
+      of every key in its allowlist - killline, linestart, lineend - and that sentence filled their
+      whole screen once, for a pasted chat message. Those names exist for the protocol; they are not
+      vocabulary anybody has been taught here.
+
+      Both sentences say the same two things: what is wrong, and that their text is still there.
+
+      **Kept to two short sentences because this card grows rather than clips.** The notice has no
+      maxLines - deliberately, since a truncated explanation is worse than none - so its length is
+      paid in the height of a bar that sits above the keyboard. Measured in Roboto at bodySmall
+      against a 412dp line: the first draft of the line-break sentence ran to 103 characters, which
+      is three lines at the standard font scale and five (about 162dp) at 2.0, on a screen where the
+      terminal is already short. These are 61 and 56, which hold at two lines up to 1.3 and stay
+      within three at 2.0.
+    -->
+    <string name="agterm_typing_notice_line_breaks">Line breaks would each press Return. Your text is still here.</string>
+    <string name="agterm_typing_notice_not_typable">Your laptop will not type that. Your text is still here.</string>
+    <string name="agterm_typing_notice_file_refused">Your laptop would not take that file. Your text is still here.</string>
+    <string name="agterm_typing_placeholder">Type a command</string>
+    <string name="agterm_typing_send">Send</string>
+    <!--
+      The file picker. A content description rather than a label: it is an icon beside the field, and
+      the sentence says what happens to the file AND what does not - the path is put in the box and the
+      owner presses Enter, because choosing a file must never run a command.
+    -->
+    <string name="agterm_typing_pick_file">Send files to your laptop and put their paths in the box</string>
+    <string name="agterm_typing_file_sent">Its path is in the box — press Enter when you are ready.</string>
+    <!-- OUR label for a workspace agterm gave no name. Deliberately reads as a description rather
+         than as a name, so nobody mistakes it for what the workspace is called. -->
+    <string name="agterm_workspace_unnamed">Workspace with no name</string>
+    <string name="agterm_typing_open">Type</string>
+    <!-- The other half of the type toggle, read aloud when the bar is open and the press would put
+         it away. Named for what the press DOES, like every other content description here. -->
+    <string name="agterm_typing_close">Put the input bar away</string>
+    <string name="agterm_typing_sent">Sent — waiting for your laptop</string>
+    <string name="agterm_typing_no_change">Your laptop took it and the screen did not change — that is normal for a password prompt or a command still running.</string>
+    <string name="agterm_typing_failed">That did not reach your laptop.</string>
+    <!--
+      A limit, stated as one. The owner will press Up inside vim and see something odd, and the
+      difference between a limit and a bug nobody has got to yet is a sentence they can read at the
+      moment it happens.
+    -->
+    <string name="agterm_typing_arrows_note">Arrow keys may behave oddly inside full-screen programs like vim or less. This app cannot tell which mode a program has put the terminal in, so it always sends the ordinary form. It is a limit, not a bug being worked on.</string>
+    <string name="agterm_key_enter">Enter</string>
+    <string name="agterm_key_escape">Esc</string>
+    <string name="agterm_key_tab">Tab</string>
+    <string name="agterm_key_up">↑</string>
+    <string name="agterm_key_down">↓</string>
+    <string name="agterm_key_left">←</string>
+    <string name="agterm_key_right">→</string>
+    <!--
+      **`^C` rather than `Ctrl-C`, and the same for `^A`, `^E`, `^U` below — REQ-0028.**
+
+      Not a taste change; it is what makes the bar one row. The cells share the width equally, so the
+      WIDEST label sets how many fit: `Ctrl-C` measures six monospace characters against `Enter`'s
+      five, and at eight cells across the owner's phone gives each 47.75dp while `Ctrl-C` needs 50.5.
+      One label decided the whole layout.
+
+      `^C` is also what the terminal itself prints when the key is pressed, which is the notation the
+      person holding this phone reads all day.
+    -->
+    <string name="agterm_key_interrupt">^C</string>
+    <string name="agterm_key_backspace">⌫</string>
+    <string name="agterm_key_clear">Ctrl-L</string>
+    <!--
+      Ctrl-E took Ctrl-D's place on the bar on 2026-07-31: *"ctrl+d кстати я вообще не знаю что зачем -
+      можешь убрать ctrl+e лучше"*. Ctrl-D is gone from the bridge's allowlist too, not merely from
+      here, so there is no string for it any more either.
+    -->
+    <string name="agterm_key_lineend">^E</string>
+    <!--
+      The third row, asked for by name on 2026-07-31: *"добавь эти две кнопки делай новый row: pgup
+      pgdown ctrl+a ctrl+u + one empty space for some extra button"*.
+
+      PgUp and PgDn are what scroll Claude's transcript from the phone. Measured rather than assumed:
+      a Claude session has no terminal scrollback at all, so reading screen plus scrollback returns
+      exactly the visible screen and nothing more. The transcript is redrawn by the application, and
+      the application answers these two keys. The bridge has accepted them all along.
+
+      Ctrl-A and Ctrl-U are labelled for the letter here and named for the ACTION on the wire
+      (linestart, killline), because that is what the owner presses and what the bridge sends.
+    -->
+    <string name="agterm_key_pageup">PgUp</string>
+    <string name="agterm_key_pagedown">PgDn</string>
+    <string name="agterm_key_linestart">^A</string>
+    <string name="agterm_key_killline">^U</string>
+    <!--
+      The Claude button, REQ-0013. A content description rather than a label, because the cell draws
+      the logo instead of text.
+
+      It says what pressing it DOES. A screen reader announcing "Claude" would name a shape; the
+      command itself, `claude_yolo`, is the owner's own shell alias and not a phrase to read aloud.
+    -->
+    <string name="agterm_macro_claude">Start Claude</string>
+    <!--
+      The fold, REQ-0028. It draws an ellipsis — the owner's own word, *"спрятать часть кнопок под
+      троеточие"* — so these two are content descriptions, not labels: a screen reader saying "ellipsis"
+      would announce a shape.
+
+      They name what is behind the fold rather than the direction it moves, because "more" and "less"
+      describe a control while "the keys for editing a line" describes what the owner is looking for.
+    -->
+    <string name="agterm_keys_more">More keys: arrows, backspace, line editing</string>
+    <string name="agterm_keys_fewer">Hide the arrows and line-editing keys</string>
+    <!--
+      Why the width control is not available, shown under it while it is disabled. The owner pressed a
+      dead button three times on 2026-07-30 with nothing anywhere saying why, so these name the
+      specific reason rather than reporting that something is unavailable.
+    -->
+    <!--
+      The recalibration reporting itself, REQ-0033. The owner could not tell the long press did
+      anything: *"анимацию надо сделать чтоб я понял когда сработало, ну или там нотификацию, хоть
+      что-то"*.
+
+      **The count is the message.** A recalibration that lands on the same width changes nothing on
+      screen, so "measured again" on its own is indistinguishable from nothing having happened. The
+      number is the one fact that says what it concluded.
+    -->
+    <string name="agterm_notice_measured_title">Measured again</string>
+    <string name="agterm_notice_measured_body">Your laptop reports %1$d columns.</string>
+    <string name="agterm_fit_why_unmeasured">Width control: waiting for the terminal to be measured</string>
+    <!--
+      **Was "waiting for the laptop to say if it is on", which described a dead control** - REQ-0033.
+      In this state the toggle has nothing to toggle between, but measuring again is still possible and
+      is exactly what the owner wants when things are stuck. So the line names the action instead of
+      the obstacle, and the tap does that action rather than nothing.
+    -->
+    <string name="agterm_fit_why_no_answer">Your laptop has not said if the fit is on. Press Fit to measure again.</string>
+    <string name="agterm_fit_label">Fit</string>
+    <!--
+      The pane toggle, REQ-0032. **Descriptions, not labels** - the control is an icon now, and the icon
+      carries the state by drawing it.
+
+      They were the words "Left" and "Right" on a segmented pair, which cost 116dp of a header the owner
+      then told us was covering the session name. What replaced it is agterm's own picture, which he
+      reads instantly and which needs no word beside it.
+
+      Each says WHICH PANE IS SHOWING and what pressing does, in that order. A description naming only
+      the destination would be the chevron ambiguity again, in the one place nobody would notice it - a
+      screen reader cannot see the glyph that resolves it.
+    -->
+    <!-- REQ-0035: the right pane may not exist yet, and this press is what brings it into being. Said
+         plainly, because a screen reader user gets no glyph and no laptop to look at. -->
+    <string name="agterm_pane_left_a11y">Showing the left pane. Switch to the right one, opening it on your laptop if there is none.</string>
+    <string name="agterm_pane_right_a11y">Showing the right pane. Switch to the left one.</string>
+    <!--
+      What the fit is doing right now, under the header.
+
+      **Both lines say only what was OBSERVED.** The count is the one the laptop measured and reported
+      back - never one this app computed - and the off line describes the window rather than guessing
+      at how anything will wrap. When the laptop has not answered at all, neither line is shown: the
+      disabled-reason line above is the honest thing to say then.
+    -->
+    <!--
+      **The hint rides free, REQ-0033.** The owner did not know when to use the long press - *"я сейчас
+      даже не понимаю в какой момент на кнопку нажимать"* - and a hint on a line of its own would have
+      cost about 16dp on the axis he has spent a week reclaiming. He removed exactly such a standing
+      line once already, the arrow-key note, for exactly that reason.
+
+      So the note it goes on got SHORTER instead. "45 columns. Hold Fit to measure again." is 37
+      characters against the 50 it replaces: the hint is carried and the line is smaller than before.
+
+      What was dropped is filler. "Your laptop is rendering ... for this phone" says who and for whom,
+      and the owner knows both - he is holding the phone and looking at the laptop's name in the header.
+      The COUNT is the fact, and it is the one thing here nobody could work out for themselves.
+    -->
+    <string name="agterm_fit_note_on">%1$d columns. Hold Fit to measure again.</string>
+    <string name="agterm_fit_note_on_unmeasured">Fitted to this phone. Hold Fit to measure again.</string>
+    <string name="agterm_fit_note_off">Laptop keeps its own width. Hold Fit to measure again.</string>
+    <!--
+      The connection notes. Two, and both are things the app watched happen - see LinkNote. Neither
+      names a cause, because a restarting bridge, a sleeping laptop and a lost network arrive here as
+      the same silence; and neither names the laptop, because the phone holds no name for it.
+    -->
+    <string name="agterm_link_reconnecting_title">Connection lost</string>
+    <string name="agterm_link_reconnecting_body">Waiting for your laptop to answer again.</string>
+    <string name="agterm_link_reconnected_title">Reconnected</string>
+    <string name="agterm_link_reconnected_body">Output resumed from where it stopped.</string>
+    <string name="agterm_link_dismiss">Dismiss</string>
+    <!--
+      Titles for the three typing reports, now that they are cards rather than a line under the field.
+      The bodies are the existing strings, unchanged and still holding TypingCopyTest: none of them
+      names or echoes what was typed.
+
+      "No change" is deliberately not phrased as a problem. The bridge accepted the keystroke and the
+      laptop showed nothing, which is ordinary.
+    -->
+    <string name="agterm_notice_sent_title">Sent</string>
+    <string name="agterm_notice_no_change_title">No change on screen</string>
+    <string name="agterm_notice_failed_title">Not delivered</string>
+    <!--
+      Creating and renaming, REQ-0011. Each names the ACTION, because a failed create leaves the list
+      exactly as it was and silence is indistinguishable from a press that was ignored.
+
+      Neither body says WHY. From a phone, a laptop that is asleep, a filtered network and a bridge
+      that is restarting are the same silence, and the house rule since REQ-0005 is that the copy says
+      what was observed and never guesses between causes. Neither body carries the name either — the
+      same rule that keeps session names and screen contents out of every message here.
+    -->
+    <string name="agterm_notice_create_failed_title">Not created</string>
+    <string name="agterm_notice_create_failed_body">Your laptop did not confirm it. Nothing was added.</string>
+    <string name="agterm_notice_rename_failed_title">Not renamed</string>
+    <string name="agterm_notice_rename_failed_body">Your laptop did not confirm it. The name is unchanged.</string>
+    <!--
+      The rename dialog. The three problems name the SHAPE of what is wrong and never the value: the
+      name is in the text field in front of them already, and this app puts names in no message.
+    -->
+    <string name="agterm_rename_title">Rename</string>
+    <string name="agterm_rename_field">Name</string>
+    <string name="agterm_rename_confirm">Rename</string>
+    <string name="agterm_rename_cancel">Cancel</string>
+    <string name="agterm_rename_empty">A name cannot be empty.</string>
+    <string name="agterm_rename_too_long">A name can be %1$d characters.</string>
+    <string name="agterm_rename_control">A name cannot contain a control character.</string>
+    <!--
+      Delete, REQ-0012, inside the rename modal that a long press opens. There is no confirmation
+      dialog: the long press and this press are the owner's own two deliberate acts.
+
+      The workspace copy carries the SESSION COUNT because agterm takes every session inside a
+      workspace with it, silently and without refusing - measured 2026-07-31. The list is behind the
+      modal, so this is the only place the owner can learn what the press costs.
+
+      **The empty case is a separate string, not an <item quantity="zero">.** It was one, and English
+      never selects it: CLDR gives English only `one` and `other`, so a count of zero falls through to
+      `other` and the button read "Delete workspace and its 0 sessions". Reachable in one gesture -
+      close the last session in a workspace, then long-press its header - and lint raised neither
+      UnusedQuantity nor ImpliedQuantity for it. The choice is made in Kotlin now, where a test pins
+      it; see deleteCopyFor.
+    -->
+    <string name="agterm_delete_session">Close this session</string>
+    <string name="agterm_delete_workspace_empty">Delete this empty workspace</string>
+    <plurals name="agterm_delete_workspace">
+        <item quantity="one">Delete workspace and its %1$d session</item>
+        <item quantity="other">Delete workspace and its %1$d sessions</item>
+    </plurals>
+    <!--
+      A close or delete that did not go through. The most important of the three failures to say out
+      loud: the owner has just pressed Delete and the row is still there, so silence reads as the app
+      ignoring them - and pressing again is the worst instinct to encourage on a control that destroys.
+    -->
+    <string name="agterm_notice_delete_failed_title">Not deleted</string>
+    <string name="agterm_notice_delete_failed_body">Your laptop did not confirm it. Nothing was removed.</string>
+    <!--
+      REQ-0035. The icon has NOT moved, which is the fact this note exists to explain: without it, a
+      tap that failed looks exactly like a tap the phone ignored, and the tap he would repeat is the
+      one that starts a shell. Says what is still true rather than what went wrong, because the app
+      does not know which of refuse, drop or vanish happened and must not guess.
+    -->
+    <string name="agterm_notice_pane_failed_title">Still on the left pane</string>
+    <string name="agterm_notice_pane_failed_body">Your laptop did not open the second pane.</string>
+    <!--
+      REQ-0037. Replaces a full-screen error that carried the bridge's own sentence about probe
+      widths - addressed to us, out of a log, and nothing he could act on. Says what is true of HIS
+      terminal: it did not change. The arithmetic stays in the bridge's log where it belongs.
+    -->
+    <string name="agterm_notice_fit_refused_title">Width unchanged</string>
+    <string name="agterm_notice_fit_refused_body">Your laptop could not work out the width this time. Your window is as it was.</string>
+    <!--
+      REQ-0041. NOT an error: this session's shape has never been measured, and measuring it moves his
+      window about for several seconds, which must not happen because he tapped a row in a list. Says
+      what to do rather than what went wrong, because nothing did.
+    -->
+    <string name="agterm_notice_needs_fit_title">Not fitted yet</string>
+    <string name="agterm_notice_needs_fit_body">This session is a different shape. Press Fit to measure it.</string>
+    <!--
+      The two + controls. Their labels say what will be created and where, because a bare "+" beside a
+      workspace heading is ambiguous about which of the two things it makes.
+    -->
+    <string name="agterm_new_session_a11y">New session in this workspace</string>
+    <string name="agterm_new_workspace_a11y">New workspace</string>
+    <string name="agterm_rename_workspace_a11y">Rename this workspace</string>
+    <string name="agterm_rename_session_a11y">Rename this session</string>
+    <string name="agterm_fit_a11y">Fit the laptop\'s terminal to this phone, %1$d columns</string>
+    <string name="agterm_fit_undo_a11y">Put the laptop\'s window back; it is fitted to %1$d columns</string>
+    <string name="agterm_fit_recalibrate_a11y">Measure the laptop\'s terminal again</string>
+    <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Open pairing to make a new key.</string>
+    <string name="agterm_action_disconnect">Disconnect</string>
+    <!--
+      The connection row, which replaced the "Sessions on your laptop" subtitle.
+
+      **%1$s is the ADDRESS this phone dials, not the laptop's name.** The phone holds no name for it:
+      the pairing payload carries a kind, a host, a port and a certificate, and nothing else. The
+      design's mock says "MacBook-Pro-Igor", and drawing that would be inventing a fact about the
+      owner's machine - the same rule that keeps this app from asserting a cause it cannot observe.
+    -->
+    <plurals name="agterm_connected">
+        <item quantity="one">%1$s · %2$d session</item>
+        <item quantity="other">%1$s · %2$d sessions</item>
+    </plurals>
+    <!--
+      The same row with no address to show - an unpaired phone, or a profile that would not read.
+
+      **Its own string rather than the one above with the address left empty.** That version was
+      assembled by formatting an empty name in and then trimming the separator back off, which is copy
+      built by cutting punctuation off other copy: it breaks the first time a translator moves the
+      separator, or uses one that is not a middle dot.
+    -->
+    <plurals name="agterm_connected_count">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+    <!-- The header control. Two labels for two positions, because one of them would always be a lie. -->
+    <string name="agterm_collapse_all">Fold every workspace shut</string>
+    <string name="agterm_expand_all">Open every workspace</string>
+    <string name="agterm_workspace_collapse">Fold this workspace shut</string>
+    <string name="agterm_workspace_expand">Open this workspace</string>
+    <!--
+      What a session's dot means. The dot carries no text, so this is the only place the state is
+      said - and it is agterm's own report, written by the agent's hooks on the laptop, rather than
+      anything this app worked out.
+    -->
+    <string name="agterm_status_running">Running</string>
+    <string name="agterm_status_needs_you">Waiting on you</string>
+    <string name="agterm_status_done">Finished</string>
+    <string name="agterm_status_idle">Idle</string>
+    <!-- On a folded group holding a session that is waiting on them. -->
+    <string name="agterm_group_attention">Something in here is waiting on you</string>
+    <!-- The count on a group header. A folded group still counts every session it holds. -->
+    <string name="agterm_group_count_a11y">%1$d sessions</string>
+    <string name="agterm_disconnected">Disconnected. Nothing is connected to your laptop.</string>
+    <string name="agterm_action_connect">Connect</string>
+    <string name="agterm_failure_not_paired">No laptop is paired with this phone yet.</string>
+
+    <!-- Observed, and nothing beyond it. -->
+    <string name="agterm_failure_cannot_reach">Your laptop is not answering. This app cannot tell why from here.</string>
+    <string name="agterm_failure_bridge_not_listening">Your router answered, but nothing was listening behind it.</string>
+    <string name="agterm_failure_timed_out">Your laptop did not answer in time.</string>
+    <string name="agterm_failure_reader_fell_behind">This app fell behind the stream and closed the connection. Nothing is wrong with your laptop.</string>
+    <string name="agterm_failure_malformed">Your laptop answered with something this app did not understand.</string>
+    <string name="agterm_failure_refused">Your laptop answered, but could not list your sessions.</string>
+
+    <!-- The car - REQ-0044. What Android Auto shows; the keys and the session statuses reuse the agterm_key_* and agterm_status_* labels above. -->
+    <string name="car_app_label">Terminal</string>
+    <string name="car_sessions_title">Sessions</string>
+    <string name="car_session_unnamed">Session with no name</string>
+    <string name="car_no_sessions">No sessions on your laptop</string>
+    <string name="car_draft_hint">Say it, or type it when parked</string>
+    <string name="car_listening">Listening</string>
+    <string name="car_keyboard_hint">A line for the terminal</string>
+    <string name="car_keyboard_title">Terminal</string>
+    <string name="car_keyboard_instructions">Done keeps the line. Enter sends it.</string>
+    <string name="car_fit_refused">Your laptop refused the fit</string>
+    <string name="car_fit_needs">Press Fit to measure this width</string>
+    <string name="car_fit_columns">fit %1$d</string>
+    <string name="car_voice_unavailable">This phone has no speech recogniser</string>
+    <string name="car_voice_denied">The microphone was not allowed. Allow it on the phone.</string>
+    <string name="car_voice_failed">Nothing was heard</string>
+    <string name="car_sending">Sending</string>
+    <string name="car_sent_no_change">Sent. The laptop showed no output.</string>
+    <string name="car_not_sent">Not sent</string>
+    <string name="car_refused">Your laptop refused what was sent. The words are back in the band.</string>
+    <string name="car_stale">Not answering</string>
+    <string name="car_refused_listing">Your laptop refused this phone: %1$s</string>
+
+    <!-- REQ-0045: the limits tile. Percent is what is LEFT, as on the owner's status line. -->
+    <string name="limits_claude">Claude</string>
+    <string name="limits_codex">Codex</string>
+    <string name="limits_window">%1$s · %2$d%% left</string>
+    <string name="limits_resets_in">resets in %1$dh %2$02dm</string>
+    <string name="limits_resets_at">resets %1$s %2$s</string>
+    <string name="limits_error_no_credential">No credential on the Mac</string>
+    <string name="limits_error_expired_claude">Open Claude Code once</string>
+    <string name="limits_error_expired_codex">Open Codex once</string>
+    <string name="limits_error_unreachable_claude">Could not reach Anthropic</string>
+    <string name="limits_error_unreachable_codex">Could not reach OpenAI</string>
+    <string name="limits_error_malformed">Unexpected answer</string>
+    <string name="limits_footer_idle">Tap and hold to fetch</string>
+    <string name="limits_footer_not_paired">Pair a laptop in Settings</string>
+    <string name="limits_footer_too_old">Update the bridge on the Mac</string>
+    <string name="limits_footer_unreachable">Laptop unreachable · tap and hold to retry</string>
+    <string name="limits_footer_updating">updating…</string>
+    <string name="limits_footer_updated_now">updated just now</string>
+    <plurals name="limits_footer_updated_ago">
+        <item quantity="one">updated %1$d min ago</item>
+        <item quantity="other">updated %1$d min ago</item>
+    </plurals>
+    <string name="limits_force_refresh_a11y">Fetch the limits again now</string>
+</resources>

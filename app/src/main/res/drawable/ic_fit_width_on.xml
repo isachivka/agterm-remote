@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The checked half of the same control. See ic_fit_width_off.xml for why these are hand-built.
+
+  The posts have moved inward and the arrows point at each other: the laptop's terminal has been
+  narrowed to this phone's width. Same two elements, same y axis, so the toggle reads as one control
+  changing position rather than as two unrelated pictures.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- Posts, drawn inward from the edges by 200 units each. -->
+    <path android:fillColor="@android:color/white" android:pathData="M300,240 h60 v480 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M600,240 h60 v480 h-60 z" />
+    <!-- Heads, pointing inward toward each other. -->
+    <path android:fillColor="@android:color/white" android:pathData="M470,480 l-90,-80 v160 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M490,480 l90,-80 v160 z" />
+</vector>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The owner's cat, lifted off the beige plate it was drawn on and put back on one deliberately.
+
+  The plate is not a choice between having one and not having one - measured on API 37, the launcher
+  always draws one. A transparent adaptive background renders as a BLACK disc, and a legacy PNG with
+  alpha renders as a WHITE disc with the artwork shrunk inside it. So the only question is which
+  colour, and beige is the colour the owner's own artwork already used.
+
+  The launcher also draws a ring outside the plate, derived from this background - proven by setting
+  it to magenta and watching the ring turn pink. The hue it picks is not predictable (dark brown gave
+  olive, beige gives pale green), so the plate cannot be matched to the ring exactly. What it can do
+  is be light, so plate and ring read as one light shape rather than as a badge inside a badge.
+
+  The foreground is a PNG because the source is raster art, at all five densities so nothing is
+  upscaled, and scaled by a per-pixel test to the largest size at which no opaque pixel leaves the
+  72dp safe circle - so no ear or paw is clipped by a round, squircle or teardrop mask.
+
+  The monochrome layer is the same silhouette, flat. It is also why this stays an adaptive icon: a
+  legacy PNG has nowhere to put one, and themed icons would fall back to a generic treatment.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome" />
+</adaptive-icon>

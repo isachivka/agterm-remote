@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What this file did before: nothing. Empty cloud-backup and device-transfer elements mean no rules,
+  and no rules means everything the app stores is included - so the token's file would have gone to
+  Google's cloud backup, and to a new phone on device transfer.
+
+  The whole datastore directory is excluded rather than the single file, because DataStore writes
+  through a temporary file beside it, and a backup running mid-write would otherwise catch that.
+
+  Two reasons, not one. Defence in depth is the obvious one. The other is that the Keystore key
+  never leaves the device, so a restored blob could not be decrypted anyway - backing it up would
+  only produce a phone that believes it has a token and cannot read it.
+
+  REQ-0009 adds a second exclusion, for the same second reason and a sharper version of it. The
+  pairing directory holds the laptop's certificate and its address; the phone's own private key is in
+  the hardware keystore and CANNOT be backed up at all. So a restored profile would arrive on a new
+  handset with no key to go with it - an app that looks paired, shows a fingerprint, and cannot
+  complete a handshake. A broken state wearing a working one's clothes is worse than an unpaired one,
+  which at least tells the owner what to do.
+
+  This is the file that applies here: android:dataExtractionRules is used from API 31 and minSdk is
+  34. BackupRulesTest fails if any exclusion is removed.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore" />
+        <exclude domain="file" path="pairing" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore" />
+        <exclude domain="file" path="pairing" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The unchecked half of the type control: the input bar is away.
+
+  Same board in the same place as ic_keyboard_on, so the toggle reads as one control changing state
+  rather than as two unrelated pictures - the same rule the fit icons follow. What changes is the
+  caret: it is gone, and a downward chevron sits where it was, which is the direction the bar travels
+  when it is put away.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- The board, identical to the checked state. -->
+    <path android:fillColor="@android:color/white"
+        android:pathData="M160,480 h640 v280 h-640 z M200,520 v200 h560 v-200 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M240,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M340,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M440,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M540,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M640,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M320,650 h300 v50 h-300 z" />
+    <!-- Chevron pointing down: the bar goes away. -->
+    <path android:fillColor="@android:color/white" android:pathData="M380,260 l90,90 l90,-90 l40,40 l-130,130 l-130,-130 z" />
+</vector>

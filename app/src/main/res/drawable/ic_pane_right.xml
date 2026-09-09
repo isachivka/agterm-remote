@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The split-pane indicator, right pane active — REQ-0032.
+
+  # Where this came from, which is not Material Symbols
+
+  **Derived from a screenshot of agterm's own toolbar**, taken by the owner on 2026-08-25 and measured
+  pixel by pixel rather than eyeballed. That provenance is the point: he recognises this picture from
+  his laptop, and the phone showing him the same one is most of its value — *"смотри как классно
+  сделано в оригинальном agterm, небольшая иконочка где визуализированы панели и подсвечена активная"*.
+
+  What the measurement gave, from the 30x23px original:
+
+    box              30 wide x 23 high      -> 880 x 675 here, the same 1.30 ratio
+    border           2/30 of the width      -> 60
+    the active half  exactly half the width -> the hole starts at the midpoint, 480
+    corner radius    ~3px                   -> 90 outer, 30 on the hole
+
+  # Solid against hollow, never two shades
+
+  The right half is SOLID and the left half is a HOLE — presence against absence, not light grey
+  against dark grey. That is the same property the owner asked for when he turned down a tinted label
+  and asked for a checkmark, and it is why this reads at 18dp when a shading difference would not.
+
+  `evenOdd` is what makes the second subpath a hole rather than a second shape: the hole is
+  TRANSPARENT, so it shows whatever is behind the icon and takes no tint. A hole painted in a
+  background colour would be a lie on any surface but the one it was picked for.
+
+  # Coordinates are plain, not Material's negative-Y
+
+  The converted glyphs in this directory carry a `<group android:translateY="960">` because they came
+  from SVGs on a `0 -960 960 960` viewBox. Nothing was converted here, so there is no offset to undo.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <path
+        android:fillColor="@android:color/white"
+        android:fillType="evenOdd"
+        android:pathData="M130,142 L830,142 A90,90 0 0 1 920,232 L920,727 A90,90 0 0 1 830,817 L130,817 A90,90 0 0 1 40,727 L40,232 A90,90 0 0 1 130,142 Z M130,202 L450,202 A30,30 0 0 1 480,232 L480,727 A30,30 0 0 1 450,757 L130,757 A30,30 0 0 1 100,727 L100,232 A30,30 0 0 1 130,202 Z" />
+</vector>

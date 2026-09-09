@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Material Symbols Rounded, glyph "attach_file". Apache License 2.0.
+  Converted from the 24px SVG: one path on a 0 -960 960 960 viewBox, which becomes a 960x960 viewport
+  with the group below shifting it down out of negative Y.
+  Fill is white and tinted at the call site - see the README for why these are bundled.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M700-330q0 103-73.5 176.5T450-80q-103 0-176.5-73.5T200-330v-350q0-79 55.5-134.5T390-870q79 0 134.5 55.5T580-680v340q0 55-37.5 92.5T450-210q-55 0-92.5-37.5T320-340v-350h80v350q0 21 14.5 35.5T450-290q21 0 35.5-14.5T500-340v-340q0-46-32-78t-78-32q-46 0-78 32t-32 78v350q0 69 50.5 119.5T450-160q69 0 119-50.5T619-330v-350h81v350Z" />
+    </group>
+</vector>

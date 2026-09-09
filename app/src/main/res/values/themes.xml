@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The platform theme, which matters for exactly one frame: the one the system draws before
+      Compose has drawn anything.
+
+      This inherited android:Theme.Material.Light.NoActionBar until REQ-0004 - a LIGHT parent under
+      an app that is now dark on every screen. Measured on an API 37 device rather than assumed: the
+      decor view's background was #FAFAFA, so every cold start painted a white window and then
+      replaced it with #15120C as soon as Compose caught up. Nobody specified that flash; it was
+      left over from a project that had no theme at all.
+
+      windowBackground is set explicitly rather than inherited, because the value has to be the
+      same #15120C the Compose theme uses and inheriting a platform grey would put it one platform
+      release away from drifting. WindowBackgroundInstrumentedTest resolves this attribute against
+      the real theme and fails if it is not the design's background.
+
+      windowLightStatusBar is false so the clock and the battery are drawn light. There is nothing
+      here setting statusBarColor or navigationBarColor: from API 35 Android enforces edge-to-edge
+      and ignores both, and minSdk is 34 - dead config that reads like a decision is worse than no
+      config.
+    -->
+    <style name="Theme.BewareOfSugar" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

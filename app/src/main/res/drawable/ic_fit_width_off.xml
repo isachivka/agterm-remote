@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OUR OWN DRAWING, not a Material Symbol, and it says so because every other file in this directory
+  is a converted Symbols glyph with a licence line. Material Symbols has no glyph that means "the
+  laptop's terminal is at its own width", and reproducing path data from memory is how a wrong
+  viewport ships looking plausible.
+
+  So this is built from geometry that can be checked by reading it: two vertical bars at the edges,
+  and a double-headed arrow filling the space between them. Wide - the window is as the owner left it.
+
+  960x960 viewport to match the converted set, so the two kinds sit together in AppIconGridPreview.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- Left and right posts. -->
+    <path android:fillColor="@android:color/white" android:pathData="M100,240 h60 v480 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M800,240 h60 v480 h-60 z" />
+    <!-- Shaft, centred on y=480. -->
+    <path android:fillColor="@android:color/white" android:pathData="M300,450 h360 v60 h-360 z" />
+    <!-- Heads, pointing outward at the posts. -->
+    <path android:fillColor="@android:color/white" android:pathData="M220,480 l90,-80 v160 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M740,480 l-90,-80 v160 z" />
+</vector>

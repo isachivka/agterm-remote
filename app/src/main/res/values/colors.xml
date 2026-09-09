@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The window background: what the system paints between the launcher icon being tapped and
+      Compose drawing its first frame.
+
+      It exists in XML because the framework needs it before any Kotlin runs, which means this one
+      colour is written down twice - here, and as DesignBackground in ui/theme/Color.kt.
+      WindowBackgroundTest fails if the two ever disagree, because a mismatch is invisible in every
+      screenshot and visible on every cold start.
+    -->
+    <color name="window_background">#FF15120C</color>
+</resources>

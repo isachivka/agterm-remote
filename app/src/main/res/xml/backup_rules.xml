@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android:fullBackupContent is only consulted up to API 30, and minSdk here is 34 - so on every
+  device this app can install on, data_extraction_rules.xml is the file that decides. This one is
+  kept in step with it anyway: a reader comparing the two should not find one of them silently
+  disagreeing, and the manifest still references it.
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore" />
+    <exclude domain="file" path="pairing" />
+</full-backup-content>

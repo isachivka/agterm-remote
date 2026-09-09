@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release trusts the system store and nothing else, which is Android's default and is restated
+  here only so the debug block below has a file to live in.
+
+  `debug-overrides` applies ONLY when android:debuggable is true, which a release build never is.
+  It lets a debug build trust a CA the tester installed on the device, so the app can be paired
+  with a bridge running on the developer's own machine — an emulator reaching 10.0.2.2 — whose LAN
+  certificate no public CA has signed. The pinned mTLS inside the stream is unaffected: this is the
+  outer hop, the one the router terminates in production, and it authenticates nothing there either
+  (see the LANCert comment in bridge/cmd/agtermbridge/main.go).
+-->
+<network-security-config>
+    <base-config>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

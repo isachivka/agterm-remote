@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the Android Auto host reads before it binds anything: this app talks in templates. Referenced
+  from the manifest's com.google.android.gms.car.application meta-data - REQ-0044.
+-->
+<automotiveApp>
+    <uses name="template" />
+</automotiveApp>
