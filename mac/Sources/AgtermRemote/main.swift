@@ -218,7 +218,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // app does not cross.
             agtermSocketExists: AgtermPresence.isRunning(),
             address: AddressPreference.stored(),
-            isPaired: AddressPreference.provenAt() != nil)
+            isPaired: AddressPreference.provenAt() != nil,
+            // **The upgrade path, and the only thing that puts the front-door pane on screen.** An
+            // owner who paired before the question existed holds an address, a paired phone and no
+            // answer - and the setup window opens only for what is unfinished, so their setup looked
+            // finished and the question was unreachable. Everybody setting up from now on answers it
+            // beside the address box; see `AddressPreference.confirmFrontDoor` at the save.
+            frontDoorAnswered: AddressPreference.frontDoorAnswered())
     }
 
     /// **Opened for what is left to SET UP, never for agterm being down.**
@@ -495,6 +501,14 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // floor, and the port has its own refusals which say their own sentence.
         let port = SaveListenPort().save(arrivalPort, dialPort: try? AddressPreference.read().get().port)
         let outcome = SaveAddress().save(typed, confirmed: confirmed)
+
+        // **The answer that is on screen, recorded once, so nobody is asked the same question twice.**
+        // The popup beside the box writes on a CHANGE, and the commonest answer is the one already
+        // selected - so somebody who agrees with it would finish setup with no answer stored and meet
+        // the migration pane afterwards, written for people who were never asked. It cannot overwrite
+        // a real answer and it changes no behaviour: the value it stores is the one every code was
+        // already being built from.
+        AddressPreference.confirmFrontDoor(onboarding.frontDoor)
 
         switch outcome {
         case .saved(let address):

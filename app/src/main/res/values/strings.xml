@@ -17,6 +17,38 @@
     <string name="settings_styled_screen_title">Colours through zmx</string>
     <string name="settings_styled_screen_body">Read each pane through its zmx daemon (history --vt) so colours and bold reach the phone. Needs Live sessions on in agterm; a pane without a daemon shows plain text as before.</string>
     <string name="pairing_section">Laptop</string>
+    <string name="settings_phone_section">This phone</string>
+
+    <!--
+      The paired panel: the address this phone dials, the fingerprint it pinned, and the one way out.
+
+      The address is EDITABLE and the certificate is not, which is the whole of spec section 5.5 said
+      as a layout: where the laptop answers is a fact that changes, and which laptop it is is not.
+    -->
+    <string name="settings_address_title">Where this phone looks for your Mac</string>
+    <string name="settings_address_body">The address your Mac answers on, as host and port. Change it when your Mac moves — a new address from your provider, a tunnel you rebuilt. Your Mac stays the one you paired with: this does not touch what this phone pinned, and you do not have to pair again.</string>
+    <string name="settings_address_save">Save</string>
+    <string name="settings_fingerprint_title">The Mac this phone is paired with</string>
+    <string name="settings_fingerprint_body">The fingerprint of the certificate this phone pinned. It is the same on your Mac, under Pair a phone — check the two against each other whenever you want to.</string>
+    <string name="settings_unpair">Unpair</string>
+    <string name="settings_cancel">Cancel</string>
+
+    <!--
+      A camera the owner turned down for good. Android will not ask again from inside the app, so the
+      only honest thing this screen can do is say so and open the place where it can be undone.
+    -->
+    <string name="settings_camera_blocked_title">Camera access is off for this app</string>
+    <string name="settings_camera_blocked_body">The camera was turned down, and Android will not ask again from inside the app. Turn it on in the system settings and come back here — or paste the code below, which needs no camera at all.</string>
+    <string name="settings_camera_blocked_open">Open system settings</string>
+
+    <!--
+      The replacement for a key that will not sign. Offered ONLY while the key is actually in that
+      state; a healthy phone never sees it. See LaptopSettings.keyIsUnusable for why the verdict
+      decides what is shown and never what is deleted.
+    -->
+    <string name="settings_key_unusable_title">This phone\'s key cannot prove who it is</string>
+    <string name="settings_key_unusable_body">Your Mac has nothing to check, so pairing is refused before it starts. Nothing on your Mac is wrong. Replacing the key is the way out, and it destroys what this phone has now.</string>
+    <string name="settings_key_replace">Replace the key</string>
     <!--
       The five states of the pairing screen. There were fourteen strings more than this, and what
       removed them was enrolment: the phone no longer carries its certificate to the Mac by hand, so
@@ -384,7 +416,7 @@
     <string name="agterm_fit_a11y">Fit the laptop\'s terminal to this phone, %1$d columns</string>
     <string name="agterm_fit_undo_a11y">Put the laptop\'s window back; it is fitted to %1$d columns</string>
     <string name="agterm_fit_recalibrate_a11y">Measure the laptop\'s terminal again</string>
-    <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Reinstalling this app makes a new key; you will have to pair again afterwards.</string>
+    <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Open Settings and replace the key; you will have to pair again afterwards.</string>
     <string name="agterm_action_disconnect">Disconnect</string>
     <!--
       The connection row, which replaced the "Sessions on your laptop" subtitle.

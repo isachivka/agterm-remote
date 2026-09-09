@@ -15,6 +15,11 @@ public enum OnboardingStep: String, CaseIterable, Equatable, Sendable {
     /// There is an address, and no phone has ever come through it. The scan is the next act, and it
     /// is also what proves the address.
     case pairing
+    /// A phone is paired and **nobody has ever answered the front-door question.**
+    ///
+    /// Only an owner who paired before the question existed can be here — see [Onboarding.setup]. It
+    /// is a migration step, and it disappears from this app the moment it is answered, once.
+    case frontDoor
     /// All three hold.
     case done
 }
@@ -43,6 +48,8 @@ public struct Onboarding: Equatable, Sendable {
     /// The stored address, parsed. Nil when there is none, or when what is stored is not one.
     public let address: Address?
     public let isPaired: Bool
+    /// Whether the front-door question has an answer stored, as opposed to being given the default.
+    public let frontDoorAnswered: Bool
 
     /// - Parameter agtermSocketExists: whether agterm is there. Named for the fact the design
     ///   document names; see the note above for what the caller may actually look at.
@@ -51,10 +58,17 @@ public struct Onboarding: Equatable, Sendable {
     /// - Parameter isPaired: whether a phone has completed enrolment **through the address that is
     ///   stored now**. See `AddressPreference.provenAt`: proof does not survive an address change,
     ///   because it was never proof about the new one.
-    public init(agtermSocketExists: Bool, address: String?, isPaired: Bool) {
+    /// - Parameter frontDoorAnswered: `AddressPreference.frontDoorAnswered`. **Defaults to true, which
+    ///   means "nothing outstanding"**, so a caller that does not know about the migration never puts
+    ///   an extra pane in front of anybody. The direction of the default is the safe one: forgetting
+    ///   to ask costs a question nobody was owed, and asking by accident interrupts a finished setup.
+    public init(
+        agtermSocketExists: Bool, address: String?, isPaired: Bool, frontDoorAnswered: Bool = true,
+    ) {
         self.agtermIsThere = agtermSocketExists
         self.address = address.flatMap { try? Address.parse($0).get() }
         self.isPaired = isPaired
+        self.frontDoorAnswered = frontDoorAnswered
     }
 
     /// The one unfinished thing, or `done`.
@@ -70,6 +84,7 @@ public struct Onboarding: Equatable, Sendable {
         guard agtermIsThere else { return .agtermMissing }
         guard address != nil else { return .address }
         guard isPaired else { return .pairing }
+        guard frontDoorAnswered else { return .frontDoor }
         return .done
     }
 
@@ -87,9 +102,18 @@ public struct Onboarding: Equatable, Sendable {
     /// that this app cannot recognise — a build run from source, say. So the ladder that decides
     /// whether the setup window opens skips agterm, and agterm's absence is reported where a runtime
     /// fact belongs: the menu.
+    /// ### The front door comes last, and only for somebody who is otherwise finished
+    ///
+    /// It is below pairing rather than above it, which looks wrong — the answer decides how the code
+    /// is built, so logically it precedes the scan. It is deliberate: for everybody who has not
+    /// paired yet, **the question is already on the address pane**, beside the box, and saving the
+    /// address records whatever is selected there. So the only person who can reach this rung is one
+    /// who paired under a build where the question did not exist, and putting it above pairing would
+    /// mean rebuilding the ladder for a case that ends the moment it is answered.
     public var setup: OnboardingStep {
         guard address != nil else { return .address }
         guard isPaired else { return .pairing }
+        guard frontDoorAnswered else { return .frontDoor }
         return .done
     }
 }

@@ -65,6 +65,15 @@ fun SettingsScreen(
     // screen.
     pairingSection: (@Composable () -> Unit)? = null,
     /**
+     * This phone's own key, and **only when there is something wrong with it.**
+     *
+     * Null is the ordinary state and the section is then not drawn at all, heading included. The one
+     * thing behind it is destructive — see `LaptopSettings.Destruction.ReplaceKey` — and a heading
+     * with a destructive button under it, present on every visit to a settings screen, is a press
+     * waiting to happen. The caller decides, because the caller is what can ask the keystore.
+     */
+    phoneSection: (@Composable () -> Unit)? = null,
+    /**
      * The styled-screen switch: null hides the section (a preview, a test), otherwise its state.
      * Off by default at the store, not here — see
      * [dev.isachivka.agtermremote.settings.StyledScreenStore].
@@ -99,6 +108,13 @@ fun SettingsScreen(
             SectionHeading(stringResource(R.string.pairing_section))
             Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 28.dp)) {
                 pairingSection()
+            }
+        }
+
+        if (phoneSection != null) {
+            SectionHeading(stringResource(R.string.settings_phone_section))
+            Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 28.dp)) {
+                phoneSection()
             }
         }
 

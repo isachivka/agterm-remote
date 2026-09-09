@@ -115,10 +115,16 @@ object PairingOutcome {
      * The enrolment itself would succeed - it presents no client certificate - and the phone would
      * then be unable to reach the API, holding a receipt for a pairing that cannot work. See
      * [EnrolGate], which is where the refusal happens and why it refuses rather than repairs.
+     *
+     * **The sentence names a control that exists**, which it did not until the settings screen grew
+     * one: it used to say *reinstall this app*, and an application whose only remedy is its own
+     * removal is an application with no remedy. The replacement is
+     * `LaptopSettings.Destruction.ReplaceKey`, offered on this same screen and only while the key is
+     * in this state.
      */
     const val KEY_CANNOT_SIGN =
         "This phone's key can no longer prove who it is, so pairing would finish and then not work. " +
-            "Reinstall this app to make a new key, then pair again."
+            "Replace the key under This phone below, then pair again."
 
     /** The key would not mint at all. Nothing about the Mac is wrong, so the sentence must not blame it. */
     const val NO_IDENTITY =

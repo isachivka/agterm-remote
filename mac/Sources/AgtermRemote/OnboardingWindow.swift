@@ -134,6 +134,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         case .agtermMissing: agtermPane(into: stack)
         case .address: addressPane(into: stack)
         case .pairing: pairingPane(into: stack, address: onboarding.address)
+        case .frontDoor: frontDoorPane(into: stack)
         case .done: donePane(into: stack, address: onboarding.address)
         }
         return stack
@@ -146,6 +147,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         case .agtermMissing: "Step 1 of 3 — agterm"
         case .address: "Step 2 of 3 — the address"
         case .pairing: "Step 3 of 3 — the code"
+        // Not "step 4 of 4". Nobody arriving here is part-way through setup - they finished it, under
+        // a build that never asked this - so a step count would be a promise about a journey they are
+        // not on.
+        case .frontDoor: "One more thing"
         case .done: "Set up"
         }
     }
@@ -245,6 +250,51 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         row.orientation = .horizontal
         row.spacing = 8
         stack.addArrangedSubview(row)
+    }
+
+    /// **The question an owner who paired before it existed has never been asked.**
+    ///
+    /// It is the migration pane and nothing else. Everybody who sets up from now on meets this
+    /// question on the address pane, beside the box, and saving the address records the answer — see
+    /// `AddressPreference.confirmFrontDoor`. This exists for the person whose setup was finished
+    /// before the question was written, whose answer is therefore absent, and for whom the setup
+    /// window would otherwise never open again.
+    ///
+    /// **Confirm writes unconditionally**, and that is the point of it being a button rather than
+    /// only the popup's own action. The popup fires on a change, and the commonest answer is the one
+    /// already selected — so somebody agreeing with the default would leave the key absent and be
+    /// asked again at the next launch, forever.
+    private func frontDoorPane(into stack: NSStackView) {
+        stack.addArrangedSubview(heading(FrontDoorCopy.heading))
+        stack.addArrangedSubview(
+            body("Your phone is paired and your setup is finished. This app has since learned to ask "
+                + "one thing it used to assume, and it cannot work the answer out for itself."))
+        stack.addArrangedSubview(body(FrontDoorCopy.explanation))
+
+        let door = NSPopUpButton(frame: .zero, pullsDown: false)
+        for choice in FrontDoor.allCases {
+            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
+            door.lastItem?.representedObject = choice.rawValue
+        }
+        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
+        door.target = self
+        door.action = #selector(frontDoorChanged(_:))
+        door.translatesAutoresizingMaskIntoConstraints = false
+        door.widthAnchor.constraint(equalToConstant: 340).isActive = true
+        frontDoorBox = door
+        stack.addArrangedSubview(door)
+        stack.addArrangedSubview(body(FrontDoorCopy.detail(for: frontDoor)))
+
+        stack.addArrangedSubview(
+            body("Your pairing is untouched either way. What this decides is the NEXT code this Mac "
+                + "makes — a wrong answer here is a code that pairs nowhere, with nothing anywhere "
+                + "saying why."))
+
+        let confirm = NSButton(
+            title: "That is how mine is set up", target: self, action: #selector(confirmFrontDoorTapped))
+        confirm.bezelStyle = .rounded
+        confirm.keyEquivalent = "\r"
+        stack.addArrangedSubview(confirm)
     }
 
     /// All three hold. It says which three, because "you are set up" is not something anybody can
@@ -349,6 +399,12 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // Redrawn so the detail under the popup describes what is now selected. The third answer's
         // detail is the whole reason somebody would pick it.
         show(current, field: field)
+    }
+
+    /// Writes the selection whether or not it changed, which is what ends the question for good.
+    @objc private func confirmFrontDoorTapped() {
+        onFrontDoor?(frontDoor)
+        onRecheck?()
     }
 
     @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }

@@ -17,8 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import dev.isachivka.agtermremote.agterm.AgtermHost
 import dev.isachivka.agtermremote.pairing.PairedLaptop
-import dev.isachivka.agtermremote.pairing.PairingHost
+import dev.isachivka.agtermremote.pairing.PhoneIdentity
+import dev.isachivka.agtermremote.settings.LaptopSettings
 import dev.isachivka.agtermremote.settings.StyledScreenStore
+import dev.isachivka.agtermremote.ui.settings.LaptopSection
+import dev.isachivka.agtermremote.ui.settings.PhoneKeySection
 import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.nav.BackStack
 import dev.isachivka.agtermremote.ui.nav.Screen
@@ -111,10 +114,26 @@ fun App(modifier: Modifier = Modifier) {
             // store itself on every poll, so nothing here needs to reach the ViewModel.
             val styledStore = remember { StyledScreenStore(context.filesDir.path) }
             var styledScreen by remember { mutableStateOf(styledStore.read()) }
+
+            // The keystore arrives here as two function references and nowhere else in the screen.
+            // `LaptopSettings` is what the JVM tests drive, so the real keystore is named at exactly
+            // one point in the application and everything below this line is testable without one.
+            val laptop = remember(pairedLaptop) {
+                LaptopSettings(
+                    store = pairedLaptop,
+                    discardIdentity = PhoneIdentity::clear,
+                    keyState = PhoneIdentity::signingState,
+                )
+            }
+
             SettingsScreen(
                 onBack = { stack = stack.pop() },
                 modifier = modifier,
-                pairingSection = { PairingHost(store = pairedLaptop) },
+                pairingSection = { LaptopSection(settings = laptop, store = pairedLaptop) },
+                // Null while the key is fine, which is the ordinary case and draws no heading. See
+                // the parameter's own note: this is what keeps the only other destructive control in
+                // the app off a healthy phone's screen entirely.
+                phoneSection = if (laptop.keyIsUnusable) ({ PhoneKeySection(settings = laptop) }) else null,
                 styledScreen = styledScreen,
                 onStyledScreen = { on ->
                     styledStore.write(on)

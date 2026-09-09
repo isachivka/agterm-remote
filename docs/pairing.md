@@ -152,15 +152,27 @@ likely to be wrong are the analysis resolution (the code needs 7–9 pixels per 
   pinned on the Mac where removing it needs a screen that does not exist yet. `EnrolGate` therefore
   refuses **before any socket is opened**, and says so.
 
-  What it does **not** do is replace the key. That verdict is reached by catching a broad exception,
-  and wiring it to a `clear()` is what destroyed the owner's identity on 2026-07-29 — so the
-  replacement has to follow from a button somebody presses, and that button belongs with the Settings
-  screen that owns unpairing. Until then the remedy is a reinstall, which takes the keystore entry
-  with it, and the refusal names it.
+  **Closed on 2026-09-09.** The replacement now exists on the Settings screen, and the shape it was
+  waiting for is the one this note argued for: the verdict decides only whether the control is
+  *offered*, and the deletion follows from two presses by a person. `Settings → This phone → Replace
+  the key`, and the section is not drawn at all unless `PhoneIdentity.signingState()` actually reports
+  `Unusable` — so a healthy phone never sees the button, and the broad exception can never delete
+  anything by itself. The refusal on the pairing card names that control instead of naming a
+  reinstall.
 - **The permission dialog itself is not exercised by any automated run.** `PairingScreenTest` covers
   what the screen does when the camera is unavailable; the emulator script grants the permission
   rather than tapping through the dialog. What a *permanent* denial looks like — Android silently
   declining to show the dialog again — has been reasoned about and not observed.
+
+  What changed on 2026-09-09 is what the app *does* about it. A permanent denial used to produce *No
+  camera to read the code* and nothing else: true, and useless, because the owner cannot re-grant from
+  inside the app and Android will not ask again. Settings now says what happened and opens the app's
+  own page in the system settings. The verdict is `settings/CameraAccess.kt`, a pure function over
+  four facts with a row per combination in `CameraAccessTest`; the fourth fact is *has this app ever
+  asked*, kept in a one-byte file, because **`shouldShowRequestPermissionRationale` is false both on a
+  first run and after a permanent refusal** and without that file the app would either accuse a new
+  owner or stay silent for the blocked one. `SettingsTest` asserts the intent behind the button
+  resolves on the device; the dialog itself is still not tapped through by anything automated.
 - **A camera that will not open lands on the paste field rather than crashing**, which was run: on an
   emulator booted `-camera-back none -camera-front emulated`, `bindToLifecycle` raises
   `IllegalArgumentException: No available camera can be found`, the screen shows *No camera to read the

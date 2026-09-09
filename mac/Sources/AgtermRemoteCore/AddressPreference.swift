@@ -105,6 +105,37 @@ public enum AddressPreference {
         return FrontDoor(rawValue: stored) ?? .unset
     }
 
+    /// Whether anybody has ever answered the front-door question, as opposed to being given the
+    /// default.
+    ///
+    /// **[frontDoor] cannot answer this**, and that is the whole reason this exists: it folds *absent*
+    /// and *chosen `.direct`* into the same value, which is right for building a pairing code and
+    /// wrong for deciding whether to ask. An owner who paired before the question existed holds an
+    /// address, a paired phone, and no answer — and no way to reach the question, because the setup
+    /// window opens only for what is unfinished and their setup looked finished.
+    ///
+    /// It reads the key directly for nil, which is the one thing `string(forKey:)` reports and
+    /// `FrontDoor(rawValue:)` throws away.
+    public static func frontDoorAnswered(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.string(forKey: frontDoorKey) != nil
+    }
+
+    /// Records the answer that is already on screen, **only if nobody has answered yet.**
+    ///
+    /// Called when an address is saved, and it is what keeps the upgrade path narrow. The setup
+    /// screen shows the popup beside the address box, seeded with [frontDoor]'s answer; somebody whose
+    /// deployment is the simplest one leaves it alone and never fires [writeFrontDoor], so without
+    /// this they would finish setup with the key still absent and be asked again afterwards by a pane
+    /// written for people who were never asked at all.
+    ///
+    /// It cannot overwrite a real answer: the guard is *absent*, not *default*. And it changes no
+    /// behaviour when it does write — the value it stores is the one every code was already being
+    /// built from — so it needs no bridge restart.
+    public static func confirmFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) {
+        guard !frontDoorAnswered(in: defaults) else { return }
+        writeFrontDoor(door, to: defaults)
+    }
+
     /// Records what stands in front.
     ///
     /// **Changing it does not clear the proof an address has earned**, unlike changing the address

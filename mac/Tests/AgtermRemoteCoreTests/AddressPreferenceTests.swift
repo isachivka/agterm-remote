@@ -305,4 +305,50 @@ struct AddressProvenanceTests {
 
         #expect(EnrolmentRecord.recordedAt(inStateDirectory: directory) == written)
     }
+
+    // MARK: - Whether anybody has ever answered the front-door question
+
+    /// **`frontDoor` cannot answer this and that is why this exists.** It folds *absent* and *chosen
+    /// `.direct`* into one value, which is right for building a code and wrong for deciding whether
+    /// to ask.
+    @Test func anUnansweredFrontDoorIsToldApartFromOneAnsweredWithTheDefault() {
+        let store = scratch()
+        defer { store.discard() }
+
+        #expect(AddressPreference.frontDoorAnswered(in: store.defaults) == false)
+        #expect(AddressPreference.frontDoor(from: store.defaults) == .unset)
+
+        AddressPreference.writeFrontDoor(.direct, to: store.defaults)
+
+        #expect(AddressPreference.frontDoorAnswered(in: store.defaults))
+        #expect(AddressPreference.frontDoor(from: store.defaults) == .direct)
+    }
+
+    /// The default IS `.direct`, so the two states above are indistinguishable by value. Stated as
+    /// its own assertion because it is the premise of the one above.
+    @Test func theDefaultIsTheAnswerThatCannotBeToldApartByValue() {
+        #expect(FrontDoor.unset == .direct)
+    }
+
+    @Test func confirmingRecordsTheAnswerThatWasOnScreen() {
+        let store = scratch()
+        defer { store.discard() }
+
+        AddressPreference.confirmFrontDoor(.direct, to: store.defaults)
+
+        #expect(AddressPreference.frontDoorAnswered(in: store.defaults))
+        #expect(AddressPreference.frontDoor(from: store.defaults) == .direct)
+    }
+
+    /// **It cannot overwrite a real answer.** The guard is *absent*, not *default*: somebody who
+    /// picked the third rung and then edits their address must not be quietly moved back.
+    @Test func confirmingNeverOverwritesAnAnswerSomebodyGave() {
+        let store = scratch()
+        defer { store.discard() }
+        AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults)
+
+        AddressPreference.confirmFrontDoor(.direct, to: store.defaults)
+
+        #expect(AddressPreference.frontDoor(from: store.defaults) == .httpsBothWays)
+    }
 }
