@@ -142,18 +142,6 @@ fi
 rm -f "$probe"
 trap - EXIT
 
-# Tracked files only. Anything gitignored is not what this protects, and an address has to be tracked
-# to be pushed.
-#
-# The listing is captured and its status checked, rather than piped straight into the loop. A failing
-# `git ls-files` produces an empty list, the loop never runs, and the script prints OK and exits 0 -
-# a guard reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files)"; then
-  echo "::error::check-no-addresses.sh could not list the tracked files in '$root'."
-  echo "    Refusing to report a clean tree on the strength of an empty listing."
-  exit 2
-fi
-
 # The walk - which files are read, which are declined and which are refused - lives in
 # scripts/lib/tracked-files.sh, shared by every guard here. It is not a tidiness: this script used a
 # bare `git ls-files` and skipped in silence any path holding a byte above ASCII, so an address and a

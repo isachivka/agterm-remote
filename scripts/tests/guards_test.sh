@@ -400,4 +400,161 @@ says "the gitlink is counted and named" "declined 1 submodule gitlink(s)"
 
 rm -rf loop && git add -A
 
+# --- the library's own failure modes --------------------------------------------------------------
+#
+# These do not test a pattern or a verdict. They test that a guard which cannot do its job says so
+# instead of printing the word that means fine - the property every defect in this family violated,
+# now living in one file and inherited six times.
+#
+# The fixtures are built by copying the real library beside a stand-in guard, so what is exercised is
+# the shipped code rather than a description of it.
+lib_case() { # name, expected exit; the guard script is written by the caller into $bench/guard.sh
+  local got
+  got="$(cd "$bench/repo" && run "$bench/scripts/guard.sh")"
+  [ "$got" = "$2" ] || { echo "FAIL $1: expected $2 got $got"; fail=1; }
+}
+lib_says() { # name, expected substring - asserts WHICH check fired, not only that one did
+  local got
+  got="$(cd "$bench/repo" && "$bench/scripts/guard.sh" 2>/dev/null || true)"
+  case "$got" in
+    (*"$2"*) ;;
+    (*) echo "FAIL $1: the guard never said \"$2\""; printf '%s\n' "$got" | sed 's/^/        /'; fail=1 ;;
+  esac
+}
+lib_says_not() { # name, substring that must NOT appear
+  local got
+  got="$(cd "$bench/repo" && "$bench/scripts/guard.sh" 2>/dev/null || true)"
+  case "$got" in
+    (*"$2"*) echo "FAIL $1: the guard said \"$2\""; printf '%s\n' "$got" | sed 's/^/        /'; fail=1 ;;
+  esac
+}
+
+bench="$(mktemp -d)"
+mkdir -p "$bench/scripts" "$bench/repo"
+cp -R "$here/../lib" "$bench/scripts/"
+(
+  cd "$bench/repo" && git init -q .
+  printf 'nothing to see here\n' > plain.txt
+  printf 'nothing here either\n' > kept.txt
+  git add -A
+)
+
+# A MISSPELLED examine function. `if "$examine" ...; then` reads "command not found" as a non-zero
+# status like any other, so the guard reported OK over a live token and exited 0, with nothing but a
+# line on stderr. Reproduced exactly that way before this check existed.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { return 1; }
+guard_walk "$root" "stand-in.sh" exmaine
+guard_finish "nothing found."
+GUARD
+chmod +x "$bench/scripts/guard.sh"
+lib_case "a misspelled examine function is fatal, not clean" 2
+# ...and it is THIS check that fired, before anything was walked, rather than the status rule below
+# catching a 127 after the fact. Both would produce exit 2; only one of them refuses to start.
+lib_says "the missing function is named before the walk" "which is not defined"
+
+# A verdict is 0 or 1. Anything else is the guard failing, and must not read as "found nothing".
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { return 3; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "an examine that exits above 1 is fatal, not clean" 2
+
+# ...and the ordinary verdicts still mean what they say, or the two cases above would pass on a
+# library that simply refused everything.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { return 1; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "an examine that finds nothing is a clean run" 0
+
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { echo "::error file=$1::found"; return 0; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "an examine that finds something fails the run" 1
+
+# A guard's OWN exclusions must survive the library being sourced afterwards. A plain default
+# definition would replace them, and the symptom would be a guard quietly scanning its own fixtures.
+# The tree has two files and one of them is excluded, so the verdict names one and not the other -
+# which is the exclusion itself under test, rather than a side effect of nothing being scanned.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+guard_excluded() { case "$1" in (plain.txt) return 0 ;; esac; return 1; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { echo "::error file=$1::this file was scanned"; return 0; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "a guard's exclusions survive sourcing the library" 1
+lib_says "the file outside the exclusion is scanned" "file=kept.txt"
+lib_says_not "the excluded file is not scanned" "file=plain.txt"
+
+# Zero files scanned is not the same as nothing found. A tree in which everything is declined used to
+# print OK, and a guard whose whole subject has been renamed away would have gone on passing forever.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+guard_excluded() { return 0; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+examine() { return 1; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "a run that scanned nothing is not a pass" 2
+lib_says "the zero-scan refusal says so" "scanned no files at all"
+
+# ...and a guard may say what zero files means for IT, which is the sentence the extraction lost from
+# the constant-time guard: its package moving is not the same as its package being clean.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+guard_excluded() { return 0; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+guard_nothing_scanned="If the package moved, move this guard with it."
+examine() { return 1; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_says "a guard's own zero-scan sentence is used" "If the package moved, move this guard with it."
+
+# A pathspec reaching nothing is caught earlier still, by the empty-listing check. Either way it is
+# never a pass.
+cat > "$bench/scripts/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+. "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
+guard_pathspec=("nothing-matches-this-*")
+examine() { return 1; }
+guard_walk "$root" "stand-in.sh" examine
+guard_finish "nothing found."
+GUARD
+lib_case "a pathspec that reaches nothing is not a pass" 2
+
+rm -rf "$bench"
+
 exit "$fail"
