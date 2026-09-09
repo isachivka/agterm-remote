@@ -257,26 +257,43 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// **What the bridge did, not what we asked it to do.**
+    /// **What the bridge did, not what we asked it to do — said without taking the screen.**
     ///
     /// Every transition arrives here, including the ones nobody pressed: a bridge that dies on its
-    /// own backs off, retries, and eventually gives up, and the giving up is the moment the owner has
-    /// to be told. `.starting` and `.running` rebuild the menu silently — an alert per restart would
-    /// be a dialogue box every half second during a failing bind.
+    /// own backs off, retries, and eventually gives up.
+    ///
+    /// The giving up used to raise an `NSAlert` after `activate(ignoringOtherApps:)`. Measured at
+    /// **9.57 seconds** from the press — the full ladder — which is a focus-stealing modal arriving
+    /// ten seconds after somebody touched a background menu and went back to their work. It is now
+    /// a line at the top of the menu and the status item's tooltip: in the place they will look when
+    /// they notice, rather than on top of whatever they were doing when they did not.
     private func bridgeChanged(to state: BridgeState) {
-        rebuildMenu()
         if case .failed(let sentence) = state {
-            notify("The bridge is not running.", sentence)
+            failure = sentence
+        } else if case .running = state {
+            failure = nil
         }
+        rebuildMenu()
     }
+
+    /// The last thing the bridge said on its way out, or nil. Shown, never announced.
+    private var failure: String?
 
     /// Rebuilt after anything that changes what the menu should say. The titles come from the model,
     /// and the model is given the system's answer rather than our memory of it.
     private func rebuildMenu() {
         // Asked, not assumed — and now there is somewhere to ask. The bridge is this app's own child,
-        // so `running` is whether we hold a live pid rather than an opinion we are keeping: the menu
-        // cannot offer Stop for something that is not there.
-        let running = if case .running = bridge?.state { true } else { false }
+        // so this is whether we hold a live pid rather than an opinion we are keeping.
+        //
+        // `.starting` counts, and that is the point rather than a shortcut. It covers the whole
+        // ~9.6-second retry ladder, during which the owner can watch it fail and, before this, could
+        // not call it off: Stop was greyed because the state was not `.running`. Stop must be
+        // available for anything that is or is about to be a process. Start is greyed in the same
+        // window, which is right — one is already in flight.
+        let running = switch bridge?.state {
+        case .running, .starting: true
+        default: false
+        }
         item?.menu = menu(
             status: BridgeStatus(
                 address: DialAddress(host: "-", port: 0),
@@ -287,6 +304,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             hasAddress: AddressPreference.read().isSuccess,
             launchesAtLogin: loginItem.status() == .registered,
         )
+        // The whole sentence, where a tooltip can hold what a menu item cannot. Still nothing that
+        // takes focus.
+        if let failure { item?.button?.toolTip = failure }
     }
 
     /// Says something, always. An alert rather than a notification: this app has no notification
@@ -375,6 +395,15 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     private func menu(status: BridgeStatus?, hasAddress: Bool, launchesAtLogin: Bool) -> NSMenu {
         let menu = NSMenu()
+        // The failure, at the top, disabled, and in the owner's own words rather than a code. Outside
+        // the loop below because it is not an action: nothing happens when it is pressed, and the
+        // assertion that ties actions to handlers is about the things that do.
+        if let failure {
+            let line = NSMenuItem(title: Self.firstLine(of: failure), action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            menu.addItem(line)
+            menu.addItem(.separator())
+        }
         for model in MenuModel.items(
             status: status, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin,
             implemented: implemented,
@@ -396,6 +425,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // reachability test checks.
         menu.autoenablesItems = false
         return menu
+    }
+
+    /// One line for a menu, the whole of it for a tooltip. The bridge's own words can run to several
+    /// lines and a menu item is one.
+    private static func firstLine(of sentence: String) -> String {
+        let first = sentence.split(separator: "\n").first.map(String.init) ?? sentence
+        return first.count > 90 ? String(first.prefix(89)) + "\u{2026}" : first
     }
 
     /// Derived from the same `implemented` set the menu's enabled state is derived from, and asserted
