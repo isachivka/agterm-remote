@@ -35,12 +35,12 @@ val AppShapes = Shapes(
     // Chips. The design draws the size chip at 10 and the Planned chip at 12; that is drawing
     // noise rather than two decisions, so both are 10.
     extraSmall = RoundedCornerShape(AppCorners.ExtraSmall),
-    // The token field's top corners. Its bottom two are 4 dp, because the field is drawn as a
+    // A text field's top corners. Its bottom two are 4 dp, because the field is drawn as a
     // filled box sitting on an underline - that asymmetry belongs at the call site, not here.
     small = RoundedCornerShape(AppCorners.Small),
     // The home banner, the "How do I make one?" panel, the error card.
     medium = RoundedCornerShape(AppCorners.Medium),
-    // Tiles and list containers: the Updates tile, module tiles, the settings list.
+    // List containers: the settings list, and the pairing card inside it.
     large = RoundedCornerShape(AppCorners.Large),
     // Cards that carry a state: status, release, download, the module placeholder.
     extraLarge = RoundedCornerShape(AppCorners.ExtraLarge),

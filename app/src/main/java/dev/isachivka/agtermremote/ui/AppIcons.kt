@@ -4,37 +4,41 @@ import androidx.annotation.DrawableRes
 import dev.isachivka.agtermremote.R
 
 /**
- * Every icon the design uses, bundled rather than depended on.
+ * Every icon this app draws, bundled rather than depended on.
  *
  * `androidx.compose.material:material-icons-extended` was the obvious alternative and was measured
  * rather than assumed: the artifact is 35,720,998 bytes, release builds here are not minified so it
- * would ship whole into an `.apk` that is currently 24.2 MB, the Compose BOM has it frozen at 1.7.8
- * while `compose-ui` moved to 1.11.4, and unpacking its 11,105 classes shows `deployed_code` and
- * `hard_drive` are simply not in it. The design is drawn in Material *Symbols*, which has moved on
- * from Material *Icons* — so 35 MB would have bought 24 of these 26 and left two to hand-author
- * anyway. See
+ * would ship whole, the Compose BOM has it frozen at 1.7.8 while `compose-ui` moved to 1.11.4, and
+ * the design is drawn in Material *Symbols*, which has moved on from Material *Icons* - so it would
+ * have bought most of this list and left the rest to hand-author anyway.
  *
  * Named for the glyph rather than for the use, deliberately. `Back` and `Key` would read better at
- * the call site right up until the moment somebody has to check one against the design, and the
- * design speaks in glyph names.
+ * the call site right up until somebody has to check one against the design, and the design speaks
+ * in glyph names.
  *
- * Rendered together by `AppIconGridPreview`, which is how 26 hand-converted paths get checked: a
- * wrong viewport or a dropped path is obvious in a grid and nearly invisible one file at a time.
+ * ### Every entry here is drawn by a screen, and that is enforced
+ *
+ * Twenty-two entries were deleted when the launcher, the updater, the limits tile and the car screen
+ * went. Nothing failed: their drawables stayed in the `.apk`, [all] kept listing them, and the test
+ * over [all] pinned a COUNT, so the orphans were exactly as green as the icons in use. One of them
+ * was a third-party logo shipping inside an application that no longer draws it.
+ *
+ * `AppIconsTest` on the JVM now walks the app's own sources and asserts the three sets agree: what is
+ * declared here, what a screen references, and what is on disk under `res/drawable`. A glyph whose
+ * last caller is deleted fails that test rather than quietly riding along.
  */
 object AppIcons {
 
-    // Navigation and chrome.
+    // Navigation and chrome. `Tune` is the way into Settings from the terminal's header.
     @DrawableRes val ArrowBack = R.drawable.ic_arrow_back
-    @DrawableRes val ChevronRight = R.drawable.ic_chevron_right
     @DrawableRes val ExpandMore = R.drawable.ic_expand_more
-    @DrawableRes val ExpandLess = R.drawable.ic_expand_less
     @DrawableRes val Tune = R.drawable.ic_tune
+
+    /** Attaching a file to what is being typed. Converted from Material Symbols. */
+    @DrawableRes val AttachFile = R.drawable.ic_attach_file
 
     // The terminal's width toggle. **Hand-drawn rather than converted** - Material Symbols has no
     // glyph for "the laptop's terminal is at this phone's width", and the two files say so at the top.
-    // Converted from Material Symbols, unlike the two below it.
-    @DrawableRes val AttachFile = R.drawable.ic_attach_file
-
     @DrawableRes val FitWidthOn = R.drawable.ic_fit_width_on
     @DrawableRes val FitWidthOff = R.drawable.ic_fit_width_off
 
@@ -50,6 +54,7 @@ object AppIcons {
     // asserting something.
     @DrawableRes val PlayArrow = R.drawable.ic_play_arrow
     @DrawableRes val FrontHand = R.drawable.ic_front_hand
+    @DrawableRes val CheckCircle = R.drawable.ic_check_circle
     @DrawableRes val UnfoldLess = R.drawable.ic_unfold_less
     @DrawableRes val UnfoldMore = R.drawable.ic_unfold_more
 
@@ -63,15 +68,12 @@ object AppIcons {
      * tinted at the call site; this one has #D97757 baked in at the owner's word, who asked for it to
      * stay orange rather than be repainted - so wherever it is drawn, the tint must be left
      * unspecified. See the drawable's header.
+     *
+     * It is here because a key on the typing bar draws it. OpenAI's mark used to sit beside it for a
+     * screen this app no longer has, and it went with that screen: an unused third-party logo inside
+     * a shipped `.apk` is a liability with no upside.
      */
     @DrawableRes val Claude = R.drawable.ic_claude
-
-    /**
-     * OpenAI's mark, for the Codex half of the limits tile. Monochrome and tinted like the
-     * Material glyphs, unlike [Claude]: the owner asked for that one to keep its colour and said
-     * nothing about this one, and a white knot on this palette is what OpenAI's own dark mode draws.
-     */
-    @DrawableRes val Codex = R.drawable.ic_codex
 
     // The open session: Send on the input bar, and the connection notes over the terminal with the
     // control that puts one away.
@@ -79,37 +81,11 @@ object AppIcons {
     @DrawableRes val Close = R.drawable.ic_close
     @DrawableRes val Lan = R.drawable.ic_lan
 
-    // The update check and the download.
-    @DrawableRes val SystemUpdateAlt = R.drawable.ic_system_update_alt
+    /** A wait that is being ridden out, on the connection note. */
     @DrawableRes val Schedule = R.drawable.ic_schedule
-    @DrawableRes val Sync = R.drawable.ic_sync
-    @DrawableRes val CheckCircle = R.drawable.ic_check_circle
-    @DrawableRes val DownloadDone = R.drawable.ic_download_done
 
-    // The token screen.
-    @DrawableRes val Key = R.drawable.ic_key
-    @DrawableRes val KeyOff = R.drawable.ic_key_off
-    @DrawableRes val VerifiedUser = R.drawable.ic_verified_user
-    @DrawableRes val NoPhotography = R.drawable.ic_no_photography
-    @DrawableRes val VisibilityOff = R.drawable.ic_visibility_off
-    @DrawableRes val Help = R.drawable.ic_help
+    /** Something the owner has to act on: a refusal, or an identity that cannot sign. */
     @DrawableRes val Error = R.drawable.ic_error
-
-    // The launcher.
-    @DrawableRes val Extension = R.drawable.ic_extension
-
-    /**
-     * The eight modules, which are illustrative and stay that way. These are the only
-     * icons here that do not correspond to anything the app can currently do.
-     */
-    @DrawableRes val Dns = R.drawable.ic_dns
-    @DrawableRes val DeployedCode = R.drawable.ic_deployed_code
-    @DrawableRes val Router = R.drawable.ic_router
-    @DrawableRes val HardDrive = R.drawable.ic_hard_drive
-    @DrawableRes val Movie = R.drawable.ic_movie
-    @DrawableRes val Lightbulb = R.drawable.ic_lightbulb
-    @DrawableRes val Backup = R.drawable.ic_backup
-    @DrawableRes val Terminal = R.drawable.ic_terminal
 
     /**
      * The overpull's armed marker — the only glyph here that is **hand-authored rather than
@@ -134,46 +110,34 @@ object AppIcons {
 
     @DrawableRes val PaneRight = R.drawable.ic_pane_right
 
-    /** A network check. */
-    @DrawableRes val NetworkCheck = R.drawable.ic_network_check
-
-    /** Glyph name to drawable, for the preview grid and for the test that counts them. */
+    /**
+     * Glyph name to drawable, for the preview grid and for the tests.
+     *
+     * **This is the complete list, and `AppIconsTest` fails if it is not.** It used to be a subset -
+     * seven declared glyphs were missing from it - which meant the grid that exists to be LOOKED AT
+     * silently did not draw seven of the icons a reviewer was looking for.
+     */
     val all: List<Pair<String, Int>> = listOf(
         "arrow_back" to ArrowBack,
-        "chevron_right" to ChevronRight,
         "expand_more" to ExpandMore,
-        "expand_less" to ExpandLess,
         "tune" to Tune,
+        "attach_file" to AttachFile,
+        "fit_width_on" to FitWidthOn,
+        "fit_width_off" to FitWidthOff,
+        "keyboard_on" to KeyboardOn,
+        "keyboard_off" to KeyboardOff,
         "play_arrow" to PlayArrow,
         "front_hand" to FrontHand,
+        "check_circle" to CheckCircle,
         "unfold_less" to UnfoldLess,
         "unfold_more" to UnfoldMore,
+        "add" to Add,
+        "claude" to Claude,
         "arrow_upward" to ArrowUpward,
         "close" to Close,
         "lan" to Lan,
-        "system_update_alt" to SystemUpdateAlt,
         "schedule" to Schedule,
-        "sync" to Sync,
-        "check_circle" to CheckCircle,
-        "download_done" to DownloadDone,
-        "key" to Key,
-        "key_off" to KeyOff,
-        "verified_user" to VerifiedUser,
-        "no_photography" to NoPhotography,
-        "visibility_off" to VisibilityOff,
-        "help" to Help,
         "error" to Error,
-        "extension" to Extension,
-        "dns" to Dns,
-        "deployed_code" to DeployedCode,
-        "router" to Router,
-        "hard_drive" to HardDrive,
-        "movie" to Movie,
-        "lightbulb" to Lightbulb,
-        "backup" to Backup,
-        "terminal" to Terminal,
-        "network_check" to NetworkCheck,
-        "claude" to Claude,
         "check" to Check,
         "pane_left" to PaneLeft,
         "pane_right" to PaneRight,

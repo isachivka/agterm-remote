@@ -62,6 +62,12 @@
 # What a guard reads is bytes, so what it can recognise is bytes. Cyrillic written as an escape
 # sequence is ASCII on disk; so is transliterated Russian; so are the owner's own words written in
 # English. Those are asserted by the people writing the code, not enforced by anything here.
+#
+# PROPER NOUNS ARE THE SHARPEST CASE OF THAT, and it is worth stating rather than leaving implied: a
+# machine name, a service name, a network name or a person's name is an ordinary word in an ordinary
+# sentence. No pattern here can tell one from prose, and no pattern here ever will - a list of the
+# owner's machine names, written into a guard, would commit exactly what the guard exists to keep
+# out. A green run from every script in this directory says nothing whatever about them.
 
 # Populated by guard_walk. Read by guard_accounting, and reconciled: a file is scanned, declined or
 # refused, and the three must add up to the number of tracked paths or the walk itself is wrong.

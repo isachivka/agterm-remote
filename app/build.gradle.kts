@@ -264,6 +264,12 @@ tasks.withType<Test>().configureEach {
     inputs.file(rootProject.layout.projectDirectory.file(".release-please-manifest.json"))
         .withPropertyName("releasePleaseManifestReadDirectlyByTests")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // `AppIconsTest` reads the app's own Kotlin for `AppIcons.X` call sites, because "is this glyph
+    // still drawn by anything" is a fact that lives only at the call sites. Same reason as everything
+    // else in this block: undeclared means UP-TO-DATE means the test does not run.
+    inputs.dir(layout.projectDirectory.dir("src/main/java"))
+        .withPropertyName("appSourcesReadDirectlyByTests")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(layout.projectDirectory.dir("src/main/res"))
         .withPropertyName("appResourcesReadDirectlyByTests")
         // RELATIVE rather than ABSOLUTE: the contents decide the result, not where the checkout is,

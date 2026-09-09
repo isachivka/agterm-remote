@@ -25,6 +25,9 @@
 #   - Whether the decoder is CORRECT, or whether it consumes every vector. That is the test suite's
 #     job, and it is the reason this guard is deliberately shallow.
 #   - A copy outside the app module, or one that is not tracked.
+#   - A copy that has been REFORMATTED - reindented, key-reordered, a trailing newline added. cmp is
+#     byte equality, and anything short of that is a parser, which is a different program. What it
+#     does catch is the shape that actually happens, which is a copy.
 #
 # The listing, the mode dispatch, the decode check and the accounting all live in
 # scripts/lib/tracked-files.sh, shared by every guard here.
@@ -81,7 +84,28 @@ mentions "$probe" "$reject" && {
   echo "::error::check-wire-vectors-consumed.sh is too broad: an unrelated file matched."
   exit 2
 }
-rm -f "$probe"
+
+# **The renamed copy, which is the case this guard shipped unable to catch.**
+#
+# The content check is what stands between a `cp` and two implementations pinning different bytes,
+# and for one review round it was gated on a `.json` extension - so a copy saved as `.txt` walked
+# past it. Both directions are probed here, on the REAL vector files rather than on a fixture,
+# because a fixture would only prove that cmp compares two things this script made up.
+copy="$(mktemp)"
+trap 'rm -f "$probe" "$copy"' EXIT
+cat "$root/wire/$accept" > "$copy"
+cmp -s "$copy" "$root/wire/$accept" || {
+  echo "::error::check-wire-vectors-consumed.sh is broken: cmp did not match an exact copy of"
+  echo "    wire/$accept, so the content check cannot detect a renamed copy at all."
+  exit 2
+}
+printf 'x\n' >> "$copy"
+cmp -s "$copy" "$root/wire/$accept" && {
+  echo "::error::check-wire-vectors-consumed.sh is too broad: cmp matched a file that differs from"
+  echo "    wire/$accept, so every JSON file in the app module would be called a copy."
+  exit 2
+}
+rm -f "$probe" "$copy"
 trap - EXIT
 
 # --- The originals have to be there ------------------------------------------------------------
@@ -128,20 +152,26 @@ examine() { # $1 = path, $2 = the file to read, $3 = what it is
       ;;
   esac
 
-  # And by CONTENT, for a copy that was renamed on the way in. cmp rather than a checksum: two files
-  # and one comparison each, and cmp says nothing on a match that has to be parsed.
-  case "$1" in
-    *.json)
-      for name in "$accept" "$reject"; do
-        if cmp -s "$2" "$root/wire/$name"; then
-          echo "::error file=$1::$3 is byte-identical to wire/$name under another name"
-          echo "    Renaming a copy does not make it not a copy. Read the original from the"
-          echo "    repository root - see wire/README.md."
-          return 0
-        fi
-      done
-      ;;
-  esac
+  # And by CONTENT, for a copy that was renamed on the way in.
+  #
+  # **EVERY file, not just `*.json`.** This check was gated on the extension for one review round, and
+  # that gate was the whole hole: `cp wire/enroll-payload-vectors.json app/src/test/resources/
+  # vectors.txt` printed OK. The three breaks it was proved against all happened to keep a `.json`
+  # name, so the tolerating half was tested and the detecting half was not - which is where every
+  # defect these guards have had has lived. A copy is a copy under any extension, and the extension is
+  # chosen by whoever makes the copy.
+  #
+  # cmp rather than a checksum: two comparisons per file, and cmp says nothing on a mismatch that has
+  # to be parsed. It exits non-zero on a size difference before reading a byte, so this costs nothing
+  # on the 190 files that are not a copy.
+  for name in "$accept" "$reject"; do
+    if cmp -s "$2" "$root/wire/$name"; then
+      echo "::error file=$1::$3 is byte-identical to wire/$name under another name"
+      echo "    Renaming a copy does not make it not a copy, and neither does renaming the extension."
+      echo "    Read the original from the repository root - see wire/README.md."
+      return 0
+    fi
+  done
 
   # The reference. Only from a test source: a mention in main/ would be the app shipping a path into
   # a repository that is not on the phone.

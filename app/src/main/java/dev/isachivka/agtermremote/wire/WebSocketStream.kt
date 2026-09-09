@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * The outer half of the wire: a WebSocket to the router, presented as a byte stream.
  *
- * KeenDNS proxies rather than forwards, so the router terminates its own TLS and the client
- * certificate cannot survive the trip. mTLS therefore runs *inside* this stream, and this class
+ * The router in front of the laptop PROXIES rather than forwards, so it terminates its own TLS and
+ * the client certificate cannot survive the trip. mTLS therefore runs *inside* this stream, and this class
  * exists to give the driver above it something that reads and writes bytes.
  *
  * ### Two trust decisions, and this class makes only one of them
@@ -194,8 +194,8 @@ class WebSocketStream private constructor(
          * Everything else is [WireFailure.CannotReach], including cases this code could easily
          * *appear* to tell apart. A DNS failure, a refused connection, a dropped route and a TLS
          * failure are four different exception types and the same fact from here: **the laptop is not
-         * answering and this app cannot observe why.** That rule has held throughout, and through
-         * the Immich report, and an arm that matched on exception type while returning the same value
+         * answering and this app cannot observe why.** That rule has held throughout, and an arm that
+         * matched on exception type while returning the same value
          * would read as a considered classification and classify nothing — preserved by the next
          * person as a distinction that never existed.
          *

@@ -5,7 +5,7 @@ package dev.isachivka.agtermremote.agterm
  *
  * ### Why the typing report moved here
  *
- * The owner, on the first build of design/v1: *"notifications still in the keyboard block, but on
+ * The owner, on the first build of the design: *"notifications still in the keyboard block, but on
  * design it is in special place over terminal with x button to close"*. They are right, and the rule
  * that admits it is the rule that already governs this surface: **it carries what the app OBSERVED.**
  *

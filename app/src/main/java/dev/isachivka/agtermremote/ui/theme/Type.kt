@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.sp
  * M3 scale disagree — a scale bent to fit one screen is a scale that fits nothing else.
  */
 val AppTypography = Typography(
-    // The app title on the launcher. Large, light, and tightened, which is the design's one piece
+    // A screen's own title, at its largest. Large, light, and tightened, which is the design's one piece
     // of real typographic character.
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
@@ -23,7 +23,7 @@ val AppTypography = Typography(
         lineHeight = 38.sp,
         letterSpacing = (-0.4).sp,
     ),
-    // Every other screen's title: Updates, GitHub token, Modules, and a module's own name.
+    // Every other screen's title: Settings, and the terminal's own header.
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
@@ -45,14 +45,14 @@ val AppTypography = Typography(
         fontSize = 17.sp,
         lineHeight = 23.sp,
     ),
-    // Module tile names, and the title of a row that leads somewhere.
+    // The title of a row that leads somewhere.
     titleSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 15.sp,
         lineHeight = 20.sp,
     ),
-    // Paragraphs the owner is expected to actually read - the token explanation above all.
+    // Paragraphs the owner is expected to actually read - the pairing explanation above all.
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,

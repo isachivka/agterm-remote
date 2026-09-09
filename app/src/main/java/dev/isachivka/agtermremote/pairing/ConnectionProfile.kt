@@ -8,8 +8,8 @@ import java.io.ByteArrayOutputStream
  *
  * **The address is not in this application.** It is not a default, not a build field, not a constant
  * with a comment saying "change me". It arrives in the pairing payload and is stored on the device,
- * so switching from a direct forwarded port to a relay through SugarDaddy is the owner re-minting one
- * payload on the laptop and re-scanning it. No rebuild, no release, and no address ever enters the
+ * so moving from a forwarded port straight to the laptop to a relay in front of it is the owner
+ * re-minting one payload and re-scanning it. No rebuild, no release, and no address ever enters the
  * repository — which is a ruling holding by construction rather than by anyone remembering
  * it.
  *
