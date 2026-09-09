@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import dev.isachivka.agtermremote.settings.AskedForCamera
 import kotlinx.coroutines.launch
 
 /**
@@ -154,9 +155,18 @@ fun PairingHost(
         when {
             !hasCamera -> flow.cameraUnavailable()
             permitted -> Unit
-            else -> runCatching { askForCamera.launch(Manifest.permission.CAMERA) }
-                // A device with no activity able to show the dialog is a device with no camera route.
-                .onFailure { flow.cameraUnavailable() }
+            else -> {
+                // **Recorded before the dialog, not after the answer.** The platform keeps no record
+                // that an app has ever asked: `shouldShowRequestPermissionRationale` is false both on
+                // a first run and after a permanent refusal, so without this one file the settings
+                // screen would either accuse a new owner of blocking the camera or never tell the
+                // blocked one anything. See `CameraAccess`.
+                AskedForCamera(context).record()
+                runCatching { askForCamera.launch(Manifest.permission.CAMERA) }
+                    // A device with no activity able to show the dialog is a device with no camera
+                    // route.
+                    .onFailure { flow.cameraUnavailable() }
+            }
         }
     }
 

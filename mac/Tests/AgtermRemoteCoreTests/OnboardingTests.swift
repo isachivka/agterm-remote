@@ -69,10 +69,15 @@ struct OnboardingTests {
     @Test func everyStepIsReachable() {
         let steps = Set(
             [
-                (false, nil as String?, false), (true, nil, false),
-                (true, "example.test:8443", false), (true, "example.test:8443", true),
+                (false, nil as String?, false, true), (true, nil, false, true),
+                (true, "example.test:8443", false, true), (true, "example.test:8443", true, false),
+                (true, "example.test:8443", true, true),
             ]
-            .map { Onboarding(agtermSocketExists: $0.0, address: $0.1, isPaired: $0.2).step })
+            .map {
+                Onboarding(
+                    agtermSocketExists: $0.0, address: $0.1, isPaired: $0.2, frontDoorAnswered: $0.3
+                ).step
+            })
 
         #expect(steps == Set(OnboardingStep.allCases))
     }
@@ -423,5 +428,83 @@ struct EditingMenuTests {
         #expect(
             main.code.contains("NSApp.mainMenu = EditingMenu.make()"),
             "the app never assigns a main menu, so nothing delivers the editing commands")
+    }
+
+    // MARK: - The question an owner who paired first was never asked
+
+    /// **The whole of the migration, in one assertion.**
+    ///
+    /// An address, a paired phone, and no answer to the front-door question is the state a build from
+    /// before that question existed leaves behind. The setup window opens only for what is
+    /// unfinished, so without this rung their setup looks finished and the question is unreachable
+    /// from anywhere in the app.
+    @Test func aPairedOwnerWhoWasNeverAskedTheFrontDoorQuestionIsAskedOnce() {
+        let onboarding = Onboarding(
+            agtermSocketExists: true, address: "example.test:8443", isPaired: true,
+            frontDoorAnswered: false)
+
+        #expect(onboarding.setup == .frontDoor)
+        #expect(onboarding.step == .frontDoor)
+    }
+
+    /// And once, which is the other half of it. An answer is an answer whichever one it is.
+    @Test func answeringItFinishesSetup() {
+        let onboarding = Onboarding(
+            agtermSocketExists: true, address: "example.test:8443", isPaired: true,
+            frontDoorAnswered: true)
+
+        #expect(onboarding.setup == .done)
+        #expect(onboarding.step == .done)
+    }
+
+    /// **Nobody who has not paired yet is sent there**, because the question is already on the address
+    /// pane beside the box. Both rungs above it hold in every direction.
+    @Test func anUnfinishedSetupIsNeverInterruptedByIt() {
+        #expect(
+            Onboarding(
+                agtermSocketExists: true, address: nil, isPaired: false, frontDoorAnswered: false
+            ).setup == .address)
+        #expect(
+            Onboarding(
+                agtermSocketExists: true, address: "example.test:8443", isPaired: false,
+                frontDoorAnswered: false
+            ).setup == .pairing)
+        #expect(
+            Onboarding(
+                agtermSocketExists: true, address: nil, isPaired: true, frontDoorAnswered: false
+            ).setup == .address)
+    }
+
+    /// agterm's absence still comes first in the full ladder and still does not enter `setup` — the
+    /// migration is a configuration fact and the terminal is a runtime one.
+    @Test func agtermStillComesFirstAndStillIsNotSetup() {
+        let onboarding = Onboarding(
+            agtermSocketExists: false, address: "example.test:8443", isPaired: true,
+            frontDoorAnswered: false)
+
+        #expect(onboarding.step == .agtermMissing)
+        #expect(onboarding.setup == .frontDoor)
+    }
+
+    /// **The default is "nothing outstanding", in the safe direction.** Forgetting to pass it costs a
+    /// question nobody was owed; the other default would interrupt a finished setup at every launch.
+    @Test func theDefaultAsksNobodyAnything() {
+        #expect(
+            Onboarding(agtermSocketExists: true, address: "example.test:8443", isPaired: true).setup
+                == .done)
+    }
+
+    /// The app reads the fact rather than assuming it. A rung nothing supplies is a rung nobody
+    /// reaches, and this is the one line that connects the ladder to the store.
+    @Test func theAppSuppliesItFromTheStore() throws {
+        let main = try AppSources.all().first { $0.name.hasSuffix("Sources/AgtermRemote/main.swift") }
+
+        guard let main else { return #expect(Bool(false), "main.swift is not in the walk") }
+        #expect(
+            main.code.contains("frontDoorAnswered: AddressPreference.frontDoorAnswered()"),
+            "the setup ladder is built without the front-door fact, so the pane is unreachable")
+        #expect(
+            main.code.contains("AddressPreference.confirmFrontDoor("),
+            "saving an address records no answer, so a new owner meets the migration pane too")
     }
 }

@@ -181,6 +181,6 @@ class PairingOutcomeTest {
     private companion object {
         /** Verbs that name an action. Short on purpose: this pins the property, not the copy. */
         val IMPERATIVES =
-            listOf("Open ", "Scan ", "Update ", "Check ", "Try ", "Point ", "Paste ", "Reinstall ")
+            listOf("Open ", "Scan ", "Update ", "Check ", "Try ", "Point ", "Paste ", "Replace ")
     }
 }

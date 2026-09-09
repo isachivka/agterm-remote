@@ -86,12 +86,18 @@ class PairedLaptop(private val directory: File) {
     }
 
     /**
-     * Forgets the laptop.
+     * Forgets the laptop, and **only** the laptop.
      *
-     * Does **not** touch [PhoneIdentity]. Re-pairing with the same laptop should not need a new
-     * identity re-pinned on the far side; unpairing is about which laptop, not about who this phone
-     * is. Discarding the identity is a separate, louder act because it invalidates a certificate the
-     * owner pinned by hand.
+     * It does not touch [PhoneIdentity], and that is a statement about this function rather than about
+     * unpairing. **Unpairing on the settings screen clears both halves** — see
+     * `LaptopSettings.confirm`, which calls this and then discards the key. The bridge keeps exactly
+     * one peer in this version, so a phone that kept its key after unpairing would hold a certificate
+     * the Mac has already been told to forget: half a pairing, and not a state worth being in.
+     *
+     * The reason the deletion is not folded in here is the one this whole area is careful about. This
+     * is a store, it is called by tests and by the enrolment path, and a store method that destroyed a
+     * hardware key as a side effect is exactly the wiring that cost the owner their pairing on
+     * 2026-07-29. The louder act stays where a person presses it.
      */
     fun clear() {
         file.delete()
