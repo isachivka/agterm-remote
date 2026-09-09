@@ -63,11 +63,43 @@
 # sequence is ASCII on disk; so is transliterated Russian; so are the owner's own words written in
 # English. Those are asserted by the people writing the code, not enforced by anything here.
 #
-# PROPER NOUNS ARE THE SHARPEST CASE OF THAT, and it is worth stating rather than leaving implied: a
-# machine name, a service name, a network name or a person's name is an ordinary word in an ordinary
-# sentence. No pattern here can tell one from prose, and no pattern here ever will - a list of the
-# owner's machine names, written into a guard, would commit exactly what the guard exists to keep
-# out. A green run from every script in this directory says nothing whatever about them.
+# # These guards enforce SHAPES. They cannot enforce IDENTITY.
+#
+# Every script in this directory recognises a shape: an address, a token prefix, a PEM header, a
+# byte range. A shape is a property of the text. **Identity is not.** A machine name, a service, a
+# network, a project, a person, a Unix login - each is an ordinary word in an ordinary sentence, and
+# what makes it a leak is a fact about the world outside the repository.
+#
+# The case that closes the argument is LOWER CASE. A session name, a workspace, a hostname and a
+# Unix login are all conventionally lower case, and a lower-case proper noun is invisible twice over:
+# no pattern here can see it, and neither can the obvious manual supplement of reading every
+# capitalised word. Once the capital is dropped there is nothing left to sort on. Every general trick
+# proposed for it - a dictionary, entity recognition, a heuristic over identifier-shaped strings -
+# has a false-pass shape, and the residue after the filtering is longer than the text it came from.
+#
+# So the constraint "nothing personal in any committed file" is three different things at once, and
+# saying which is which is the only honest way to state it:
+#
+#   ENFORCED      for the shapes. Addresses, GitHub tokens, private keys, credential-shaped fields
+#                 and Cyrillic bytes fail the build. That part is mechanical and it works.
+#   ENFORCEABLE   for any FINITE set of terms somebody enumerates in advance. A name nobody has
+#                 written down cannot be matched; a name that has been written down can be, exactly.
+#   A PROMISE     for everything else - kept by somebody who knows the owner's life reading the text.
+#                 Not by anything in this directory.
+#
+# **The base rate, so nobody reads that third line as a formality.** This project ported one Android
+# module out of a private repository and swept it for names three times. Each round found one more:
+# a server named in a comment; a project name in a lower-case string fixture; a Unix login inside
+# `ls` output used as terminal test data. Three passes, three finds, by three different readers. The
+# next pass should expect to find something too.
+#
+# THE ONE MECHANISM THAT WOULD ACTUALLY WORK, named here rather than built: an exact-token denylist
+# of the owner's own vocabulary - logins, machines, services, projects, domains - held OUTSIDE this
+# repository and read by CI from a secret, or by a pre-push hook on the maintainer's machine. It is
+# deterministic, it case-folds, it needs no cleverness, and it would have caught both of the misses
+# above. It is not here, and no such list may ever be committed here: writing the owner's vocabulary
+# into a public repository to detect the owner's vocabulary in a public repository is the thing being
+# prevented, performed. That is why this is a note and not a script.
 
 # Populated by guard_walk. Read by guard_accounting, and reconciled: a file is scanned, declined or
 # refused, and the three must add up to the number of tracked paths or the walk itself is wrong.

@@ -46,7 +46,7 @@ class TerminalWithKeyboardTest {
     private val screen = buildString {
         appendLine("$ ls -la")
         appendLine("total 48")
-        appendLine("drwxr-xr-x  8 is  staff   256 Jul 29 22:20 .")
+        appendLine("drwxr-xr-x  8 user  staff   256 Jul 29 22:20 .")
         appendLine("$ hello")
         appendLine("zsh: command not found: hello")
         append("$ ")
