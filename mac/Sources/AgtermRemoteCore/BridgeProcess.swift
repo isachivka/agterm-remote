@@ -86,6 +86,10 @@ public final class BridgeProcess: @unchecked Sendable {
     /// Returns nil when it is in none of them, and the caller's job is then to grey the menu items
     /// rather than to offer a control that cannot work.
     ///
+    /// The first candidate is spelled by `BundledBridge`, not here. That layout —
+    /// `Contents/Resources/agterm-remote-bridge` — is a thing `bundle.sh` and this lookup have to
+    /// agree about, and a second copy of it in this file is the way they would stop agreeing.
+    ///
     /// - Parameter isExecutable: injected so the order can be asserted without a file system.
     public static func locate(
         resources: URL?,
@@ -94,7 +98,7 @@ public final class BridgeProcess: @unchecked Sendable {
         isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
     ) -> URL? {
         let candidates = [
-            resources?.appending(path: executableName),
+            resources.map(BundledBridge.candidate(inResources:)),
             beside.deletingLastPathComponent().appending(path: executableName),
             stateDir.appending(path: "bin").appending(path: executableName),
         ]
