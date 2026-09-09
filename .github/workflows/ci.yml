@@ -185,12 +185,12 @@ jobs:
           app="$(swift build -c release --show-bin-path)/AgtermRemote.app"
           archs="$(lipo -archs "$app/Contents/Resources/agterm-remote-bridge")"
           echo "archs: $archs"
-          for want in x86_64 arm64; do
-            case " $archs " in
-              *" $want "*) ;;
-              *) echo "::error::the bundled bridge is '$archs' and needs $want"; exit 1 ;;
-            esac
-          done
+          # Exactly these two, not "at least": a fat file can carry a third slice nothing here built,
+          # and a membership test waves that through.
+          if [ "$(printf '%s\n' $archs | sort | tr '\n' ' ')" != "arm64 x86_64 " ]; then
+            echo "::error::the bundled bridge is '$archs' and must be exactly x86_64 and arm64"
+            exit 1
+          fi
       # **`-trimpath`, asked of Go's own record rather than of the bytes.**
       #
       # This step used to grep the binary for `/Users/`. That check PASSED on a binary carrying 50

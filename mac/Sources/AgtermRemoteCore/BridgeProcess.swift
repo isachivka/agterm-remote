@@ -117,36 +117,65 @@ public final class BridgeProcess: @unchecked Sendable {
     /// about the attempt after it.
     static let longEnoughToForget: TimeInterval = 30
 
-    /// **How long a spawned bridge may say nothing before it is treated as never having run.**
+    /// **What the bridge prints once its listener is bound, and the only thing that counts as ready.**
     ///
-    /// Every signal this class has is about a process *existing*: spawned, alive, exited. None of
-    /// them separates a bridge that is working from one that was launched and froze — and freezing is
-    /// not hypothetical, it is what a quarantined copy does on every Mac that downloaded it. The
-    /// child sits in `SN`, writes nothing, exits never, and `.running(pid:)` is a true statement
-    /// about a process that will never answer a phone.
+    /// Not "any output". An earlier version accepted anything at all on stderr, which made the check
+    /// mean *exec succeeded* rather than *the bridge is answering* — and it rested on an invariant
+    /// living in the Go half with nothing on that side holding it, so a reworded log line would have
+    /// disarmed this silently.
     ///
-    /// So silence is the signal. **This depends on the bridge writing to stderr**, which it does
-    /// because `arguments()` never passes `--log` — a fact asserted by a test rather than left to
-    /// whoever next edits that function, because adding `--log` here would make this timer kill a
-    /// healthy bridge two seconds after every start.
+    /// It is now a contract with a test at each end: the bridge's own suite starts it on a real port,
+    /// waits for this line and then dials the port, and `theReadyMarkerIsTheOneTheBridgePrints` reads
+    /// this literal out of the bridge's source and compares it with this one. Change either and both
+    /// fail.
+    public static let readyMarker = "ready: listening on"
+
+    /// **How long a spawned bridge may take to say it is ready before it is treated as frozen.**
     ///
-    /// Two seconds. Measured against the real binary: it announces its identity and its listening
-    /// address within milliseconds of exec, so this is two orders of magnitude of headroom rather
-    /// than a race.
-    public static let silenceCeiling: TimeInterval = 2
+    /// Every other signal this class has is about a process *existing*: spawned, alive, exited. None
+    /// separates a working bridge from one macOS froze at exec — the child sits in `SN`, writes
+    /// nothing, exits never, and `.running(pid:)` is a true statement about a process that will never
+    /// answer a phone.
+    ///
+    /// **Ten seconds, and the previous two were wrong.** Two was chosen against the wrong
+    /// measurement: how long the bridge takes to announce itself *after* `main`, which is
+    /// milliseconds. The cost that matters is spawn-to-`main` — signature validation of a fresh
+    /// eighteen-megabyte universal binary, which macOS does on first exec of every new copy. Measured
+    /// on an idle machine, five fresh copies: **548, 592, 599, 602 and 606 ms** cold against 194–239
+    /// ms warm, and review measured up to 1.05 s. Half the old budget was gone before the bridge ran
+    /// its first instruction, with no retry and a message that blamed Gatekeeper.
+    ///
+    /// Ten leaves room for that, for a loaded machine, and for the bridge's own two-second identity
+    /// wait when two starts race for one state directory. Nothing legitimate takes ten seconds; a
+    /// binary macOS is holding takes forever.
+    public static let readyCeiling: TimeInterval = 10
 
     public enum Failure: Error, Equatable, CustomStringConvertible {
         /// Nothing was spawned at all. Carries the sentence that is also in `.failed`.
         case couldNotStart(String)
 
+        /// macOS is holding the binary. Carries the sentence **and the command on its own**, because
+        /// an `NSAlert`'s informative text cannot be selected: a command that exists only inside the
+        /// paragraph is one the owner retypes by hand from the screen.
+        case quarantined(String, command: String)
+
         /// **The sentence, and nothing around it.** The caller shows this to a person — `main.swift`
         /// puts `"\(error)"` in an alert — and the default rendering of an enum with an associated
-        /// value would put `couldNotStart(` in front of it and a close bracket after. That mattered
-        /// the moment one of these grew past a line: the quarantine refusal is a paragraph with a
-        /// command in it, and it has to arrive looking like something written for the reader.
+        /// value would put the case name in front of it and a bracket after. That mattered the moment
+        /// one of these grew past a line: the quarantine refusal is a paragraph with a command in it,
+        /// and it has to arrive looking like something written for the reader.
         public var description: String {
             switch self {
             case .couldNotStart(let sentence): sentence
+            case .quarantined(let sentence, _): sentence
+            }
+        }
+
+        /// Something the owner should be able to copy rather than transcribe, when there is one.
+        public var copyable: String? {
+            switch self {
+            case .couldNotStart: nil
+            case .quarantined(_, let command): command
             }
         }
     }
@@ -228,7 +257,7 @@ public final class BridgeProcess: @unchecked Sendable {
             delay, work in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
         },
-        isQuarantined: @escaping @Sendable (URL) -> Bool = { Quarantine.isSet(on: $0) },
+        isQuarantined: @escaping @Sendable (URL) -> Bool = { Quarantine.wouldBeHeld($0) },
     ) {
         self.launcher = launcher
         self.executable = executable
@@ -262,7 +291,7 @@ public final class BridgeProcess: @unchecked Sendable {
             if isQuarantined(executable) {
                 let sentence = Quarantine.explanation(for: executable)
                 set(.failed(sentence))
-                throw Failure.couldNotStart(sentence)
+                throw Failure.quarantined(sentence, command: Quarantine.command(for: executable))
             }
             listenAddress = listen
             socketPath = socket
@@ -360,33 +389,35 @@ public final class BridgeProcess: @unchecked Sendable {
             // Armed per launch, and it belongs to this launch: `mine` is checked when it fires, so a
             // Stop, a retry or a fresh Start in the meantime makes it a no-op rather than a verdict
             // about somebody else's child.
-            watchForSilence(Self.silenceCeiling) { [weak self] in
-                self?.giveUpIfItNeverSpoke(run: mine)
+            watchForSilence(Self.readyCeiling) { [weak self] in
+                self?.giveUpIfItNeverBecameReady(run: mine)
             }
         }
         return nil
     }
 
-    /// **The generic backstop: launched, alive, and has never said a word.**
+    /// **The generic backstop: launched, alive, and never became ready.**
     ///
     /// The quarantine check above names the cause this was built for, but it is not the only way a
     /// child can be spawned and never run — a corrupted binary, a filesystem that stops answering,
     /// whatever Gatekeeper does next year. All of them look identical from here: a live pid that
-    /// produces nothing. So the rule is about the symptom rather than about any one cause.
+    /// never announces a bound listener. So the rule is about the symptom rather than any one cause.
     ///
-    /// It **stops** the child rather than leaving it. A bridge that has said nothing has not bound
-    /// the port either, so there is nothing to lose by ending it — and leaving a frozen process alive
-    /// under a menu that offers Start again is how one press becomes several stuck children.
+    /// **It waits for [readyMarker], not for output.** A bridge that printed a warning and then hung
+    /// before binding would have satisfied the earlier "said anything" rule while answering nothing.
     ///
-    /// No retry. Five attempts at something that hangs are five hangs and forty-five seconds of a
-    /// menu saying `.starting`.
-    private func giveUpIfItNeverSpoke(run: Int) {
+    /// It **stops** the child rather than leaving it. A bridge that never bound has not taken the
+    /// port, so there is nothing to lose by ending it — and leaving a frozen process alive under a
+    /// menu that offers Start again is how one press becomes several stuck children.
+    ///
+    /// No retry. Five attempts at something that hangs are five hangs and a minute of a menu that
+    /// says it is starting.
+    private func giveUpIfItNeverBecameReady(run: Int) {
         lock.withLock {
             guard run == runID, !stopping else { return }
             guard case .running(let alive) = _state else { return }
-            // It spoke. That is the whole test: the bridge announces its identity and its listening
-            // address on stderr as it comes up, and anything at all means exec succeeded.
-            if let said = launcher.lastOutput(of: alive), !said.isEmpty { return }
+            // Bound and answering, in the bridge's own words. See `readyMarker`.
+            if launcher.lastOutput(of: alive)?.contains(Self.readyMarker) == true { return }
 
             // Same shape as `stop()`: mark first so the exit this causes is not read as a crash and
             // retried, and bump the generation so a retry already waiting is no longer ours to make.
@@ -394,25 +425,30 @@ public final class BridgeProcess: @unchecked Sendable {
             generation += 1
             launcher.terminate(alive)
             pid = nil
-            set(.failed(Self.silenceSentence(executable: executable)))
+            set(.failed(Self.notReadySentence(executable: executable, said: launcher.lastOutput(of: alive))))
         }
     }
 
-    /// What silence is reported as. Names the observation first and the likeliest cause second,
-    /// because the observation is a fact and the cause is an inference.
-    static func silenceSentence(executable: URL) -> String {
-        """
-        The bridge started but never said anything, so it has been stopped.
+    /// What a bridge that never bound is reported as. The observation first and the inference second,
+    /// because the observation is a fact and the cause is a guess — and whatever the child did manage
+    /// to say last, since that is evidence and this app did not write it.
+    static func notReadySentence(executable: URL, said: String?) -> String {
+        var sentence = """
+            The bridge started but never reported a listening address, so it has been stopped.
 
-        A working bridge announces the address it is listening on immediately. One that says nothing \
-        was launched and never ran. The usual reason on macOS is that the app arrived by download and \
-        is being held by Gatekeeper — check it with:
+            A working bridge announces the port it is listening on within a second or so of starting. \
+            One that never does was launched and never ran, or could not bind. If the app arrived by \
+            download, macOS may be holding it — check with:
 
-            xattr -l "\(Quarantine.enclosingBundle(of: executable)?.path ?? executable.path)"
+                xattr -l "\(Quarantine.enclosingBundle(of: executable)?.path ?? executable.path)"
 
-        If `com.apple.quarantine` is listed, remove it with `xattr -dr com.apple.quarantine` on that \
-        same path and start the bridge again.
-        """
+            If `com.apple.quarantine` is listed with flags that do not end in an approved bit, open \
+            the app from the Finder once and allow it, or clear the attribute with `xattr -dr`.
+            """
+        if let said = said?.trimmingCharacters(in: .whitespacesAndNewlines), !said.isEmpty {
+            sentence += "\n\nIt said:\n\(lastBytes(said, sentenceOutputLimit))"
+        }
+        return sentence
     }
 
     private func handle(exit status: Int32, run: Int) {

@@ -87,6 +87,19 @@ const (
 	identityWaitStep   = 10 * time.Millisecond
 )
 
+// readyLine is the exact text this bridge prints once its listener is BOUND and it can answer.
+//
+// **It is a contract with the macOS app, not a log message.** That app spawns this process and has
+// no other way to tell a bridge that is working from one macOS froze at exec - a quarantined copy
+// returns a pid, never reaches main, writes nothing and never exits, so "the process exists" is true
+// of both. The app waits for this line and stops a child that has not printed it within its ceiling.
+//
+// So it must be printed AFTER the listener is bound and BEFORE anything that could block, and it
+// must not be reworded casually: TestTheReadyLineIsPrintedOnceTheListenerIsBound holds this side, and
+// a test in the macOS package reads this constant out of this file and compares it with the string
+// that app looks for. Changing the text here fails there, which is the point.
+const readyLine = "ready: listening on"
+
 func main() {
 	listen := flag.String("listen", "", "host:port to listen on (required)")
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
@@ -251,7 +264,7 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// The BOUND address, not the argument that produced it. `:8443` and `[::]:8443` are one truth
 	// with two spellings, and the control socket's `status` reports the bound one - two spellings in
 	// a log and a status reply is how somebody ends up comparing them and concluding the bridge moved.
-	log.Printf("listening on %s", tcp.Addr())
+	log.Printf("%s %s", readyLine, tcp.Addr())
 	log.Printf("paired phones: %d", len(peers.Peers()))
 	log.Printf("agterm socket %s", socketPath)
 	// **This process exits with the app that started it.**

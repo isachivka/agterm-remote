@@ -7,11 +7,14 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -254,4 +257,79 @@ func TestConcurrentFirstStartsAgreeOnOneUsableIdentity(t *testing.T) {
 			t.Fatalf("round %d: disk holds a different identity from the one every start returned", round)
 		}
 	}
+}
+
+// **The ready line is a contract, so it is asserted end to end rather than by reading the source.**
+//
+// The macOS app spawns this process and cannot otherwise tell a working bridge from one macOS froze
+// at exec: a quarantined binary returns a pid, never reaches main, writes nothing and never exits.
+// The app waits for this line. A change here that stopped printing it, printed it before the listener
+// was bound, or reworded it would silently disarm that check on the other side of the repository - so
+// this runs the real startup path and waits for the real line, on a real bound port.
+func TestTheReadyLineIsPrintedOnceTheListenerIsBound(t *testing.T) {
+	// A port the kernel picks and then releases, so this does not fight whatever else is running.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserving a port: %v", err)
+	}
+	addr := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("releasing the port: %v", err)
+	}
+
+	said := &safeBuffer{}
+	log.SetOutput(said)
+	defer log.SetOutput(io.Discard)
+
+	done := make(chan error, 1)
+	go func() { done <- run(addr, filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", 0) }()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(said.String(), readyLine) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the bridge never printed %q. It said:\n%s", readyLine, said.String())
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the bridge stopped before it was ready: %v\n%s", err, said.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// **Bound, not merely announced.** The whole value of this line is that it means the port is
+	// answering, so the port is dialled rather than trusted.
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("the bridge said it was ready and %s does not answer: %v", addr, err)
+	}
+	_ = conn.Close()
+
+	// The same signal the macOS app sends. `run` installs a handler for it, so this unwinds the
+	// bridge rather than killing this test process.
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatalf("stopping the bridge: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the bridge did not unwind on SIGTERM")
+	}
+}
+
+// A log sink two goroutines touch: `log` writes from the bridge, the loop above reads.
+type safeBuffer struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.text.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.text.String()
 }

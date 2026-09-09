@@ -42,10 +42,19 @@ public enum BundledBridge {
     /// one fails at `Process.run` with an error the owner reads as the app being broken. So the type
     /// is asked for as well as the mode.
     ///
+    /// **The link is resolved first**, and that matters here rather than being tidiness. A previous
+    /// version asked `.isRegularFileKey` of the path as given, which does not follow links — so every
+    /// symbolic link failed this test, including the perfectly ordinary one somebody makes during
+    /// development to point `.build/debug/agterm-remote-bridge` at a Go build tree. That greyed both
+    /// menu items with no explanation, in the one place `locate` exists to serve. Containment is a
+    /// question for the bundle and is asked in `url(in:)`; here the only question is whether the
+    /// thing at the end is a file that can be executed.
+    ///
     /// - Parameter path: a file system path, not a URL, so it can stand in as `locate`'s predicate.
     public static func isSpawnable(_ path: String) -> Bool {
         guard FileManager.default.isExecutableFile(atPath: path) else { return false }
-        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey])
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey])
         return values?.isRegularFile == true
     }
 
@@ -57,11 +66,14 @@ public enum BundledBridge {
     ///  2. **It is spawnable** — an executable *regular file*. One that exists with the wrong mode, or
     ///     a directory wearing the name, is indistinguishable from a working install until somebody
     ///     presses Start.
-    ///  3. **It is the one this bundle carries.** `isExecutable` follows symbolic links, so without
-    ///     this a link planted in `Contents/Resources` would make the app spawn a binary from
-    ///     anywhere on the disk while every check above said the bridge came from inside the bundle.
-    ///     Measured: it resolved and would have run. The bundle's signature seals the link, not its
-    ///     target, so the seal does not cover this either.
+    ///  3. **It is the one this bundle carries.** Both checks above follow symbolic links — they
+    ///     have to, or an ordinary development symlink would fail them — so without this a link
+    ///     planted in `Contents/Resources` would make the app spawn a binary from anywhere on the
+    ///     disk while every check above said the bridge came from inside the bundle. Measured: it
+    ///     resolved and would have run. The bundle's signature seals the link, not its target, so
+    ///     the seal does not cover this either. This is the ONLY check that catches it, which is why
+    ///     it is here and not folded into `isSpawnable`: `locate`'s other two candidates are not
+    ///     inside any bundle and have nothing to be contained by.
     ///
     /// Nil for all three, because nil is what greys Start and Stop — and a menu item that looks dead
     /// is the correct report for a bridge that is not really here.
@@ -78,12 +90,18 @@ public enum BundledBridge {
         guard let resources = bundle.resourceURL else { return nil }
         let bridge = candidate(inResources: resources)
         guard isExecutable(bridge.path) else { return nil }
-        // Both sides resolved, so the comparison is about links inside the bundle rather than about
-        // the ones every temporary directory on macOS is reached through.
+        // **Inside the resource directory — not at one exact path.** The question is whether the app
+        // would spawn something this bundle carries, and a link to a sibling in the same sealed
+        // directory is something this bundle carries. An equality test here refused that too, which
+        // is a rule stricter than its own reason.
+        //
+        // Both sides resolved, so this is about links inside the bundle rather than about the ones
+        // every temporary directory on macOS is reached through (`/var` to `/private/var`).
         let landsOn = bridge.resolvingSymlinksInPath().standardizedFileURL.path
-        let belongsAt = candidate(
-            inResources: resources.resolvingSymlinksInPath().standardizedFileURL,
-        ).standardizedFileURL.path
-        return landsOn == belongsAt ? bridge : nil
+        var inside = resources.resolvingSymlinksInPath().standardizedFileURL.path
+        // The separator is load-bearing: without it `/x/Resources` would also contain
+        // `/x/ResourcesElsewhere/agterm-remote-bridge`.
+        if !inside.hasSuffix("/") { inside += "/" }
+        return landsOn.hasPrefix(inside) ? bridge : nil
     }
 }

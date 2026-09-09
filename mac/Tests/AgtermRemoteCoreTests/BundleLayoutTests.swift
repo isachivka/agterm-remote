@@ -91,12 +91,53 @@ struct BundleLayoutTests {
         #expect(BundledBridge.url(in: app) == nil)
     }
 
+    /// **An ordinary development symlink is accepted.**
+    ///
+    /// This is the half the containment check nearly cost. `.isRegularFileKey` does not follow links,
+    /// so asking it of the path as given rejected *every* symlink — including the one somebody makes
+    /// during development to point a build directory at a Go tree, which is the case `locate` exists
+    /// to serve. It greyed both menu items with no explanation. The link is resolved first, so what
+    /// is judged is the file at the end of it.
+    @Test func aSymlinkToARealBinaryInsideTheBundleIsStillTheBridge() throws {
+        let app = try bundle(named: "AgtermRemote", containing: ["real-bridge": 0o755])
+        let resources = try #require(app.resourceURL)
+        try FileManager.default.createSymbolicLink(
+            at: resources.appending(path: "agterm-remote-bridge"),
+            withDestinationURL: resources.appending(path: "real-bridge"))
+
+        // Spawnable: the link resolves to an executable regular file, which is all `locate` asks.
+        #expect(BundledBridge.isSpawnable(resources.appending(path: "agterm-remote-bridge").path))
+        // And accepted, because what it points at is still something this bundle carries. The rule
+        // is "inside the resource directory", not "at exactly this path" — the stricter version
+        // refused this too, which is a rule stricter than its own reason.
+        #expect(BundledBridge.url(in: app) != nil)
+    }
+
+    /// And `locate` — where containment is not the question — accepts one beside the executable,
+    /// which is exactly the development layout `mac/README.md` tells people to create.
+    @Test func aDevelopmentBridgeReachedThroughASymlinkIsFound() throws {
+        let build = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "agterm-remote-dev-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: build, withIntermediateDirectories: true)
+        let real = build.appending(path: "built-by-go")
+        FileManager.default.createFile(atPath: real.path, contents: Data())
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: real.path)
+        try FileManager.default.createSymbolicLink(
+            at: build.appending(path: "agterm-remote-bridge"), withDestinationURL: real)
+
+        let found = BridgeProcess.locate(
+            resources: nil, beside: build.appending(path: "AgtermRemote"),
+            stateDir: URL(fileURLWithPath: "/nowhere"))
+
+        #expect(found?.lastPathComponent == "agterm-remote-bridge")
+    }
+
     /// **A link out of the bundle is not the bridge this bundle carries.**
     ///
-    /// `isExecutableFile` follows symbolic links, so without a containment check a link planted in
-    /// `Contents/Resources` would make the app spawn a binary from anywhere on the disk while every
-    /// other check said it came from inside. The bundle's signature seals the link and not its
-    /// target, so the seal does not cover this either.
+    /// Both checks above follow symbolic links — they have to, or the development layout would fail
+    /// — so containment is the only thing that catches a link planted in `Contents/Resources`
+    /// pointing at a binary from anywhere on the disk. The bundle's signature seals the link and not
+    /// its target, so the seal does not cover this either.
     @Test func aLinkPointingOutOfTheBundleIsNotTheBridge() throws {
         let app = try bundle(named: "AgtermRemote", containing: [:])
         let resources = try #require(app.resourceURL)
@@ -109,6 +150,9 @@ struct BundleLayoutTests {
         try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: elsewhere)
 
         #expect(FileManager.default.isExecutableFile(atPath: planted.path), "the trap this closes")
+        // It passes the spawnability test — that is the point. Containment is what refuses it, and
+        // if this expectation ever flips, the containment check below has become dead code.
+        #expect(BundledBridge.isSpawnable(planted.path), "the earlier guard must NOT be what stops it")
         #expect(BundledBridge.url(in: app) == nil)
     }
 
@@ -135,59 +179,79 @@ private final class Marker {}
 
 /// **The attribute that decides whether the bridge will run at all, read the way the app reads it.**
 ///
-/// Against a real file with a real extended attribute, not a stub. The whole claim this rests on is
-/// that an *unentitled, ad-hoc-signed* process can read `com.apple.quarantine` even though it cannot
-/// remove it — and a stubbed `getxattr` would assert nothing about that.
+/// Against real files with real extended attributes, not a stub. The whole claim this rests on is
+/// that an *unentitled, ad-hoc-signed* process can read `com.apple.quarantine` — and a stubbed
+/// `getxattr` would assert nothing about that.
 struct QuarantineTests {
 
-    private func file(quarantined: Bool) throws -> URL {
+    private func file(_ value: String?) throws -> URL {
         let at = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "agterm-remote-quarantine-\(UUID().uuidString)")
         FileManager.default.createFile(atPath: at.path, contents: Data("x".utf8))
-        if quarantined {
-            let value = "0081;00000000;test;"
+        if let value {
             let written = setxattr(at.path, Quarantine.attribute, value, value.utf8.count, 0, 0)
             try #require(written == 0, "could not set the attribute this suite is about")
         }
         return at
     }
 
-    @Test func aQuarantinedFileIsSeenAsQuarantined() throws {
-        #expect(Quarantine.isSet(on: try file(quarantined: true)))
-    }
-
-    @Test func anOrdinaryFileIsNot() throws {
-        #expect(Quarantine.isSet(on: try file(quarantined: false)) == false)
-    }
-
-    /// A file that is not there is not quarantined either. It is a state the caller has already
-    /// excluded — the binary was located before this is asked — and it must not read as held.
-    @Test func aFileThatIsNotThereIsNotQuarantined() {
-        #expect(Quarantine.isSet(on: URL(fileURLWithPath: "/nowhere/agterm-remote-bridge")) == false)
-    }
-
-    /// **The app CAN clear this, and that is exactly why the rule needs a test rather than a note.**
+    /// **Presence is not the condition, and this is the case that made that expensive.**
     ///
-    /// It is tempting to write that macOS forbids it. Measured here, on this machine: `removexattr`
-    /// from an ordinary unentitled process succeeds. So the reason the app does not is a decision —
-    /// quarantine is the record that this code came from outside, and an app that erases that record
-    /// about itself because somebody pressed Start has removed the only Gatekeeper signal a
-    /// non-notarised application is subject to.
-    ///
-    /// A decision is what drifts. This test states the capability so nobody re-derives the false
-    /// premise, and the one below holds the app to the choice.
-    @Test func theAppCouldClearItWhichIsWhyTheChoiceIsWrittenDown() throws {
-        let held = try file(quarantined: true)
-
-        #expect(removexattr(held.path, Quarantine.attribute, 0) == 0, "removal is permitted")
-        #expect(Quarantine.isSet(on: held) == false, "and it worked")
+    /// Every downloaded application on the machine this was measured on still carries the attribute
+    /// while running perfectly — `01c1`, `03c1`. Approving an app does not remove it; it sets a bit.
+    /// A check on presence alone refused every one of them, which is the path every real owner takes.
+    @Test(arguments: [
+        // flags, held?
+        ("0081;6aa0e764;Safari;", true),
+        ("0083;6aa0e764;Safari;", true),
+        ("0041;6aa0e764;Safari;", false),
+        ("00c1;6aa0e764;Safari;", false),
+        ("01c1;6aa0e764;Arc;E1D0A0E6-0000-4000-8000-000000000000", false),
+        ("03c1;6aa0e764;Arc;E1D0A0E6-0000-4000-8000-000000000000", false),
+    ])
+    func onlyAnUnapprovedQuarantineWouldHoldTheBinary(value: String, held: Bool) throws {
+        #expect(Quarantine.wouldBeHeld(try file(value)) == held, "flags \(value.prefix(4))")
     }
 
-    /// **So the app never writes an extended attribute, and never removes one.** It reads.
+    /// The bit itself, named once and asserted against the two spellings it arrives in.
+    @Test func theApprovedBitIsTheOneMacOSSets() {
+        #expect(Quarantine.flags(in: "0081;a;b;c") == 0x0081)
+        #expect(Quarantine.flags(in: "03c1;a;b;c")! & Quarantine.userApproved != 0)
+        #expect(Quarantine.flags(in: "0081;a;b;c")! & Quarantine.userApproved == 0)
+    }
+
+    @Test func anOrdinaryFileIsNotHeld() throws {
+        #expect(Quarantine.wouldBeHeld(try file(nil)) == false)
+    }
+
+    /// **An unreadable value lets the binary through, deliberately.**
     ///
-    /// Held at the source, the way `BoundaryTests` holds the list of processes this app may launch:
-    /// the capability is available and one line would use it, so the check names the two calls rather
-    /// than trusting a paragraph above them.
+    /// The two errors are not symmetrical. Wrongly refusing costs a working application and a false
+    /// explanation — the defect this rule replaced. Wrongly allowing costs one silent hang, which the
+    /// launch backstop catches and reports with the evidence in it.
+    @Test func aValueThisCannotParseIsNotTreatedAsAHold() throws {
+        #expect(Quarantine.wouldBeHeld(try file("not-hexadecimal;a;b;c")) == false)
+        #expect(Quarantine.wouldBeHeld(try file("")) == false)
+    }
+
+    /// A file that is not there is not held either. It is a state the caller has already excluded —
+    /// the binary was located before this is asked — and it must not read as held.
+    @Test func aFileThatIsNotThereIsNotHeld() {
+        #expect(Quarantine.wouldBeHeld(URL(fileURLWithPath: "/nowhere/agterm-remote-bridge")) == false)
+    }
+
+    /// **The app never writes an extended attribute, and never removes one.** It reads.
+    ///
+    /// Held at the source, the way `BoundaryTests` holds the list of processes this app may launch.
+    ///
+    /// This is the whole of the rule, and it deliberately makes no claim about whether removal
+    /// *would* succeed. Two review rounds have carried a confident answer in opposite directions —
+    /// that macOS forbids it, then that it does not — and measurement here (unentitled, and from
+    /// inside the quarantined bundle, across approved and unapproved flags, with and without a UUID)
+    /// succeeded every time while review measured EPERM. The reason the app does not do it survives
+    /// either answer: quarantine is macOS's record that this code came from outside, and an app that
+    /// erases that record about itself has removed the only Gatekeeper signal a non-notarised
+    /// application is subject to.
     @Test func nothingInThisAppRemovesOrSetsAnExtendedAttribute() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

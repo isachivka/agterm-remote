@@ -66,6 +66,12 @@ both items greyed. For development, put a locally built one beside the executabl
 (cd ../bridge && go build -o ../mac/.build/debug/agterm-remote-bridge ./cmd/agterm-remote-bridge)
 ```
 
+A symbolic link works here too. `BundledBridge.isSpawnable` resolves the link before asking whether
+it is an executable regular file, which it has to: `.isRegularFileKey` does not follow links, so
+asking it of the path as given rejected every symlink and greyed both menu items with no explanation,
+in the one place `locate` exists to serve. Inside a bundle there is one extra rule — the link must
+land inside `Contents/Resources`, because the bundle's signature seals a link and not its target.
+
 ### `-trimpath`, and why a byte grep is not how you check it
 
 Without it the Go binary carries the absolute path of every source file it was compiled from —
@@ -88,6 +94,11 @@ lipo -thin x86_64 -output slice bridge && go version -m slice | grep -- '-trimpa
 
 `CGO_ENABLED=0` and the expected `GOARCH` come from the same record. The byte grep is kept below it
 as a cheaper second net, no longer as the guard. CI repeats all of it.
+
+The `go` on `PATH` is trusted, and there is no way around that: the same `go` built the binary being
+asked about, so a shim that lied about the record could have written the record. Said rather than
+chased — the check is against an honest toolchain making a mistake, which is the failure that
+actually happens.
 
 ### Nothing enters the bundle until it has passed
 
@@ -119,21 +130,41 @@ A bundle built from source on the machine that runs it is never quarantined, so 
 *downloading* a release, not of building one. It is, however, the **first-run experience of every
 person who downloads one**, so the app does not leave it as a button that does nothing:
 
-- **Quarantine is read before the spawn.** `getxattr` answers from an ordinary unentitled process, so
-  `BridgeProcess.start` refuses with a paragraph naming quarantine and carrying the `xattr -dr`
-  command, and nothing is spawned. Verified end to end against a real quarantined bundle: 0 processes
-  started, the message shown.
-- **The app will not clear it**, and not because it cannot — measured, `removexattr` from this process
-  *succeeds*, on the nested binary and on the `.app` alike. Quarantine is macOS's record that this
-  code came from outside; an app that erased that record about itself as a side effect of somebody
-  pressing Start would be deleting the only Gatekeeper signal a non-notarised app is subject to. A
-  test asserts the capability so nobody re-derives the false premise, and another asserts that no
-  source file here calls `removexattr` or `setxattr`.
-- **A spawn timeout is the generic backstop.** A child that is alive and has written nothing after
-  `BridgeProcess.silenceCeiling` (two seconds) is stopped and reported as *started but never said
-  anything* — which covers freezes that have nothing to do with Gatekeeper. It works because the
-  bridge announces its listening address on stderr immediately, so `arguments()` must never pass
-  `--log`; a test holds that in place.
+- **The quarantine flags are read before the spawn** — the flags, not the attribute's presence.
+  Approving an app does not remove `com.apple.quarantine`; it sets bit `0x40` in it. Every downloaded
+  application in `/Applications` on the machine this was measured on still carries the attribute
+  while running perfectly (`01c1`, `03c1`). Measured against this exact bundle, same binary, only the
+  flags differing:
+
+  | flags  | the bridge |
+  |--------|------------|
+  | `0081` | frozen at exec — no output, no exit |
+  | `0041` | runs to completion |
+
+  So `BridgeProcess.start` refuses only when `0x40` is clear, and an attribute it cannot parse is let
+  through: wrongly refusing costs a working app and a false explanation, wrongly allowing costs one
+  hang that the backstop below catches and reports.
+- **The app will not clear it.** Quarantine is macOS's record that this code came from outside; an app
+  that erased that record about itself as a side effect of somebody pressing Start would be deleting
+  the only Gatekeeper signal a non-notarised app is subject to. That argument is deliberately the
+  only one here — two review rounds carried confident and *opposite* claims about whether
+  `removexattr` would succeed, and measurement here (unentitled, and from inside the quarantined
+  bundle, across approved and unapproved flags, with and without a UUID) succeeded every time while
+  review measured `EPERM`. The design does not rest on the answer; a test asserts the app calls
+  neither `removexattr` nor `setxattr`.
+- **The remedy is copyable.** `NSAlert.informativeText` is not selectable, so the `xattr -dr` command
+  — a quoted absolute path, typed from memory into a shell — gets its own accessory view: a
+  selectable monospaced field with a Copy button beside it.
+- **A launch timeout is the generic backstop**, and it waits for the *bridge's own ready line*, not
+  for output. `BridgeProcess.readyMarker` is compared against the Go constant `readyLine` by a test
+  that reads the bridge's source, and the bridge's own suite starts it on a real port, waits for that
+  line and then dials the port. Without that, the invariant lived in Go with nothing on that side
+  holding it, and a reworded log line would have disarmed the check silently.
+- **The ceiling is ten seconds**, and two was wrong. Two was measured against how long the bridge
+  takes to announce itself *after* `main`; the cost that matters is spawn-to-`main` — macOS validating
+  the signature of a fresh 18 MB universal binary on first exec. Five fresh copies on an idle machine:
+  **548, 592, 599, 602, 606 ms** cold against 194–239 ms warm. Half the old budget was gone before the
+  bridge ran an instruction, with no retry and a message blaming Gatekeeper.
 
 ## Layout
 

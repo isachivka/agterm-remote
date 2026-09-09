@@ -478,34 +478,23 @@ struct BridgeProcessTests {
 
     // MARK: - Spawned and frozen
 
-    /// A launcher whose children are alive and mute — the shape of a quarantined bridge, and of every
-    /// other way a process can be started and never run.
-    private final class MuteLauncher: ProcessLauncher, @unchecked Sendable {
+    /// A launcher whose child is alive and says exactly `said` — nil for one that says nothing at
+    /// all. The shape of a bridge macOS froze, of one that failed before binding, and of a healthy
+    /// one, depending on what it is given.
+    private final class SayingLauncher: ProcessLauncher, @unchecked Sendable {
         private let lock = NSLock()
         private var _terminated: [Int32] = []
+        private let said: String?
         var terminated: [Int32] { lock.withLock { _terminated } }
+
+        init(_ said: String?) { self.said = said }
 
         func launch(
             _: URL, _: [String], onExit _: @escaping @Sendable (Int32) -> Void,
         ) throws -> Int32 { 5150 }
 
         func terminate(_ pid: Int32) { lock.withLock { _terminated.append(pid) } }
-        /// Nothing, ever. Not an empty string — a child that has written nothing at all.
-        func lastOutput(of _: Int32) -> String? { nil }
-    }
-
-    /// Alive and talking, which is what a working bridge does within milliseconds of exec.
-    private final class TalkativeLauncher: ProcessLauncher, @unchecked Sendable {
-        private let lock = NSLock()
-        private var _terminated: [Int32] = []
-        var terminated: [Int32] { lock.withLock { _terminated } }
-
-        func launch(
-            _: URL, _: [String], onExit _: @escaping @Sendable (Int32) -> Void,
-        ) throws -> Int32 { 5151 }
-
-        func terminate(_ pid: Int32) { lock.withLock { _terminated.append(pid) } }
-        func lastOutput(of _: Int32) -> String? { "listening on 0.0.0.0:8443" }
+        func lastOutput(of _: Int32) -> String? { said }
     }
 
     /// **Refused before the spawn, because after it there is nothing left to notice.**
@@ -551,53 +540,105 @@ struct BridgeProcessTests {
         #expect(Quarantine.explanation(for: loose).contains("/build/debug/agterm-remote-bridge\""))
     }
 
-    /// **A live pid is not a working bridge.** Nothing else in this class can tell the two apart, so
-    /// silence is the signal — and the child is stopped rather than left frozen under a menu that
-    /// offers Start again.
-    @Test func aChildThatSaysNothingIsStoppedAndReported() throws {
-        let launcher = MuteLauncher()
-        let silence = ImmediateSchedule()
+    /// **A live pid is not a working bridge, and neither is a talkative one.**
+    ///
+    /// The condition is the bridge's own ready line, not "it said something". A child that printed a
+    /// warning and then hung before binding satisfies "said something" while answering nothing —
+    /// which is why the first row below is here alongside total silence.
+    @Test(arguments: [
+        (nil, "a child that never wrote a byte"),
+        ("warning: could not read the resize cache", "a child that spoke but never bound"),
+    ] as [(String?, String)])
+    func aChildThatNeverReportsAListeningAddressIsStoppedAndReported(
+        said: String?, what: String,
+    ) throws {
+        let launcher = SayingLauncher(said)
+        let watch = ImmediateSchedule()
         let bridge = BridgeProcess(
             launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
-            watchForSilence: silence.run)
+            watchForSilence: watch.run)
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 
-        #expect(silence.delays == [BridgeProcess.silenceCeiling])
-        #expect(launcher.terminated == [5150], "a frozen child must not be left running")
+        #expect(watch.delays == [BridgeProcess.readyCeiling], "\(what)")
+        #expect(launcher.terminated == [5150], "\(what): a frozen child must not be left running")
         guard case .failed(let sentence) = bridge.state else {
-            Issue.record("state must be .failed, was \(bridge.state)")
+            Issue.record("\(what): state must be .failed, was \(bridge.state)")
             return
         }
-        #expect(sentence.contains("never said anything"))
+        #expect(sentence.contains("never reported a listening address"))
+        // Whatever it did manage to say is evidence, and this app did not write it.
+        if let said { #expect(sentence.contains(said)) }
     }
 
-    /// And it does not fire on a bridge that is working. This is the half that would break a healthy
-    /// app every two seconds if the condition were wrong.
-    @Test func aChildThatSpokeIsLeftAlone() throws {
-        let launcher = TalkativeLauncher()
-        let silence = ImmediateSchedule()
+    /// And it does not fire on a bridge that is working. This is the half that would kill a healthy
+    /// app on every start if the condition were wrong — which it was: the ceiling was two seconds,
+    /// measured against announce-after-`main` rather than spawn-to-`main`, and a fresh 18 MB copy
+    /// costs 548-606 ms in signature validation before the bridge runs its first instruction.
+    @Test func aChildThatReportedItsListeningAddressIsLeftAlone() throws {
+        let launcher = SayingLauncher("\(BridgeProcess.readyMarker) 0.0.0.0:8443")
+        let watch = ImmediateSchedule()
         let bridge = BridgeProcess(
             launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
-            watchForSilence: silence.run)
+            watchForSilence: watch.run)
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 
         #expect(launcher.terminated.isEmpty)
-        #expect(bridge.state == .running(pid: 5151))
+        #expect(bridge.state == .running(pid: 5150))
     }
 
-    /// **The coupling that makes silence readable, held in place by a test.**
+    /// **The contract, read out of the other language.**
     ///
-    /// The backstop above works only because the bridge's startup chatter reaches this app on stderr.
-    /// Passing `--log` would send it to a file, every healthy bridge would then be silent, and the
-    /// timer would kill it two seconds after every start. That is not a comment's job to prevent.
-    @Test func noLogFileIsPassedBecauseSilenceIsReadAsAHang() throws {
+    /// The invariant that makes the backstop mean anything — *the bridge prints this once its
+    /// listener is bound* — lives in the Go half. A test in this package asserting only that this app
+    /// omits `--log` held nothing on that side: a reworded log line there would have disarmed the
+    /// check here silently, and nothing would have failed.
+    ///
+    /// So the literal is compared against the bridge's own source. The Go suite proves the constant
+    /// is actually printed, on a real bound port; this proves the string this app waits for is that
+    /// constant.
+    @Test func theReadyMarkerIsTheOneTheBridgePrints() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let main = repository.appending(path: "bridge/cmd/agterm-remote-bridge/main.go")
+        let go = try String(contentsOf: main, encoding: .utf8)
+
+        #expect(
+            go.contains("const readyLine = \"\(BridgeProcess.readyMarker)\""),
+            "the bridge's readyLine and this app's readyMarker have come apart")
+    }
+
+    /// **A second thing the ready line depends on.** `--log` would send the bridge's output to a
+    /// file, this app would never see the marker, and the backstop would stop a healthy bridge on
+    /// every start. Weaker than the cross-language check above, and kept because it guards a
+    /// different way of breaking the same thing.
+    @Test func noLogFileIsPassedBecauseTheReadyLineArrivesOnStderr() throws {
         let launcher = RecordingLauncher()
         let bridge = bridge(launcher)
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 
         #expect(!launcher.arguments.contains("--log"))
+    }
+
+    /// The refusal carries the command **separately**, because an `NSAlert`'s informative text is not
+    /// selectable and a command that exists only inside the paragraph is one somebody retypes by hand.
+    @Test func theQuarantineRefusalCarriesACopyableCommand() {
+        let bridge = BridgeProcess(
+            launcher: RecordingLauncher(), executable: Self.executable, stateDir: Self.stateDir,
+            isQuarantined: { _ in true })
+
+        do {
+            try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+            Issue.record("it started")
+        } catch let failure as BridgeProcess.Failure {
+            #expect(failure.copyable == "xattr -dr com.apple.quarantine \"\(Self.executable.path)\"")
+            // And the paragraph still contains it, for the tooltip and for anywhere with no button.
+            #expect("\(failure)".contains(failure.copyable ?? "\u{0}"))
+        } catch {
+            Issue.record("wrong error: \(error)")
+        }
     }
 }
