@@ -36,6 +36,22 @@ workflow file says, and a pull request from a fork can propose a workflow file. 
 the Android half live in repository secrets; a runner on somebody's own Mac plus a job that reads
 those secrets is how they leave.
 
+## The bridge is a child of this app
+
+There is **no launchd job, no plist and no installer**. `swift build` produces a menu-bar app that
+spawns `agterm-remote-bridge`, passes it the address to listen on, the state directory and its own
+pid, and terminates it on the way out. The bridge polls that pid and exits when it goes, which is the
+half that survives a force-quit — it polls every couple of seconds, so a crashed app leaves a bridge
+alive for up to that long by design.
+
+Start and Stop in the menu are enabled **only when a bridge binary is actually there**, because a
+control that cannot do its job must look dead rather than pressable. Until `bundle.sh` ships the
+binary inside the bundle, put a locally built one beside the executable:
+
+```sh
+(cd ../bridge && go build -o ../mac/.build/debug/agterm-remote-bridge ./cmd/agterm-remote-bridge)
+```
+
 ## Layout
 
 - `Sources/AgtermRemoteCore` — everything testable without AppKit: the address type and its parser,

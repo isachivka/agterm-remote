@@ -134,13 +134,13 @@ public struct PairingCodeMaker: Sendable {
     private let binary: String
     private let outputPath: String
     private let exists: @Sendable (String) -> Bool
-    private let run: BridgeSupervisor.Runner
+    private let run: CommandRunner
 
     public init(
         binary: String,
         outputPath: String = PairingCodeCommand.outputPath(),
         exists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-        run: @escaping BridgeSupervisor.Runner,
+        run: @escaping CommandRunner,
     ) {
         self.binary = binary
         self.outputPath = outputPath
