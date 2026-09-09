@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Agterm Remote</string>
+    <!-- The file inside Contents/MacOS. Without it the bundle has no executable to launch. -->
+    <key>CFBundleExecutable</key>
+    <string>AgtermRemote</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.isachivka.agtermremote</string>
+    <!--
+      The icon, WITHOUT its extension, which is what CFBundleIconFile means. bundle.sh generates
+      AgtermRemote.icns from Mark.svg and copies it into Contents/Resources before signing, and then
+      asserts that this key and that file agree: a bundle declaring an icon it does not carry is a
+      lie the system tells the owner in the Finder, and it is worse than declaring none.
+
+      The app is LSUIElement, so this is seen in the Finder, in Login Items, and in the Privacy and
+      Security panel - not in the Dock, where an accessory app has no tile. Those three places are
+      exactly where somebody goes to work out what is running on their Mac and whether to trust it,
+      which is why an app that asks for a network listener cannot show up there as a blank page.
+    -->
+    <key>CFBundleIconFile</key>
+    <string>AgtermRemote</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <!--
+      No Dock icon and no window at launch. This is the half macOS reads when the app is launched as a
+      bundle; main.swift also calls setActivationPolicy(.accessory) for the `swift run` path, so a
+      developer run behaves the same way as a real one.
+    -->
+    <key>LSUIElement</key>
+    <true/>
+    <!--
+      Overwritten at release time by scripts/bundle.sh, from the same version string the .apk is
+      stamped with. One place decides what a release is called; a literal here that anybody edits by
+      hand is a second source of truth, and the two halves of a paired product must never be able to
+      disagree about which release they belong to.
+    -->
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.0</string>
+</dict>
+</plist>
