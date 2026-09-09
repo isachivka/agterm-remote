@@ -100,6 +100,23 @@ class EnrollmentTest {
                 assertTrue("the bridge answered, which is what this asserts", true)
             }
         }
+
+        // **And now the same code a second time, which is the failure a person will actually meet.**
+        //
+        // The window closed on success and the token is spent, so this is exactly what an owner
+        // scanning a stale QR - or scanning twice - runs into. The bridge is back to offering
+        // `agterm/api-1` alone, this connection offers `agterm/enroll-1` alone, and the handshake
+        // dies on `no_application_protocol` with no certificate exchanged and nothing logged on
+        // either side.
+        //
+        // It has to arrive as a refusal. A unit test pins the same thing against a fake, and this is
+        // here because the fake is the one that could be wrong about which layer fails: only the real
+        // bridge decides its own configuration per connection.
+        val again = Enrollment.enroll(payload, identity, "an emulator", store)
+        assertTrue(
+            "a spent code must be reported as refused, not as an unreachable laptop: $again",
+            again is EnrollResult.Refused,
+        )
     }
 
     private companion object {
