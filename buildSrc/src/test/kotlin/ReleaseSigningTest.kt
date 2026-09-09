@@ -17,7 +17,7 @@ class ReleaseSigningTest {
     private val complete = mapOf(
         "SIGNING_KEYSTORE_BASE64" to "a2V5c3RvcmU=",
         "SIGNING_KEYSTORE_PASSWORD" to "store-secret-value",
-        "SIGNING_KEY_ALIAS" to "beware-of-sugar",
+        "SIGNING_KEY_ALIAS" to "agterm-remote",
         "SIGNING_KEY_PASSWORD" to "key-secret-value",
     )
 
@@ -27,7 +27,7 @@ class ReleaseSigningTest {
     fun `resolves when every variable is present`() {
         val config = releaseSigningFrom(envOf(complete))
         assertEquals("a2V5c3RvcmU=", config?.keystoreBase64)
-        assertEquals("beware-of-sugar", config?.keyAlias)
+        assertEquals("agterm-remote", config?.keyAlias)
     }
 
     @Test

@@ -50,7 +50,7 @@
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/Theme.BewareOfSugar">
+        android:theme="@style/Theme.AgtermRemote">
         <!--
           adjustResize, stated rather than left to the system.
 
@@ -64,7 +64,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.BewareOfSugar">
+            android:theme="@style/Theme.AgtermRemote">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

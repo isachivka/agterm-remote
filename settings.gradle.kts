@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "beware-of-sugar"
+rootProject.name = "agterm-remote"
 include(":app")

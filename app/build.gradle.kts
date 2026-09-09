@@ -17,12 +17,12 @@ plugins {
 }
 
 android {
-    namespace = "dev.isachivka.bewareofsugar"
+    namespace = "dev.isachivka.agtermremote"
     // Verified via the SDK Manager that API 37 is the highest stable platform.
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.isachivka.bewareofsugar"
+        applicationId = "dev.isachivka.agtermremote"
         minSdk = 34
         targetSdk = 37
         versionName = appVersionName

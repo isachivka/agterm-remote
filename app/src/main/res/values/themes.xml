@@ -20,7 +20,7 @@
       and ignores both, and minSdk is 34 - dead config that reads like a decision is worse than no
       config.
     -->
-    <style name="Theme.BewareOfSugar" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.AgtermRemote" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
