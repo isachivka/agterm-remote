@@ -17,14 +17,14 @@ import org.junit.Test
 class BackStackTest {
 
     @Test
-    fun `the app opens on the terminal`() {
-        assertEquals(Screen.Agterm, BackStack.Initial.current)
-        assertFalse("back at the root must exit the app, not be swallowed", BackStack.Initial.canPop)
+    fun `a phone with a laptop opens on the terminal`() {
+        assertEquals(Screen.Agterm, BackStack.initialFor(Start.Terminal).current)
+        assertFalse("back at the root must exit the app, not be swallowed", BackStack.initialFor(Start.Terminal).canPop)
     }
 
     @Test
     fun `going somewhere and coming back returns you where you were`() {
-        val stack = BackStack.Initial.push(Screen.Settings)
+        val stack = BackStack.initialFor(Start.Terminal).push(Screen.Settings)
 
         assertEquals(Screen.Settings, stack.current)
         assertTrue(stack.canPop)
@@ -33,7 +33,7 @@ class BackStackTest {
 
     @Test
     fun `tapping the same destination twice costs one press of back, not two`() {
-        val once = BackStack.Initial.push(Screen.Settings)
+        val once = BackStack.initialFor(Start.Terminal).push(Screen.Settings)
         val twice = once.push(Screen.Settings)
 
         assertEquals(once, twice)
@@ -51,7 +51,7 @@ class BackStackTest {
      */
     @Test
     fun `going back to a screen already behind you returns to it`() {
-        val stack = BackStack.Initial
+        val stack = BackStack.initialFor(Start.Terminal)
             .push(Screen.Settings)
             .push(Screen.Agterm)
 
@@ -63,7 +63,7 @@ class BackStackTest {
     fun `no journey can grow the stack past the destinations it visited`() {
         val visited = setOf(Screen.Agterm, Screen.Settings)
 
-        val stack = BackStack.Initial
+        val stack = BackStack.initialFor(Start.Terminal)
             .push(Screen.Settings)
             .push(Screen.Agterm)
             .push(Screen.Settings)
@@ -77,7 +77,7 @@ class BackStackTest {
 
     @Test
     fun `back at the root is a no-op rather than an empty stack`() {
-        assertEquals(BackStack.Initial, BackStack.Initial.pop())
+        assertEquals(BackStack.initialFor(Start.Terminal), BackStack.initialFor(Start.Terminal).pop())
     }
 
     @Test
@@ -115,6 +115,6 @@ class BackStackTest {
                 .ifEmpty { listOf(Screen.Agterm) },
         )
 
-        assertEquals(BackStack.Initial, restored)
+        assertEquals(BackStack.initialFor(Start.Terminal), restored)
     }
 }
