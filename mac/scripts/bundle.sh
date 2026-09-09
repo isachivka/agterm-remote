@@ -39,6 +39,13 @@
 # what protects the owner here is that the bridge listens on the LAN and hands out nothing without an
 # enrolment. Apple Silicon refuses to execute code with no signature at all, so ad-hoc is the floor
 # rather than a choice, and the linker's signature on the executable does not cover a bundle.
+# # Run it as bash, which the shebang already says
+#
+# **Never `zsh scripts/bundle.sh`.** zsh does not word-split unquoted parameter expansions, so the
+# slice-set comparison below folds `x86_64 arm64` into a single word and the check silently accepts
+# any slice set at all. The shebang is `bash` and `./scripts/bundle.sh` is correct; naming another
+# shell on the command line disables a guard without saying so. Recorded rather than worked around,
+# because the fix is not to write shell that survives being run by the wrong interpreter.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

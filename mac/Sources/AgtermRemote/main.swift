@@ -292,19 +292,23 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // Asked, not assumed — and now there is somewhere to ask. The bridge is this app's own child,
         // so this is whether we hold a live pid rather than an opinion we are keeping.
         //
-        // `.starting` counts, and that is the point rather than a shortcut. It covers the whole
-        // ~9.6-second retry ladder, during which the owner can watch it fail and, before this, could
-        // not call it off: Stop was greyed because the state was not `.running`. Stop must be
-        // available for anything that is or is about to be a process. Start is greyed in the same
-        // window, which is right — one is already in flight.
-        let running = switch bridge?.state {
-        case .running, .starting: true
-        default: false
+        // **Passed through as three states rather than flattened to a bool**, because `.starting` is
+        // no longer only the retry ladder: it is also the window between spawning a child and that
+        // child announcing a bound listener, which for a binary macOS has frozen never ends.
+        // Flattening it to `running` told the owner a held bridge was Running for the whole ceiling.
+        //
+        // Stop stays available across both, and that is the point rather than a shortcut: the owner
+        // can watch a start fail and call it off. Start is greyed in the same window, which is right
+        // — one is already in flight. `MenuModel` derives both from this.
+        let running: BridgeStatus.Running = switch bridge?.state {
+        case .running: .running
+        case .starting: .starting
+        default: .notRunning
         }
         item?.menu = menu(
             status: BridgeStatus(
                 address: DialAddress(host: "-", port: 0),
-                running: running ? .running : .notRunning,
+                running: running,
                 reachable: .noAnswer("not checked"),
                 identified: .notEstablished,
             ),
@@ -343,6 +347,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     /// A selectable field holding `text`, and a button that puts it on the pasteboard.
+    ///
+    /// **Known and not fixed here:** with a very long path the fixed 420-point row can leave the
+    /// layout ambiguous rather than truncating cleanly. The Copy button is unaffected and is the
+    /// path that matters — but somebody with a deeply nested application directory may see the field
+    /// laid out oddly. Recorded rather than papered over.
     private static func copyableField(_ text: String) -> NSView {
         let field = NSTextField(labelWithString: text)
         field.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
