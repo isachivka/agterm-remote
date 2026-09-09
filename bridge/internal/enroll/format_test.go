@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -98,7 +99,7 @@ func TestMatchesTheGoldenVectors(t *testing.T) {
 	for _, v := range vectors {
 		names = append(names, v.Name)
 	}
-	wantNames := []string{"short-host", "host-at-253-bytes", "non-ascii-host", "boundary-values"}
+	wantNames := []string{"short-host", "host-at-253-bytes", "non-ascii-host", "ipv6-literal-host", "boundary-values"}
 	if !slices.Equal(names, wantNames) {
 		t.Fatalf("the vector set changed\n want %v\n got  %v\nIf a vector was added on purpose, add its name here too; if one went missing, put it back.", wantNames, names)
 	}
@@ -383,6 +384,9 @@ type vector struct {
 	Token       string `json:"token_hex"`
 	Expiry      int64  `json:"expiry_unix"`
 	Text        string `json:"text"`
+	// DialAddress is derived from Host and Port rather than encoded, and it is the field the Kotlin
+	// side has to reproduce. See TestTheVectorsPinTheDialAddress.
+	DialAddress string `json:"dial_address"`
 }
 
 func goldenVectors(t *testing.T) []vector {
@@ -417,4 +421,71 @@ func mustBytes(t *testing.T, p enroll.Payload) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// **The vectors carry a dial address because a Go helper cannot reach Kotlin.**
+//
+// The bug this closes is one layer past decoding. An IPv6 accept vector on its own would only pin
+// that both sides read the host field as `2001:db8::1`, which they would have done anyway; what goes
+// wrong is the next line, where something builds an address to connect to. `host + ":" + port` is
+// right for a DNS name, right for IPv4, and produces `2001:db8::1:8443` for an IPv6 literal - not an
+// address, and the symptom is a phone that will not pair with nothing visible in the QR code to
+// explain it.
+//
+// So the rule has one implementation, [enroll.Payload.DialAddress], and the vectors are what enforce
+// it on the other side of the language boundary. This test is the Go half: the file's derived field
+// and the helper must agree, or the file is recording a rule the code does not implement.
+func TestTheVectorsPinTheDialAddress(t *testing.T) {
+	for _, v := range goldenVectors(t) {
+		if v.DialAddress == "" {
+			t.Errorf("%s: the vector carries no dial_address", v.Name)
+			continue
+		}
+		got := enroll.Payload{Host: v.Host, Port: v.Port}.DialAddress()
+		if got != v.DialAddress {
+			t.Errorf("%s: the helper produces %q, the vector says %q", v.Name, got, v.DialAddress)
+		}
+	}
+}
+
+// The bracketing rule itself, stated as cases rather than only as a vector, because the vector set
+// carries one IPv6 host and this is the whole rule.
+//
+// net.JoinHostPort does the work; what is asserted here is that it is the right tool - brackets
+// exactly when the host contains a colon, and nothing added to a name or an IPv4 address, so no
+// caller has to decide which kind of host it is holding.
+func TestDialAddressBracketsIPv6AndLeavesEverythingElseAlone(t *testing.T) {
+	for _, c := range []struct{ host, want string }{
+		{"example.test", "example.test:8443"},
+		{"a-laptop.invalid", "a-laptop.invalid:8443"},
+		{"203.0.113.5", "203.0.113.5:8443"},
+		{"127.0.0.1", "127.0.0.1:8443"}, // adb reverse, which is the emulator's pairing path
+		{"localhost", "localhost:8443"},
+		{"2001:db8::1", "[2001:db8::1]:8443"},
+		{"::1", "[::1]:8443"},
+		{"fe80::1%en0", "[fe80::1%en0]:8443"}, // a zone identifier survives, brackets and all
+	} {
+		if got := (enroll.Payload{Host: c.host, Port: 8443}).DialAddress(); got != c.want {
+			t.Errorf("host %q dials as %q, want %q", c.host, got, c.want)
+		}
+	}
+}
+
+// **The naive form is wrong, and it is wrong in exactly one of the cases above.** Written down as a
+// test so that the thing this helper exists to prevent is visible rather than described - and so
+// that anybody who "simplifies" DialAddress back into a concatenation fails here as well as in the
+// vectors.
+func TestTheNaiveConcatenationIsWrongForIPv6(t *testing.T) {
+	p := enroll.Payload{Host: "2001:db8::1", Port: 8443}
+	naive := p.Host + ":" + "8443"
+	if naive == p.DialAddress() {
+		t.Fatal("the naive concatenation now agrees with DialAddress, which means one of them changed")
+	}
+	if _, _, err := net.SplitHostPort(naive); err == nil {
+		t.Errorf("%q was expected to be unusable as a dial target, and parses", naive)
+	}
+	host, port, err := net.SplitHostPort(p.DialAddress())
+	if err != nil || host != p.Host || port != "8443" {
+		t.Errorf("DialAddress() = %q does not split back to %q and 8443 (%v)", p.DialAddress(), p.Host, err)
+	}
 }

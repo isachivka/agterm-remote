@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -883,53 +885,116 @@ func TestASecondPairOpenSaysItTookTheFirstCode(t *testing.T) {
 	}
 }
 
-// **One request per connection, and the rest of the line is never read.**
+// **One request per connection, and it is held by TWO independent mechanisms.**
 //
 // Pinned rather than documented alone, because the person who discovers it otherwise is whoever
 // writes the Swift panel, in a debugger, wondering why two of their three verbs did nothing. The
 // convention is agterm's own control socket's, and it is affordable here for the reason it is not
 // affordable on the pinned front door: a connection to a local unix socket costs a syscall pair and
 // no handshake.
+//
+// # Why this is two subtests, and what the first one alone failed to catch
+//
+// The first version of this test pipelined three verbs in one write and asserted one reply. It
+// passed - and it **also passed against a deliberately mutated handle() with a for loop around it**,
+// measured, in 3.02s against 0.02s. So it was not testing what its name said.
+//
+// The reason is that readLine returns at the first newline in the chunk it read and DISCARDS the
+// rest of that chunk. Three pipelined lines arrive in one 512-byte read, so verbs two and three were
+// thrown away inside readLine and never reached the dispatch at all - a looping handle would have
+// gone back for a second read and found nothing. That is a real mechanism and worth having; it is
+// just not the one the test claimed.
+//
+// So: the first subtest pins the pipelined case, which is what a client actually does. The second
+// writes the follow-up AFTER the first reply has been read, when readLine has already returned and
+// the buffer is empty - which is the case only a loop in handle could serve, and it is the one that
+// fails against the mutant.
 func TestOnlyTheFirstRequestOnAConnectionIsServed(t *testing.T) {
-	b := newBridge(t)
-	b.pair(t, "a phone")
-	path := servingWith(t, &fakeFit{}, b.pairing)
+	// The verbs sent after the first are chosen to be DESTRUCTIVE and to use a fingerprint that is
+	// actually paired, so that "it did not run" is a claim with evidence behind it. An earlier
+	// version sent "x", which matches no peer, so unpair would have refused it anyway and the count
+	// stayed 1 whether or not the verb ran - a leg that advertised an assertion and made none.
+	const openWindow = `{"verb":"pair-open","ttl_seconds":300}`
 
-	conn, err := net.DialTimeout("unix", path, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	t.Run("pipelined in one write", func(t *testing.T) {
+		b := newBridge(t)
+		fingerprint := b.pair(t, "a phone")
+		path := servingWith(t, &fakeFit{}, b.pairing)
 
-	// Three verbs, pipelined. The second would open an enrolment window and the third would unpair
-	// the owner's phone, so this is not merely about a dropped reply.
-	if _, err := io.WriteString(conn,
-		"{\"verb\":\"status\"}\n{\"verb\":\"pair-open\",\"ttl_seconds\":300}\n{\"verb\":\"unpair\",\"fingerprint\":\"x\"}\n"); err != nil {
-		t.Fatal(err)
-	}
+		conn, err := net.DialTimeout("unix", path, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 
-	r := bufio.NewReader(conn)
-	first, err := r.ReadBytes('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(first, []byte(`"listening"`)) {
-		t.Fatalf("the first request was not the one answered: %s", first)
-	}
+		if _, err := io.WriteString(conn, fmt.Sprintf(
+			"{\"verb\":\"status\"}\n%s\n{\"verb\":\"unpair\",\"fingerprint\":%q}\n",
+			openWindow, fingerprint)); err != nil {
+			t.Fatal(err)
+		}
 
-	// Nothing more comes back, and the connection is closed from this end rather than left open.
-	if extra, err := r.ReadBytes('\n'); err == nil {
-		t.Fatalf("a second reply arrived on one connection: %s", extra)
-	}
+		r := bufio.NewReader(conn)
+		first, err := r.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(first, []byte(`"listening"`)) {
+			t.Fatalf("the first request was not the one answered: %s", first)
+		}
+		if extra, err := r.ReadBytes('\n'); err == nil {
+			t.Fatalf("a second reply arrived on one connection: %s", extra)
+		}
+		assertNothingElseRan(t, b, fingerprint)
+	})
 
-	// And - the half that matters - the discarded verbs did not RUN. A silently executed unpair
-	// would be far worse than a silently dropped reply.
+	// **The leg that catches a loop.** The second request is written only after the first reply has
+	// been read, so readLine's buffer is empty and cannot be what discards it: the only thing that
+	// could serve this verb is handle going back for another line.
+	t.Run("written after the first reply", func(t *testing.T) {
+		b := newBridge(t)
+		fingerprint := b.pair(t, "a phone")
+		path := servingWith(t, &fakeFit{}, b.pairing)
+
+		conn, err := net.DialTimeout("unix", path, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+
+		if _, err := io.WriteString(conn, "{\"verb\":\"status\"}\n"); err != nil {
+			t.Fatal(err)
+		}
+		r := bufio.NewReader(conn)
+		if _, err := r.ReadBytes('\n'); err != nil {
+			t.Fatal(err)
+		}
+
+		// The connection is on its way out from the other end, so this write may itself fail - which
+		// is a correct outcome and not the thing being asserted. What is asserted is below.
+		_, _ = io.WriteString(conn, openWindow+"\n")
+		_, _ = io.WriteString(conn, fmt.Sprintf("{\"verb\":\"unpair\",\"fingerprint\":%q}\n", fingerprint))
+		if extra, err := r.ReadBytes('\n'); err == nil {
+			t.Fatalf("a second request on the same connection was served: %s", extra)
+		}
+		assertNothingElseRan(t, b, fingerprint)
+	})
+}
+
+// assertNothingElseRan is the half that matters in both legs: not the dropped reply, but that the
+// discarded verbs did not RUN. A silently executed unpair would be far worse than a silently dropped
+// answer.
+func assertNothingElseRan(t *testing.T, b *bridge, fingerprint string) {
+	t.Helper()
 	if b.window.IsOpen() {
-		t.Error("a pipelined pair-open opened a window")
+		t.Error("a pair-open past the first request opened a window")
 	}
-	if len(b.peers.Peers()) != 1 {
-		t.Error("a pipelined unpair reached the trust store")
+	// Load-bearing: the fingerprint is one the store actually holds, so an unpair that RAN would
+	// empty it. Asserted on the identity as well as the count, so a store that lost this phone and
+	// gained another would not pass either.
+	if peers := b.peers.Peers(); len(peers) != 1 || peers[0].Fingerprint != fingerprint {
+		t.Errorf("an unpair past the first request reached the trust store: %#v", peers)
 	}
 }
 
@@ -955,6 +1020,56 @@ func TestTrailingGarbageAfterTheObjectIsRefused(t *testing.T) {
 		}
 		if b.window.IsOpen() {
 			t.Fatalf("%q opened a window", line)
+		}
+	}
+}
+
+// **The diagnostic the removed guard used to give, without the policy it used to enforce.**
+//
+// A wildcard host is a fine thing to be bound to and is not an address anything can connect to, so a
+// code carrying one looks perfect and fails on the phone - the worst shape a failure can take here,
+// because there is nothing on either screen to look at. The guard that used to refuse it had to go:
+// it caught `0.0.0.0` and `::` and passed `localhost`, `127.0.0.1` and `[::1]`, and the repair that
+// would have caught those breaks the `adb reverse` path.
+//
+// So the code is minted either way and the log carries the warning. **Loopback must stay silent** -
+// it is the emulator's own pairing address and warning about it would train the owner to ignore the
+// line.
+func TestAWildcardAddressIsWarnedAboutAndStillMintsACode(t *testing.T) {
+	const warning = "every interface rather than one address"
+
+	mint := func(t *testing.T, listening string) (map[string]any, string) {
+		t.Helper()
+		var logged strings.Builder
+		previous := log.Writer()
+		log.SetOutput(&logged)
+		defer log.SetOutput(previous)
+
+		b := newBridge(t)
+		b.pairing.Listening = listening
+		got := call(t, servingWith(t, &fakeFit{}, b.pairing), `{"verb":"pair-open","ttl_seconds":300}`)
+		return got, logged.String()
+	}
+
+	for _, listening := range []string{"0.0.0.0:8443", "[::]:8443"} {
+		got, logged := mint(t, listening)
+		if got["payload"] == nil {
+			t.Errorf("%s was refused: %#v - the guard is supposed to be gone", listening, got)
+		}
+		if !strings.Contains(logged, warning) {
+			t.Errorf("%s minted a code with no warning: %q", listening, logged)
+		}
+	}
+
+	// The emulator's path, and two others that are perfectly ordinary. Silence, or the warning is
+	// noise the owner learns to skip past.
+	for _, listening := range []string{"127.0.0.1:8443", "localhost:8443", "[::1]:8443", "203.0.113.5:8443"} {
+		got, logged := mint(t, listening)
+		if got["payload"] == nil {
+			t.Errorf("%s was refused: %#v", listening, got)
+		}
+		if strings.Contains(logged, warning) {
+			t.Errorf("%s was warned about, and it is a real address: %q", listening, logged)
 		}
 	}
 }

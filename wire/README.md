@@ -65,14 +65,49 @@ A JSON array. Each entry is one payload, given as inputs plus the text they must
 | `token_hex` | 32 bytes: the one-time enrolment secret. |
 | `expiry_unix` | Unix **seconds**, carried on the wire as a `uint32`. |
 | `text` | What the encoder must produce: standard, **padded** base64. |
+| `dial_address` | **Derived, not encoded.** `host` and `port` joined the way something about to connect must join them. Nothing in `text` carries it. |
 
 The fingerprints and tokens are fixtures — arithmetic ramps and fills, not secrets, and not derived
 from any. Real ones are 32 bytes from a cryptographic random source and never appear in a repository.
 
-The four vectors cover a short host, the longest legitimate DNS name (253 bytes, which is what pins
+The five vectors cover a short host, the longest legitimate DNS name (253 bytes, which is what pins
 the length prefix as a `uint16` rather than a byte), a host with a multi-byte character (which pins
-that the prefix counts bytes and not characters), and every field at its ceiling — the largest port
-a `uint16` holds and the last second a `uint32` expiry can name, 2106-02-07T06:28:15Z.
+that the prefix counts bytes and not characters), an IPv6 literal, and every field at its ceiling —
+the largest port a `uint16` holds and the last second a `uint32` expiry can name,
+2106-02-07T06:28:15Z.
+
+### `dial_address`, and why a decoder test is not enough
+
+`dial_address` is the only field here that is **not** part of the encoded bytes. It is derived from
+`host` and `port`, and it exists because the payload's host field is a bare string: `2001:db8::1`,
+never `[2001:db8::1]`. The brackets are deliberately absent from the wire — one host, one spelling,
+no display-versus-dial ambiguity in the bytes.
+
+The consequence is a bug one layer past decoding. An IPv6 accept vector on its own would only pin
+that both sides read the host as `2001:db8::1`, which they would do anyway. What goes wrong is the
+next line, in whatever builds an address to connect to:
+
+```
+host + ":" + port   ->  "2001:db8::1:8443"     not an address
+```
+
+That is the obvious two lines, it is what a dialler written from the field list does, and nothing in
+the format says otherwise. The symptom is a phone that will not pair, with nothing visible in the QR
+code to explain it — which is the failure shape this whole directory exists to prevent.
+
+So the rule has one implementation per language and one cross-language enforcement:
+
+- Go: `enroll.Payload.DialAddress()`, which is `net.JoinHostPort`.
+- Kotlin: whatever the equivalent is there, asserted against this field.
+- **The vectors are the connection.** A Go helper the Android app cannot import proves nothing about
+  the Android app.
+
+Each side must produce `dial_address` from the decoded `host` and `port` and compare it byte for
+byte, exactly as it does with `text`. The rule, stated without reference to either language: bracket
+the host if and only if it contains a colon, then append `:` and the port.
+
+Adding this field did **not** change any `text`. It is additive, and the four vectors that predate it
+carry byte-identical text — proven by the accept-vector test, which still pins those bytes.
 
 ## `enroll-payload-reject-vectors.json`
 

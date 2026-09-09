@@ -45,6 +45,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 	"unicode/utf8"
 )
@@ -125,6 +127,30 @@ type Payload struct {
 func (p Payload) Canonical() Payload {
 	p.Expiry = p.Expiry.Truncate(time.Second).UTC()
 	return p
+}
+
+// DialAddress is Host and Port as a string something can connect to.
+//
+// # Why this is a method here and not two lines at the call site
+//
+// **An IPv6 literal has to be bracketed before a port can be appended to it, and the payload does not
+// carry the brackets.** Host is a bare string - `2001:db8::1`, not `[2001:db8::1]` - because the
+// field is one host and adding brackets to the BYTES would put a display-versus-dial ambiguity into
+// the wire format: two spellings of one host, and every implementation guessing which one it holds.
+//
+// The consequence is that `host + ":" + port` is correct for a DNS name, correct for IPv4, and
+// silently wrong for every IPv6 address - `2001:db8::1:8443` is not an address, and what happens next
+// is a phone that will not pair for a reason nobody can see from the QR code. It is the obvious two
+// lines, it is what a dialler written from the field list does, and nothing in the format says
+// otherwise.
+//
+// So the rule exists once, here, as net.JoinHostPort - which brackets exactly when it has to and
+// leaves a name or an IPv4 address alone. **And it is pinned across languages by the `dial_address`
+// field on every accept vector**, which is the only mechanism in this repository that reaches the
+// Kotlin side: a Go helper the Android app cannot import proves nothing about the Android app. See
+// wire/README.md.
+func (p Payload) DialAddress() string {
+	return net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
 }
 
 // Encode serialises a payload.

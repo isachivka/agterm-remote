@@ -40,6 +40,16 @@ type generated struct {
 	Token       string `json:"token_hex"`
 	Expiry      int64  `json:"expiry_unix"`
 	Text        string `json:"text"`
+	// DialAddress is DERIVED, not an input: it is host and port joined the way something that is
+	// about to connect must join them, and it comes from [enroll.Payload.DialAddress] so the
+	// bracketing rule has one implementation.
+	//
+	// **It is here because a Go helper cannot reach Kotlin.** The bug it closes is one layer past
+	// decoding: both sides already agree that the host field of an IPv6 vector is `2001:db8::1`, and
+	// a dialler that writes `host + ":" + port` from that produces something that is not an address.
+	// The vectors are the only mechanism in this repository that both languages read, so this is
+	// where the rule can be enforced rather than merely written down.
+	DialAddress string `json:"dial_address"`
 }
 
 func TestWriteVectors(t *testing.T) {
@@ -89,6 +99,15 @@ func TestWriteVectors(t *testing.T) {
 			expiry: 1_900_000_000,
 		},
 		{
+			name:   "ipv6-literal-host",
+			note:   "An IPv6 literal, unbracketed in the host field as every host is. The payload carries one host and no brackets, so a dialler that appends \":\" and the port produces \"2001:db8::1:8443\", which is not an address - see dial_address, which is what this vector exists to pin.",
+			host:   "2001:db8::1",
+			port:   8443,
+			fp:     counting(0x55, 2),
+			tok:    counting(0xaa, -2),
+			expiry: 1_850_000_000,
+		},
+		{
 			name:   "boundary-values",
 			note:   "Every field at its ceiling: the highest port a uint16 holds, and the last second a uint32 expiry can name (2106-02-07T06:28:15Z).",
 			host:   "a",
@@ -117,6 +136,9 @@ func TestWriteVectors(t *testing.T) {
 			Token:       hex.EncodeToString(c.tok[:]),
 			Expiry:      c.expiry,
 			Text:        text,
+			// Derived from the helper rather than formatted here, so the file cannot record a
+			// bracketing rule the code does not implement.
+			DialAddress: enroll.Payload{Host: c.host, Port: c.port}.DialAddress(),
 		})
 	}
 
@@ -173,32 +195,32 @@ func TestWriteRejectVectors(t *testing.T) {
 		{
 			name: "wrong-version", refusal: "unsupported-version",
 			note: "Version byte 2 in a build that speaks 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here.",
-			text: b64(mutate(func(b []byte) []byte { b[0] = 2; return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { b[0] = 2; return b })),
 		},
 		{
 			name: "version-zero", refusal: "unsupported-version",
 			note: "Version 0 - the shape a zero-filled or truncated-then-padded buffer takes.",
-			text: b64(mutate(func(b []byte) []byte { b[0] = 0; return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { b[0] = 0; return b })),
 		},
 		{
 			name: "trailing-byte", refusal: "length-mismatch",
 			note: "A valid payload with one byte appended. The length the header describes is the only length the payload may have; a trailing byte is the tail of a second message, or somebody probing for a parser that ignores what it does not understand.",
-			text: b64(mutate(func(b []byte) []byte { return append(b, 0) })),
+			text: vectorB64(mutate(func(b []byte) []byte { return append(b, 0) })),
 		},
 		{
 			name: "host-length-overruns-buffer", refusal: "length-mismatch",
 			note: "Host length 300 in an 85-byte buffer. Under MaxField, so the ceiling does not catch it: this is the case a decoder that reads hostLen bytes without checking what it holds gets wrong.",
-			text: b64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 300); return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 300); return b })),
 		},
 		{
 			name: "host-length-65535", refusal: "host-length-over-ceiling",
 			note: "The largest number the uint16 length field can hold. Must be refused before anything is allocated for it - a length field an attacker chose must never size an allocation.",
-			text: b64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 0xffff); return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 0xffff); return b })),
 		},
 		{
 			name: "host-length-zero", refusal: "empty-host",
 			note: "Host length 0, and a buffer exactly that long, so only the empty host is wrong. A payload naming no host is nothing the phone can act on.",
-			text: b64(func() []byte {
+			text: vectorB64(func() []byte {
 				b := append([]byte{}, valid[:3]...)
 				binary.BigEndian.PutUint16(b[1:3], 0)
 				return append(b, valid[3+len("example.test"):]...)
@@ -207,12 +229,12 @@ func TestWriteRejectVectors(t *testing.T) {
 		{
 			name: "truncated-in-the-middle", refusal: "length-mismatch",
 			note: "A valid payload with its last four bytes - the expiry - cut off. Long enough to pass a minimum-length check, short of what its own header describes.",
-			text: b64(valid[:len(valid)-4]),
+			text: vectorB64(valid[:len(valid)-4]),
 		},
 		{
 			name: "truncated-to-a-stub", refusal: "too-short",
 			note: "Twenty bytes: a correct version byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
-			text: b64(valid[:20]),
+			text: vectorB64(valid[:20]),
 		},
 		{
 			name: "url-safe-alphabet", refusal: "not-standard-base64",
@@ -227,7 +249,7 @@ func TestWriteRejectVectors(t *testing.T) {
 		{
 			name: "host-not-utf8", refusal: "host-not-utf8",
 			note: "The host field filled with 0xff bytes, which are not UTF-8 in any position. A decoder that lets them through arrives at a host of replacement characters - a different host from the one the owner is looking at.",
-			text: b64(mutate(func(b []byte) []byte {
+			text: vectorB64(mutate(func(b []byte) []byte {
 				for i := 3; i < 3+len("example.test"); i++ {
 					b[i] = 0xff
 				}
@@ -261,7 +283,13 @@ func TestWriteRejectVectors(t *testing.T) {
 	t.Logf("wrote %d reject vectors to %s", len(out), rejectVectorsPath)
 }
 
-func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+// vectorB64 is this file's own, and it is not called b64 because handler_test.go declares that name
+// in the same package. It collided the moment handler_test.go landed, and the collision is invisible
+// from an ordinary run: this file is behind the `vectors` tag, so `go test ./...` never compiles the
+// two together and the documented regeneration command was the only thing that failed - which is a
+// command nobody runs unless the wire format is being changed on purpose. Found while adding the
+// IPv6 vector, i.e. the first time it was run since.
+func vectorB64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
 // counting fills 32 bytes with an arithmetic ramp, so that a byte swapped anywhere in the
 // fingerprint or the token changes the encoded text. Nothing here is a secret or is derived from

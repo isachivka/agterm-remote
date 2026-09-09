@@ -596,6 +596,23 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int) {
 		reply(conn, errorReply{Error: err.Error()})
 		return
 	}
+	// **A warning, not a refusal, and the difference is the emulator.**
+	//
+	// A wildcard host is a fine thing to be bound to and is not an address anything can connect to,
+	// so a code carrying one looks perfect and fails on the phone - the worst shape a failure can
+	// take here, because there is nothing on either screen to look at. This used to be a refusal
+	// naming the flag, and the refusal had to go: it caught `0.0.0.0` and `::` and passed
+	// `localhost`, `127.0.0.1` and `[::1]`, and the repair that would have caught those breaks the
+	// `adb reverse` path, where the phone connects to 127.0.0.1 and that is exactly right.
+	//
+	// So the diagnostic comes back without the policy. The code is still minted, nothing about which
+	// addresses are reachable is decided here, and the owner's log says the one thing this process
+	// can actually be sure of: it is bound to every interface, so the code names no particular one.
+	if isWildcard(host) {
+		log.Printf("control: the pairing code names %q, which is every interface rather than one "+
+			"address; a phone dialling it will fail unless something translates it. Start the bridge "+
+			"with the address the phone should use.", host)
+	}
 
 	// Asked BEFORE the call, because Open is what destroys the answer. A window already open here
 	// means this call is about to make somebody's code stop working - see [pairOpenReply.Replaced].
@@ -712,6 +729,16 @@ func unpair(conn net.Conn, p *Pairing, fingerprint string) {
 // question about the owner's network, the router, and whether a tunnel is in front - none of which
 // this process can see, and all of which the Mac app either knows or can ask. The only refusals left
 // are structural: a string that is not a host and a port, and a port that is not a port.
+// isWildcard reports whether a host names every interface rather than one address.
+//
+// Used for a LOG LINE and for nothing else. It is deliberately not exhaustive and does not need to
+// be: an address it fails to recognise costs a warning that was not printed, not a code that was
+// wrongly refused, and the whole reason the refusal was removed is that a list like this cannot be
+// made complete without breaking hosts that work.
+func isWildcard(host string) bool {
+	return host == "" || host == "0.0.0.0" || host == "::"
+}
+
 func dialTarget(listen string) (string, int, error) {
 	host, portText, err := net.SplitHostPort(listen)
 	if err != nil {
