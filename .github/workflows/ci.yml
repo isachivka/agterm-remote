@@ -60,6 +60,7 @@ jobs:
       - run: ./scripts/check-no-private-keys.sh
       - run: ./scripts/check-no-addresses.sh
       - run: ./scripts/check-constant-time-tokens.sh
+      - run: ./scripts/check-no-cyrillic.sh
 
   bridge:
     name: bridge
@@ -89,6 +90,29 @@ jobs:
       # looks identical either way. The suite must not be split into raced and unraced halves to
       # save time: the package left out is exactly where the next race will live.
       - run: go test ./... -race
+      # `wire/` is a contract two implementations in two languages are held to, and the generator
+      # that produces it sits behind the `vectors` build tag, so the ordinary suite never compiles
+      # it. It stopped compiling for five commits and every run in between was green, because a file
+      # nothing builds cannot fail. Regenerating it here means the tag is exercised on every push and
+      # the vectors are provably still derivable from the encoder that has to agree with them; a
+      # generator nobody can run is a contract nobody can re-derive.
+      #
+      # The diff is the assertion. If the encoder has moved, the regenerated files differ and this
+      # fails - which is the drift the vectors exist to catch, arriving here rather than in the
+      # Kotlin suite weeks later. Fixing it means deciding which side is wrong, never re-running the
+      # generator to make the red go green.
+      - name: Re-derive the wire vectors
+        run: go test ./internal/enroll/ -tags vectors -run 'TestWrite.*Vectors'
+      - name: Refuse vectors the generator does not reproduce
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! git diff --quiet -- wire/; then
+            echo "::error::wire/ is not what the generator produces from the current encoder."
+            git diff --stat -- wire/
+            git diff -- wire/
+            exit 1
+          fi
+          echo "OK: wire/ is reproducible from the generator."
 
   android:
     name: android

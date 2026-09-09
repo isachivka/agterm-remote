@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 #
-# The test for scripts/check-no-addresses.sh, plus the fail-open cases that apply to all four guards.
+# The test for scripts/check-no-addresses.sh and scripts/check-no-cyrillic.sh, plus the fail-open
+# cases that apply to every guard here.
 #
 # It builds a throwaway git repository in a temp directory, stages one file at a time, and runs the
 # guard against it. A real repository is the only honest fixture here: the guard scans `git ls-files`
 # and nothing else, so a test that fed it a loose file would be testing something the guard never
 # does.
 #
-# The three older guards carry their own self-tests inside them and are covered by running them; this
-# one is the guard that needed a test written before it existed.
+# Every guard here carries its own positives and negatives inside it, and running it exercises them.
+# What lands in this file is what a guard cannot check from within itself: the addresses guard, which
+# needed a test written before it existed, and the loop around the Cyrillic guard's pattern - the git
+# listing, the path resolution, and the binary skip.
 set -euo pipefail
 
 # Resolved from this script's own location, not from $OLDPWD. The first draft used "$OLDPWD/scripts/
@@ -96,5 +99,54 @@ got="$(cd sub && run "$guard")"
 printf 'the owner supplies host and port\n' > candidate.txt && git add -A
 got="$(cd sub && run "$guard")"
 [ "$got" = "0" ] || { echo "FAIL from a subdirectory, clean tree: expected 0 got $got"; fail=1; }
+
+# --- scripts/check-no-cyrillic.sh -----------------------------------------------------------------
+#
+# That guard carries its own positives and negatives inside it, matrixed per byte pattern, and
+# running it exercises them. What it cannot test from within is the scan LOOP around them: the git
+# listing, the path resolution, and the skip that keeps a binary asset from being read as text. Those
+# are what this section covers, and each of them has been the whole bug in a guard before.
+cyrillic="$here/../check-no-cyrillic.sh"
+[ -x "$cyrillic" ] || { echo "FAIL: $cyrillic is missing or not executable"; exit 1; }
+
+cyr() { # name, printf-escaped content, expected exit
+  printf '%b' "$2" > candidate.txt && git add -A
+  got="$(run "$cyrillic")"
+  if [ "$got" -ge 2 ]; then
+    echo "FAIL $1: guard aborted with exit $got (its self-test failed)"; fail=1; return
+  fi
+  [ "$got" = "$3" ] || { echo "FAIL $1: expected $3 got $got"; fail=1; }
+}
+
+cyr "russian comment"  '// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271\n' 1
+cyr "latin homoglyph"  'the p\320\260ir code\n'                                                 1
+cyr "english prose"    'the bridge answers on the configured port\n'                            0
+cyr "em dash"          'the bridge \342\200\224 once paired \342\200\224 answers\n'              0
+cyr "curly quote"      'the owner\342\200\231s own words\n'                                      0
+cyr "greek test data"  'the constant \317\200 and the angle \316\261\n'                          0
+
+# A binary asset whose bytes happen to land in a Cyrillic range. D0 B0 is a valid two-byte sequence
+# on its own, so the pattern matches it; the file is not valid UTF-8, so it is not text and the match
+# is not a character. An icon reported as Cyrillic is how this guard would get deleted.
+cyr "binary asset"     '\211PNG\r\n\320\260\377\376\320\261\n'                                   0
+
+# Outside a repository, `git ls-files` fails and yields nothing. An empty listing must never be read
+# as an empty tree.
+outside="$(mktemp -d)"
+printf '%b' '// \320\275\320\265\n' > "$outside/candidate.txt"
+got="$(cd "$outside" && run "$cyrillic")"
+[ "$got" = "2" ] || { echo "FAIL cyrillic outside a repository: expected 2 got $got"; fail=1; }
+rm -rf "$outside"
+
+# From a subdirectory, `git ls-files` lists only that subtree. A clean subdirectory must not clear a
+# tree whose offending file is somewhere else in it.
+printf '%b' '// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271\n' > candidate.txt
+mkdir -p sub && printf 'nothing to see here\n' > sub/clean.txt
+git add -A
+got="$(cd sub && run "$cyrillic")"
+[ "$got" = "1" ] || { echo "FAIL cyrillic from a subdirectory: expected 1 got $got"; fail=1; }
+printf 'the bridge answers\n' > candidate.txt && git add -A
+got="$(cd sub && run "$cyrillic")"
+[ "$got" = "0" ] || { echo "FAIL cyrillic from a subdirectory, clean tree: expected 0 got $got"; fail=1; }
 
 exit "$fail"
