@@ -17,8 +17,8 @@ import androidx.compose.ui.graphics.Color
 // rows by letting the background show through rather than by drawing a line.
 internal val DesignBackground = Color(0xFF15120C)
 
-// Three container depths. The design used all three on one screen, and the screen that needed all
-// three is gone; what is left uses two - a list container, and the rows inside it.
+// Three container depths. The design used all three on one screen, and that screen is gone; what is
+// left uses two - a list container, and the rows inside it.
 internal val DesignSurfaceLow = Color(0xFF1D1A13)
 internal val DesignSurface = Color(0xFF211E16)
 internal val DesignSurfaceHigh = Color(0xFF2C2820)
@@ -32,8 +32,8 @@ internal val DesignTextSubtle = Color(0xFF9A8F7C)
 // Outlined buttons, and the hairline around a container.
 internal val DesignOutline = Color(0xFF4D4639)
 
-// The divider inside the release card. Lighter than the outline, because it separates rather than
-// bounds.
+// The divider between rows inside a card. Lighter than the outline, because it separates rather
+// than bounds.
 internal val DesignOutlineVariant = Color(0xFF37332A)
 
 // The one accent: Send, Pair, and the controls that act.
@@ -41,7 +41,7 @@ internal val DesignPrimary = Color(0xFFF7BF52)
 internal val DesignOnPrimary = Color(0xFF422C00)
 
 /**
- * "There is an update", as a filled container: the home banner and the available status card.
+ * The accent as a filled container: a banner, or a card the owner is meant to act on.
  *
  * Mapped to M3's `primaryContainer` rather than to a role of its own. The design's four amber
  * values are a single M3 tonal ramp — `#422C00` / `#5E4100` / `#F7BF52` / `#FFDEA8` are exactly what
@@ -53,8 +53,8 @@ internal val DesignOnPrimary = Color(0xFF422C00)
 internal val DesignPrimaryContainer = Color(0xFF5E4100)
 internal val DesignOnPrimaryContainer = Color(0xFFFFDEA8)
 
-// The design's one accent-container pair: the Planned chip, the download size chip, and the
-// the filled status card. Both M3 accent-container slots point here - see AppColorScheme.
+// The design's one accent-container pair: a chip, and a filled status card. Both M3
+// accent-container slots point here - see AppColorScheme.
 internal val DesignAccentContainer = Color(0xFF4E452F)
 internal val DesignOnAccentContainer = Color(0xFFF0E0BF)
 

@@ -22,8 +22,8 @@ import javax.security.auth.x500.X500Principal
  *
  * The trust model settled first; this is its other half. Two self-signed certificates, no certificate
  * authority, each side pinning the exact bytes of the other. **The QR carries a certificate, never a
- * signing request** — there is no issuer anywhere in this design, and the ruling behind it is only true
- * because of that.
+ * signing request** — there is no issuer anywhere in this design, and the ruling behind it is only
+ * true because of that.
  *
  * ### Nothing here ever holds a private key
  *
@@ -57,9 +57,9 @@ object PhoneIdentity {
     /**
      * Twenty years, matching the bridge.
      *
-     * An open question, answered here: an expiry on a pinned self-signed pair buys an attacker nothing and
-     * guarantees a day the owner's phone stops working while they are away from the only machine that
-     * can fix it.
+     * An open question, answered here: an expiry on a pinned self-signed pair buys an attacker
+     * nothing and guarantees a day the owner's phone stops working while they are away from the only
+     * machine that can fix it.
      */
     private const val VALIDITY_YEARS = 20
 

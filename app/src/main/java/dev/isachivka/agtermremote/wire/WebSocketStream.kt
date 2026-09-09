@@ -17,8 +17,8 @@ import java.util.concurrent.atomic.AtomicReference
  * The outer half of the wire: a WebSocket to the router, presented as a byte stream.
  *
  * The router in front of the laptop PROXIES rather than forwards, so it terminates its own TLS and
- * the client certificate cannot survive the trip. mTLS therefore runs *inside* this stream, and this class
- * exists to give the driver above it something that reads and writes bytes.
+ * the client certificate cannot survive the trip. mTLS therefore runs *inside* this stream, and this
+ * class exists to give the driver above it something that reads and writes bytes.
  *
  * ### Two trust decisions, and this class makes only one of them
  *

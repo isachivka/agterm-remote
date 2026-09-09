@@ -515,8 +515,8 @@ class AgtermSessions(
      * agterm refuses that with `session has no split`, measured. A session with one pane is ALREADY
      * showing it at full width, so sending anyway would turn the commonest case there is into a
      * refusal — and on the initiated path that refusal takes his terminal away, which is exactly the
-     * shape that had to be undone once. The two callers each establish that a second pane exists before
-     * calling: the toggle by asking the laptop, the switch by reading the row it was handed.
+     * shape that had to be undone once. The two callers each establish that a second pane exists
+     * before calling: the toggle by asking the laptop, the switch by reading the row it was handed.
      */
     private suspend fun maximize(sessionId: String, pane: Pane, initiated: Boolean): Boolean {
         val worked = if (initiated) {
@@ -1124,10 +1124,10 @@ class AgtermSessions(
      * already been sent is the one arrangement that makes double-sending feel natural. While the send
      * is in flight the text lives in this function's parameter and nowhere else.
      *
-     * **A send that did not happen leaves the text where it was — refused OR failed.** This was granted
-     * for a refusal only; it extends to a connection that dropped, because from the
-     * owner's side both are the same event: they pressed send and their words went nowhere. On a
-     * refusal the notice says why; on a failure the report does.
+     * **A send that did not happen leaves the text where it was — refused OR failed.** This was
+     * granted for a refusal only; it extends to a connection that dropped, because from the owner's
+     * side both are the same event: they pressed send and their words went nowhere. On a refusal the
+     * notice says why; on a failure the report does.
      *
      * [thenReturn] presses Return after the text landed, with [ENTER_AFTER_TEXT_MS] between the two,
      * and never when the text did not land.
@@ -1284,11 +1284,11 @@ class AgtermSessions(
         // Cleared here rather than on a timer of its own, so every note on that one surface goes away
         // by the same route and none can outlive the others.
         _recalibrated.value = null
-        // **And the mutation note, since the pane toggle put one on this screen.** Without this the pane note
-        // has no way out: the session screen's auto-expire runs through here, so a note this route did
-        // not clear would sit over the terminal until the session was closed - which is precisely the
-        // outliving the sentence above rules out. The list screen clears the same field through
-        // dismissMutationNote and is unaffected.
+        // **And the mutation note, since the pane toggle put one on this screen.** Without this the
+        // pane note has no way out: the session screen's auto-expire runs through here, so a note
+        // this route did not clear would sit over the terminal until the session was closed - which
+        // is precisely the outliving the sentence above rules out. The list screen clears the same
+        // field through dismissMutationNote and is unaffected.
         _mutation.value = MutationNote.None
     }
 
@@ -1330,8 +1330,8 @@ class AgtermSessions(
                 // **The pane comes from the same field the screen and the keystroke read**.
                 // The fit is FOR the pane he is looking at, so it must be told which one, and it must
                 // be told by the one value that already decides where a read and a press go. A second
-                // source for "which pane" is the addressed-pane defect waiting to be reintroduced in a third
-                // place.
+                // source for "which pane" is the addressed-pane defect waiting to be reintroduced in
+                // a third place.
                 val answer = it.resize(
                     watching.id, pane, boxWidthDp, characterWidthMilliDp,
                     FitToPhone.TERMINAL_HORIZONTAL_PADDING_DP,
@@ -1617,11 +1617,11 @@ class AgtermSessions(
                 // the next poll succeed; leaving the pane alone would make it fail forever and read
                 // as the connection being broken, which it is not.
                 //
-                // **Destroyed, not collapsed** — the distinction the second-pane flag turns on. A collapsed pane
-                // refuses nothing, so this never fires for it, which is correct: it still reads, and
-                // the toggle above it is now present to leave it. The bridge's own sentence still reaches
-                // the owner through the state below - this changes what we ASK for next, not what
-                // they are told happened.
+                // **Destroyed, not collapsed** — the distinction the second-pane flag turns on. A
+                // collapsed pane refuses nothing, so this never fires for it, which is correct: it
+                // still reads, and the toggle above it is now present to leave it. The bridge's own
+                // sentence still reaches the owner through the state below - this changes what we
+                // ASK for next, not what they are told happened.
                 if (e.detail.contains(NO_SPLIT_PANE)) {
                     _pane.value = Pane.Left
                     // **The memory agrees with this path rather than fighting it**. Without

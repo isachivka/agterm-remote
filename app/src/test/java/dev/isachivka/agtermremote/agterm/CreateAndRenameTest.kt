@@ -595,18 +595,17 @@ class CreateAndRenameTest {
         // **MutationNote has no Succeeded case at all**, which is the mechanism rather than the habit:
         // there is nowhere to put a success, so nobody can add one by reflex.
         //
-        // The count is pinned so that growing this enum is a deliberate act. It caught the additions of
-        // DeleteFailed, PaneFailed, FitRefused and NeedsFit one at a time - and the names are asserted
-        // rather than the number alone, since a count says
-        // nothing about what was added.
+        // The count is pinned so that growing this enum is a deliberate act. It caught the additions
+        // of DeleteFailed, PaneFailed, FitRefused and NeedsFit one at a time - and the names are
+        // asserted rather than the number alone, since a count says nothing about what was added.
         assertEquals(7, MutationNote.entries.size)
         assertEquals(
             listOf("None", "CreateFailed", "RenameFailed", "DeleteFailed", "PaneFailed", "FitRefused", "NeedsFit"),
             MutationNote.entries.map { it.name },
         )
-        // **The stated invariant was "every case here is a FAILURE", and NeedsFit broke it.** Corrected
-        // rather than quietly stepped past, because a guard whose prose no longer describes what it
-        // guards is worse than no guard.
+        // **The stated invariant was "every case here is a FAILURE", and NeedsFit broke it.**
+        // Corrected rather than quietly stepped past, because a guard whose prose no longer
+        // describes what it guards is worse than no guard.
         //
         // NeedsFit is not a failure. Nothing went wrong: a session was opened whose shape the laptop
         // has never measured, and measuring it was DECLINED on purpose because a calibration moves his

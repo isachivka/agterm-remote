@@ -14,8 +14,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * **The acceptance test for the phone provisioning itself**, which was agreed as: `PhoneProvisioningScaffold`
- * can be deleted without anything breaking.
+ * **The acceptance test for the phone provisioning itself**, which was agreed as:
+ * `PhoneProvisioningScaffold` can be deleted without anything breaking.
  *
  * That harness was the only way a phone ever got an identity, in this project's entire history. It
  * needed a cable, `adb` and an instrumentation runner, which meant the owner could not pair a phone

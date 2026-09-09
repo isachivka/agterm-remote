@@ -72,7 +72,10 @@ class AppIconsTest {
         assertTrue("no AppIcons.kt at ${iconsFile.path}", iconsFile.isFile)
         assertTrue("no drawables at ${drawableDir.path}", drawableDir.isDirectory)
         assertTrue("no declarations parsed out of AppIcons.kt", declared.isNotEmpty())
-        assertTrue("no references found in src/main - is the scan reading anything?", referenced.isNotEmpty())
+        assertTrue(
+            "no references found in src/main - is the scan reading anything?",
+            referenced.isNotEmpty(),
+        )
     }
 
     @Test
@@ -94,7 +97,9 @@ class AppIconsTest {
 
     @Test
     fun `every bundled drawable is declared`() {
-        val onDisk = drawableDir.listFiles()!!.filter { it.extension == "xml" }.map { it.nameWithoutExtension }
+        val onDisk = drawableDir.listFiles()!!
+            .filter { it.extension == "xml" }
+            .map { it.nameWithoutExtension }
         val undeclared = (onDisk - declared.values.toSet()).sorted()
         // A drawable nothing declares is a file in the .apk that no code can name. It is how
         // ic_mic, ic_keyboard and ic_view_list survived the deletion of the car screen.

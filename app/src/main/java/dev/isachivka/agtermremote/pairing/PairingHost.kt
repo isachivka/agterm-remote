@@ -41,8 +41,8 @@ import androidx.core.content.ContextCompat
  * ### Two ways in, neither privileged
  *
  * **Scanning is what the owner asked for**: the code should be read through the camera, the way any
- * ordinary QR code is. [PairingViewfinder] reads frames continuously; the permission is requested when it opens
- * and nowhere else.
+ * ordinary QR code is. [PairingViewfinder] reads frames continuously; the permission is requested
+ * when it opens and nowhere else.
  *
  * **The file route stays, and reaching it never asks for anything.** `PairingCode`'s argument is
  * unchanged — a dark room, a cracked lens or a camera that will not focus must never block pairing —

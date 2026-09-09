@@ -50,7 +50,7 @@ class PaneToggleTest {
         id = "11111111-1111-4111-8111-111111111111",
         workspaceId = "w",
         workspace = "ws",
-        name = "ozon",
+        name = "build",
         title = "",
         active = true,
         splitPane = splitPane,

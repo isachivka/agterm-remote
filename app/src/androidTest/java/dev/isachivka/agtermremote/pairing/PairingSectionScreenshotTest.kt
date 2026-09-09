@@ -105,8 +105,9 @@ class PairingSectionScreenshotTest {
     @Test fun paired() =
         capture("pairing-4-paired", PairingState.Paired(profile, fingerprint, phoneFingerprint))
 
-    // The two states that separate holding a profile from being able to use it. Both are reachable here without a laptop, a camera or
-    // a screen lock, which is the point of keeping PairingSection stateless.
+    // The two states that separate holding a profile from being able to use it. Both are reachable
+    // here without a laptop, a camera or a screen lock, which is the point of keeping PairingSection
+    // stateless.
     @Test fun halfDone() = capture(
         "pairing-5-half-done",
         PairingState.PhoneHalfOutstanding(profile, fingerprint, phoneFingerprint),

@@ -20,8 +20,9 @@ import org.junit.runner.RunWith
  * number never moved. `AppIconsTest` on the JVM now asks whether anything still DRAWS each one, which
  * is a fact about the call sites rather than about this list, and it answers in milliseconds.
  *
- * What neither covers is whether each glyph is the right shape, the right way up and the right size —
- * the actual risk in converting paths by machine. `DesignScreenshotTest` takes the picture that does.
+ * What neither covers is whether each glyph is the right shape, the right way up and the right size
+ * — the actual risk in converting paths by machine. `DesignScreenshotTest` takes the picture that
+ * does.
  */
 @RunWith(AndroidJUnit4::class)
 class AppIconsScreenshotTest {

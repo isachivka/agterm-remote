@@ -63,7 +63,7 @@ What does **not** carry over, and must not appear anywhere in the new tree:
   APK installation from private releases. Play forbids this and it is not needed.
 - `app/**/car/**` (Android Auto), `app/**/limits/**`, `app/**/ui/home/**` (module grid),
   `bridge/cmd/ailimits`, `bridge/internal/limits`.
-- Any address: `dial.txt` values, the KeenDNS suffix, the hard-coded host in
+- Any address: `dial.txt` values, the owner's dynamic-DNS suffix, the hard-coded host in
   `RouterCertificateTrustTest.kt`, the `GITHUB_REPO` build-config field.
 - `keystore-backup/`, `local.properties`, `docs/runbooks/release-key-recovery.md`, `.claude/`,
   `.agents/`, `skills-lock.json`, `docs/req/**`, `docs/qa/**`.

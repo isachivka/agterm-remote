@@ -469,10 +469,12 @@ documents that do not exist here and will read as rot. Replace each with the rea
 or delete the sentence. Find them:
 
 ```bash
-grep -rn 'REQ-0\|PLAN-0\|docs/qa\|docs/req\|beware-of-sugar\|KeenDNS' --include='*.go' .
+grep -rn 'REQ-0\|PLAN-0\|docs/qa\|docs/req' --include='*.go' .
 ```
 
-`KeenDNS` becomes "a TLS-terminating proxy" — the mechanism is general, only the example was specific.
+Also grep for the private repository's own name and for the brand of the owner's router, neither of
+which is written out here for the reason this step exists. The router's brand becomes "a
+TLS-terminating proxy" — the mechanism is general, only the example was specific.
 
 - [ ] **Step 5: Write the new `main.go`**
 
