@@ -112,10 +112,41 @@ if $proxied; then
         -ca-out "$ca" -ca-key "$root/scripts/tls-proxy/.ca-key.pem" > "$work/proxy.log" 2>&1 &
     proxy_pid=$!
     sleep 1
-    echo "   the emulator must trust $ca. Install it into the user store under both hash names:"
-    echo "     h=\$(openssl x509 -subject_hash_old -in $ca -noout); cp $ca \$h.0"
-    echo "     adb root && adb push \$h.0 /data/misc/user/0/cacerts-added/"
-    echo "   (a debug build trusts the user store; see network_security_config.xml)"
+
+    # **The emulator has to TRUST the proxy, and this is checked rather than explained.**
+    #
+    # Without the certificate authority installed the phone refuses the proxy's certificate, the
+    # enrolment comes back as unreachable, and that is INDISTINGUISHABLE from the defect this mode
+    # exists to catch. A missing setup step must never look like the bug it was written to find; it
+    # was printed as instructions once, which is the same thing as not checking.
+    #
+    # The check is the certificate's own subject hash against what is on the device, because that is
+    # the name Android looks it up by - a file that is there under the wrong name is not installed.
+    installed=false
+    for h in "$(openssl x509 -subject_hash_old -in "$ca" -noout)" "$(openssl x509 -hash -in "$ca" -noout)"; do
+        if "$adb" shell "cmp -s /data/misc/user/0/cacerts-added/$h.0 /dev/null; test -s /data/misc/user/0/cacerts-added/$h.0" 2>/dev/null; then
+            installed=true
+        fi
+    done
+    if ! $installed; then
+        old_hash="$(openssl x509 -subject_hash_old -in "$ca" -noout)"
+        new_hash="$(openssl x509 -hash -in "$ca" -noout)"
+        {
+            echo "the emulator does not trust the proxy's certificate authority, so this run would"
+            echo "fail as 'unreachable' - which is exactly what the defect under test looks like."
+            echo
+            echo "install it into the user store under both hash names, then run this again:"
+            echo "  adb root"
+            echo "  cp $ca /tmp/$old_hash.0 && adb push /tmp/$old_hash.0 /data/misc/user/0/cacerts-added/"
+            echo "  cp $ca /tmp/$new_hash.0 && adb push /tmp/$new_hash.0 /data/misc/user/0/cacerts-added/"
+            echo "  adb shell chown system:system /data/misc/user/0/cacerts-added/$old_hash.0 /data/misc/user/0/cacerts-added/$new_hash.0"
+            echo "  adb shell chmod 644 /data/misc/user/0/cacerts-added/$old_hash.0 /data/misc/user/0/cacerts-added/$new_hash.0"
+            echo
+            echo "a debug build trusts the user store; see app/src/main/res/xml/network_security_config.xml"
+        } >&2
+        exit 1
+    fi
+    echo "   the emulator trusts $ca"
 fi
 
 echo "== opening an enrolment window through the control socket"

@@ -138,10 +138,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--advertise-scheme must be plain or tls")
 		os.Exit(2)
 	}
-	// Both or neither. One alone is a half-configured hop, and the failure it produces - a proxy that
-	// cannot talk to this port - is exactly the one this pair exists to fix.
-	if (*lanCert == "") != (*lanKey == "") {
-		fmt.Fprintln(os.Stderr, "--lan-cert and --lan-key must both be set, or neither")
+	if err := checkHopFlags(scheme, *onLinkTLS, *lanCert, *lanKey); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, scheme, *lanCert, *lanKey, *onLinkTLS, *parentPID); err != nil {
@@ -172,6 +170,34 @@ func advertised(advertise, bound string) string {
 		return bound
 	}
 	return advertise
+}
+
+// checkHopFlags refuses the two ways the outer hop and this port can be told to disagree.
+//
+// A function rather than two ifs in main, so it can be tested: main exits the process, and a rule
+// that is only reachable by starting a program is a rule nothing asserts.
+func checkHopFlags(scheme enroll.Scheme, onLinkTLS bool, lanCert, lanKey string) error {
+	// Both or neither. One alone is a half-configured hop, and the failure it produces - a proxy that
+	// cannot talk to this port - is exactly the one this pair exists to fix.
+	if (lanCert == "") != (lanKey == "") {
+		return errors.New("--lan-cert and --lan-key must both be set, or neither")
+	}
+	// **The combination that describes a bridge nothing can reach.**
+	//
+	// A phone told to open a plain connection, arriving at a port that answers only TLS: the
+	// handshake cannot happen and there is nothing anywhere to say why. The Mac app cannot express it
+	// at all - control.FrontDoor has three cases and this is the absent fourth - but **the command
+	// line is a second way in, and a type that forbids a state is worth nothing if the flags beside
+	// it permit the same state.**
+	//
+	// Refused rather than repaired. Either half could be "corrected" here and both corrections are
+	// guesses about somebody's network, which is the mistake version 1 of the payload made.
+	if scheme == enroll.SchemePlain && (onLinkTLS || lanCert != "") {
+		return errors.New(
+			"--advertise-scheme plain serves a plain outer hop, so TLS on this port is unreachable: " +
+				"pass --advertise-scheme tls, or drop the on-link flags")
+	}
+	return nil
 }
 
 // schemeNamed turns the flag's word into the wire value, and says so rather than defaulting.

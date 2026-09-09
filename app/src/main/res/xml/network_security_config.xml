@@ -29,10 +29,14 @@
       the TLS inside it. That is a real loss, and it is why `CleartextPolicyTest` asserts this rather
       than leaving it to a comment.
 
-  The narrower alternative - naming the laptop's host here - is not available: the address arrives in
-  a pairing code at runtime and is deliberately absent from this repository. The alternative worth
-  having is a scheme in the pairing payload, so a deployment behind a TLS-terminating proxy says so
-  and gets `wss://`. That is a payload version bump on both sides, not a line in this file.
+  The narrower alternative - naming the laptop's host here - is not available and never will be: the
+  address arrives in a pairing code at runtime and is deliberately absent from this repository, so
+  there is nothing to write in a domain-config at build time.
+
+  **The pairing payload does carry a scheme, as of version 2, and it does not retire this line.** A
+  deployment behind a TLS-terminating proxy now says so and gets `wss://`. The direct route - the one
+  this bridge serves with nothing in front of it - is still a cleartext socket to a host nobody knows
+  until the code is scanned. Only a bridge that terminated its own TLS would let this go.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">

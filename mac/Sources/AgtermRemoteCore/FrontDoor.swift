@@ -28,10 +28,23 @@ import Foundation
 /// direct connection that also serves TLS on the hop is a bridge nothing can reach, and a type that
 /// cannot express it is better than a validation rule that rejects it.
 ///
-/// The third rung names a symptom rather than a mechanism, because that is what its owner will
-/// actually have in front of them: pairing fails and the thing in front says 502. That is exactly
-/// what a router insisting on an HTTPS backend produces against a plaintext listener — measured, and
-/// the reason the on-link hop exists at all.
+/// ### The two proxied rungs are told apart by TRYING, not by a discriminator
+///
+/// There is no fact about their own setup that most owners can check to choose between them. The
+/// first attempt at this copy offered one — *an address you would open in a browser as https* — and
+/// it is true of both, so it discriminates nothing and quietly sends everybody to the second rung.
+/// Somebody with a proxying router would pick it, fail, and only then find the third.
+///
+/// So the copy says so: **the second rung tells them to try the next one if it fails.** That is
+/// honest about what this app knows, and the ordering is not arbitrary — the second is the commoner
+/// deployment, so most people stop there.
+///
+/// The third rung names a symptom rather than a mechanism, because a 502 from the thing in front is
+/// the only evidence its owner can observe. That is exactly what a router insisting on an HTTPS
+/// backend produces against a plaintext listener — measured, and the reason the on-link hop exists at
+/// all. **The phone cannot show it**: by the time that hop fails the phone has either reached nothing
+/// or been refused, with no status anywhere in what it gets, so the evidence really is in the
+/// router's own page and pointing at it is the best this screen can do.
 public enum FrontDoor: String, CaseIterable, Equatable, Sendable {
 
     /// Nothing in between: the phone opens a connection and this Mac's bridge is what answers.
@@ -114,11 +127,12 @@ public enum FrontDoorCopy {
             return "A port forward on your router, Tailscale, or WireGuard. Your phone connects and "
                 + "this Mac answers."
         case .httpsInFront:
-            return "A tunnel, a reverse proxy, or a router that publishes this Mac. Pick this if the "
-                + "address you typed is one you would open in a browser as https."
+            return "A tunnel, a reverse proxy, or a router that publishes this Mac. Try this one "
+                + "first if something sits in front; if pairing fails with it, try the next one."
         case .httpsBothWays:
-            return "Some routers insist on it. Pick this if the one above looks right and pairing "
-                + "still fails, or if the thing in front reports a 502."
+            return "The same, for something in front that also insists on HTTPS to this Mac — some "
+                + "routers do. Try this if the one above did not work, or if the thing in front "
+                + "reports a 502."
         }
     }
 }

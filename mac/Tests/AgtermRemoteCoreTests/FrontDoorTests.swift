@@ -72,6 +72,25 @@ import Testing
         #expect(FrontDoorCopy.detail(for: .httpsBothWays).contains("502"))
     }
 
+    /**
+     Two proxied answers that a person cannot tell apart need a way through, and the way through is
+     being told to try the next one.
+
+     The first version of this copy offered a discriminator - "an address you would open in a browser
+     as https" - which is true of BOTH proxied answers. It therefore discriminated nothing and sent
+     everybody to the second rung, where somebody with a proxying router fails and has to discover the
+     third for themselves.
+     */
+    @Test func theSecondProxiedAnswerSendsThemOnWhenItFails() {
+        let second = FrontDoorCopy.detail(for: .httpsInFront)
+
+        #expect(
+            second.contains("try the next one"),
+            "an answer a person cannot verify must say what to do when it is wrong")
+        // The discriminator that was not one. Named so it cannot come back as an improvement.
+        #expect(!second.lowercased().contains("browser"))
+    }
+
     /// Absent means the simplest deployment, and an unreadable stored value means the same rather
     /// than an error: it is the shape a downgrade leaves behind, and the remedy is identical.
     @Test func anUnsetOrUnreadableChoiceIsTheSimplestDeployment() {
