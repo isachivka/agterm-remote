@@ -5,13 +5,14 @@ import (
 	"errors"
 )
 
-// This file is what the LOCAL control socket may ask of the handler, and it is deliberately two
-// methods long.
+// This file is what the LOCAL control socket may ask of the handler, and it is deliberately short.
 //
-// **Neither of them is a new code path.** RestoreFit dispatches the ordinary resize verb with no box
-// width, which is the same request the phone's own off press sends, so the restore has one
-// implementation, one owner of the store, and one place where the restore point is consumed. A second
-// implementation "for the local case" is exactly how two paths drift until one of them is wrong.
+// **None of it is a new code path**, and that is the rule this file is held to rather than a count of
+// methods. RestoreFit dispatches the ordinary resize verb with no box width, which is the same request
+// the phone's own off press sends; AgtermReachable dispatches the ordinary sessions verb and reports
+// only whether it worked. So the restore has one implementation, one owner of the store, and one place
+// where the restore point is consumed, and "is agterm up" has one definition. A second implementation
+// "for the local case" is exactly how two paths drift until one of them is wrong.
 //
 // See internal/control for why a unix socket needs no authentication of its own.
 
@@ -40,4 +41,19 @@ func (h *Handler) RestoreFit(ctx context.Context) error {
 		return errors.New("the window could not be restored")
 	}
 	return nil
+}
+
+// AgtermReachable reports whether agterm is answering, for the menu bar's `status`.
+//
+// **The ordinary sessions request, and only its ok flag is read.** A bridge whose agterm has gone
+// away is running, listening and useless, and that is a different thing to tell an owner than "the
+// bridge is not running" - which is what they would otherwise conclude from a menu that shows a
+// paired phone and nothing working.
+//
+// Nothing about what came back leaves this function: not the session list, not the count, not the
+// error text. The caller asked a yes-or-no question and the answer to it is the only thing that is
+// any of its business - the session names are the owner's work, and a menu-bar tooltip is not where
+// they belong.
+func (h *Handler) AgtermReachable(ctx context.Context) bool {
+	return h.Handle(ctx, Request{Verb: VerbSessions}).OK
 }

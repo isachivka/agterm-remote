@@ -176,13 +176,17 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 
 	// The enrolment window.
 	//
-	// **Nothing in this binary opens it, and that is no longer a gate on anything.** It used to be
-	// one: the listener handed every completed handshake to the API handler whatever it had
-	// negotiated, so an open window would have meant a connection reaching the API with no client
-	// certificate, and the note here said nothing that could open a window may ship first. The
-	// dispatch below is that missing half - `agterm/enroll-1` reaches enrolment and nothing else - so
-	// what remains is simply that the user interface for pairing lives in the Mac app, which will call
-	// Open and Close over the control socket.
+	// **One thing in this binary can open it, and it is the local control socket.** That used to be
+	// nothing at all, and the note here said so; it was a gate on something for a while, because the
+	// listener handed every completed handshake to the API handler whatever it had negotiated, so an
+	// open window would have meant a connection reaching the API with no client certificate. The
+	// dispatch in internal/listener is that missing half - `agterm/enroll-1` reaches enrolment and
+	// nothing else - and the control socket is now wired to `pair-open` further down.
+	//
+	// So the property internal/enroll's anonymous branch rests on - "a window is seconds of the
+	// bridge's life and requires a person at the Mac" - is held by two things and neither is a habit:
+	// enroll.MaxTTL caps the seconds, and the control socket's 0600 on a path with no address off this
+	// machine is the person.
 	//
 	// With no window open, this bridge offers `agterm/api-1` and nothing else, exactly as before the
 	// split. Constructed rather than left nil because "closed" is a state this type has and nil is not
@@ -288,7 +292,25 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	//
 	// Not fatal: a bridge that refused to start because the control socket could not be created would
 	// take the phone offline to protect a convenience.
-	if door, err := control.Listen(ctx, stateDir, handler); err != nil {
+	//
+	// **It is also the only thing in this binary that can open an enrolment window**, which is the
+	// half of internal/enroll's argument that nothing in the repository used to supply: the anonymous
+	// branch of the front door is justified by "a window is seconds of the bridge's life and requires
+	// a person at the Mac", and this socket's 0600 is what makes the second clause true. The Mac app
+	// dials it; nothing else can.
+	pairing := &control.Pairing{
+		// The address the app chose, handed back to it by `status` so the panel and the bridge cannot
+		// disagree about where a phone should dial, and used to build the QR payload.
+		Listening: listenAddr,
+		Window:    window,
+		Peers:     peers,
+		// The parsed leaf, which is also what the enrolment handler returns to a phone. The QR code
+		// carries the SHA-256 of its DER, so both ends of pairing are talking about one certificate.
+		Certificate: leaf,
+		// The handler's own probe rather than a second opinion about what "reachable" means.
+		Agterm: handler.AgtermReachable,
+	}
+	if door, err := control.Listen(ctx, stateDir, handler, pairing); err != nil {
 		log.Printf("control socket unavailable: %v", err)
 	} else {
 		// Closing it no longer removes the file - see SetUnlinkOnClose in internal/control - so this
