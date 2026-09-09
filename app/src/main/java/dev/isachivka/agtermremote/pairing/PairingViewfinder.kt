@@ -4,6 +4,7 @@ import android.util.Size
 import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 // androidx.lifecycle.compose, not androidx.compose.ui.platform: the latter is deprecated and moved
 // here. lifecycle-runtime-compose is already on this app's classpath, so the correct one costs no
 // new dependency - checked against the resolved classpath rather than assumed.
+import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.isachivka.agtermremote.R
 import dev.isachivka.agtermremote.ui.theme.AppTheme
@@ -83,12 +85,24 @@ import java.util.concurrent.Executors
  * exotic:
  *
  *  - a device with **no back camera**. `FEATURE_CAMERA_ANY` is satisfied by a front camera, so such a
- *    phone passes the check the host makes and then throws on `DEFAULT_BACK_CAMERA`.
- *  - a camera **held by another application**, which throws on the way in.
+ *    phone passes the check the host makes and then throws on `DEFAULT_BACK_CAMERA`. That one is a
+ *    throw, and [cameraOrUnavailable] catches it.
+ *  - a camera **held by another application**. **This one does not throw at all**, and assuming it did
+ *    was wrong: `bindToLifecycle` succeeds, and the camera service's refusal arrives later and
+ *    elsewhere, as a `CameraState` carrying an error. Nothing was watching that, so the outcome was
+ *    not the paste field - it was a viewfinder that stayed black forever with no way out, which is
+ *    worse than the crash the guard was built for.
  *
- * Both used to reach the top of the stack as a crash on the pairing screen. They now call
- * [onUnavailable] - see [cameraOrUnavailable], which is where the policy is, and `CameraGuardTest`,
- * which asserts it.
+ * So there are two mechanisms because there are two shapes, and only one of them is an exception. The
+ * state is observed below and the policy is [cameraIsUnusable]; both are unit-tested.
+ *
+ * **No end-to-end run has produced a camera-state error, and staging one was tried and failed.** A
+ * second client opened from inside this process does not do it: Android hands the camera to the
+ * foreground application, and CameraX logged `Camera open completed ... errorCode=null` while the test
+ * held the device. That is worth knowing rather than hiding - it means the in-use case is rarer on
+ * this platform than it sounds, and it means the errors this route will actually carry are more likely
+ * to be the ones a person cannot stage either: a camera disabled by device policy, do-not-disturb, or
+ * the hardware failing. Recorded as a gap in `docs/pairing.md`.
  *
  * ### What is proven about this file, and what is not
  *
@@ -216,13 +230,39 @@ fun PairingViewfinder(
         }
 
         onDispose {
-            // The torch first: unbinding extinguishes it anyway, but a torch left burning in
-            // somebody's pocket is the one failure here with a physical cost.
-            camera?.cameraControl?.enableTorch(false)
-            analysis.clearAnalyzer()
-            bound?.unbind(preview, analysis)
+            // Guarded for the same reason the bind is: this runs on the way out of a screen, on the
+            // main thread, with nothing above it to catch anything. A provider left in a bad state by
+            // whatever failed a moment ago must not turn leaving the screen into a crash - and there
+            // is nothing useful to report here, because the screen is already going.
+            cameraOrUnavailable({}) {
+                // The torch first: unbinding extinguishes it anyway, but a torch left burning in
+                // somebody's pocket is the one failure here with a physical cost.
+                camera?.cameraControl?.enableTorch(false)
+                analysis.clearAnalyzer()
+                bound?.unbind(preview, analysis)
+            }
             camera = null
         }
+    }
+
+    // **The camera opened, or it did not, and the second answer arrives here rather than as a throw.**
+    //
+    // A camera another application is holding lets `bindToLifecycle` succeed and then never delivers
+    // a frame: the refusal comes from the camera service, asynchronously, as a state carrying an
+    // error. Watching it is the difference between the paste field and a black rectangle that never
+    // resolves.
+    //
+    // Keyed on `camera`, so a rebind gets a fresh observer and the old one is removed. The LiveData is
+    // observed with the screen's own lifecycle owner as well, so nothing here outlives the screen even
+    // if the dispose is missed.
+    val watched = camera
+    DisposableEffect(watched, lifecycleOwner) {
+        val state = watched?.cameraInfo?.cameraState
+        val observer = Observer<CameraState> { value ->
+            if (cameraIsUnusable(value)) unavailable()
+        }
+        state?.observe(lifecycleOwner, observer)
+        onDispose { state?.removeObserver(observer) }
     }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -318,3 +358,22 @@ internal inline fun <T> cameraOrUnavailable(onUnavailable: () -> Unit, block: ()
     onUnavailable()
     null
 }
+
+/**
+ * Whether a camera state means this phone is not going to read a code with it.
+ *
+ * ### Any error, and not only the ones CameraX calls critical
+ *
+ * `StateError` carries a type — recoverable or critical — and a camera **held by another
+ * application** is recoverable: CameraX will open it if that application lets go. Routing only the
+ * critical ones would therefore leave the commonest case exactly where it was, which is a viewfinder
+ * that stays black until something outside this app changes.
+ *
+ * So any error at all sends the owner to the paste field, and the cost of that is the safe direction:
+ * a route that always works, needs no permission, and is on the same screen. Nothing is destroyed and
+ * nothing is stored; re-opening the screen tries the camera again.
+ *
+ * A state with no error is not interesting whatever its type. `PENDING_OPEN` on its own is CameraX
+ * waiting, which is what it does before every successful open.
+ */
+internal fun cameraIsUnusable(state: CameraState): Boolean = state.error != null

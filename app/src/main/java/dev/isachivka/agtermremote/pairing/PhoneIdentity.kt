@@ -152,9 +152,10 @@ object PhoneIdentity {
             // **The breadth is only safe because this verdict no longer destroys anything.** It was a
             // sentence on a screen AND a deletion, and as a deletion one misclassification cost the
             // owner their pairing on 2026-07-29. Reporting broadly is right; acting broadly was not.
-            // Its one caller today is EnrolGate, which REFUSES a pairing on it - non-destructive, and
-            // the owner presses Try again. Do not reconnect this verdict to a clear(); the button
-            // that replaces a key belongs on a screen, pressed by the person who loses the pairing.
+            // It has two callers today and NEITHER destroys anything: EnrolGate refuses a pairing on
+            // it, and AgtermViewModel turns it into the terminal's own failure copy. Do not reconnect
+            // this verdict to a clear(); the button that replaces a key belongs on a screen, pressed
+            // by the person who loses the pairing.
             SigningState.Unusable
         }
     }

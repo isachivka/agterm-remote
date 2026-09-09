@@ -1,5 +1,7 @@
 package dev.isachivka.agtermremote.pairing
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.security.GeneralSecurityException
 import java.security.cert.X509Certificate
 
@@ -67,5 +69,37 @@ internal object EnrolGate {
         }
 
         return enrol(certificate)
+    }
+}
+
+/**
+ * **The wiring**: this phone's keystore, the gate, and the one enrolment, in that order and off the
+ * main thread.
+ *
+ * ### Why this is a function and not three lines in the composable
+ *
+ * Because the property worth having lives in the arrangement, and an arrangement that only exists
+ * inside a private function is one nobody can test. [EnrolGate] proves the gate refuses when it is
+ * asked; **that says nothing about whether anybody asks it.** Replacing the call below with a direct
+ * `Enrollment.enroll` left every test in this module passing, which is precisely the shape this
+ * repository keeps meeting: the piece is pinned and the wiring is not.
+ *
+ * So the wiring is here, it is `internal`, and `EnrolWiringTest` drives it with a key that will not
+ * sign and watches a real socket to assert that nothing dialled. [Enrollment] is deliberately **not**
+ * injectable: it is the only thing in this module that opens a socket or writes the store, so a fake
+ * in its place would make "nothing was opened" a statement about the fake.
+ *
+ * [identity] and [signing] have defaults that are the real keystore, so the call site passes neither
+ * and the thing under test is the thing that ships.
+ */
+internal suspend fun enrolThisPhone(
+    payload: EnrollPayload,
+    store: PairedLaptop,
+    deviceName: String,
+    identity: () -> X509Certificate = { PhoneIdentity.certificate() },
+    signing: () -> SigningState = { PhoneIdentity.signingState() },
+): EnrollResult = withContext(Dispatchers.IO) {
+    EnrolGate.run(identity, signing) { certificate ->
+        Enrollment.enroll(payload, certificate, deviceName, store)
     }
 }
