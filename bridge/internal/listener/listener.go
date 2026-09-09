@@ -321,6 +321,34 @@ func (s *Server) accept(ctx context.Context, raw net.Conn) {
 	// silent way a failed handshake is, so an unauthenticated caller still cannot make this process
 	// do anything at all.
 	//
+	// # THIS SWITCH IS LOAD-BEARING, AND WHAT IT OMITS IS THE LOAD
+	//
+	// A reviewer's verdict on the whole enrolment mechanism was that the guarantee comes from what
+	// this switch does NOT have a case for. Everything above it - the pinned verifier, the anonymous
+	// branch, the window's ceiling and its single use - narrows who gets here. This is the only line
+	// that decides what they reach, and it decides it by having exactly two arms.
+	//
+	// Two edits break it, both silently, and **no test in this repository would notice either**:
+	//
+	//   - **A protocol added to either config's NextProtos in enroll.ServerConfigFor without a
+	//     correctly guarded case here.** The negotiated protocol is then a string this switch has
+	//     never heard of. Today that falls to no arm and the connection closes, which is the safe
+	//     direction; the dangerous version is somebody adding the arm and the ALPN entry in one
+	//     commit without noticing which BRANCH's configuration they added it to. A protocol offered
+	//     by the anonymous branch and dispatched to s.serve is the original bug restored exactly -
+	//     a caller with no client certificate answered `ok=true` with the owner's session list -
+	//     and it looks like two tidy lines in a diff.
+	//   - **Any future code that reads the connection before this point.** A banner, a proxy header,
+	//     a peek to guess a protocol, a log line carrying the first bytes. The invariant at the top
+	//     of this file says nothing is read before HandshakeContext returns nil; this adds that
+	//     nothing is read before the switch has chosen an arm, because a read here happens on a
+	//     connection that may be the anonymous one, and whatever consumed those bytes is outside
+	//     both branches and therefore outside both threat models.
+	//
+	// So: adding an ALPN protocol means writing the arm here in the same change, and saying which
+	// branch of ServerConfigFor may offer it. Anything else compiles, passes, and quietly widens the
+	// only door in this design that opens without a certificate.
+	//
 	// The handshake slot was released above, BEFORE either branch, and that is deliberate on the
 	// enrolment side too. Holding it across the exchange would cap concurrent enrolments at twelve -
 	// which sounds like the right kind of bound and is the wrong one here, because the semaphore is

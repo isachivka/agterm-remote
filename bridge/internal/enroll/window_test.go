@@ -511,3 +511,133 @@ func TestTheClampedExpiryIsWhatThePayloadWouldCarry(t *testing.T) {
 		t.Fatalf("the code advertises %s, past the %s ceiling", got.Expiry.Sub(at), enroll.MaxTTL)
 	}
 }
+
+// **"Expired" and "closed after five wrong tokens" are different things to tell an owner**, and the
+// panel showing the code cannot guess which it was: both present as a code that stopped working.
+//
+// So the window says. [Window.State] is the deliberate accessor the note on ErrRefused anticipated -
+// it lives on this side, where the decision about what an owner may be told belongs, and nothing it
+// returns ever travels to the anonymous caller.
+func TestTheWindowSaysWhyItStoppedAcceptingAToken(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	now := func() time.Time { return at }
+
+	t.Run("never opened", func(t *testing.T) {
+		s := enroll.NewWindow(now).State()
+		if s.Open || s.Ended != enroll.EndedNever {
+			t.Fatalf("a window nobody opened reports %+v", s)
+		}
+	})
+
+	t.Run("open", func(t *testing.T) {
+		w := enroll.NewWindow(now)
+		_, expiry := w.Open(time.Minute)
+		s := w.State()
+		if !s.Open {
+			t.Fatal("an open window reports itself closed")
+		}
+		if !s.Expiry.Equal(expiry) {
+			t.Errorf("state says %s, Open said %s", s.Expiry, expiry)
+		}
+		if s.AttemptsLeft != enroll.MaxAttempts {
+			t.Errorf("a fresh window has %d attempts left, want %d", s.AttemptsLeft, enroll.MaxAttempts)
+		}
+		if s.Ended != enroll.EndedNever {
+			t.Errorf("an open window claims to have ended as %q", s.Ended)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		w := enroll.NewWindow(now)
+		w.Open(time.Minute)
+		at = at.Add(2 * time.Minute)
+		defer func() { at = time.Unix(1_700_000_000, 0).UTC() }()
+
+		// Nobody tried the token. The window has to notice by itself, or the panel says "wrong code"
+		// about a code nobody entered.
+		s := w.State()
+		if s.Open || s.Ended != enroll.EndedExpired {
+			t.Fatalf("a window that ran out reports %+v", s)
+		}
+	})
+
+	t.Run("five wrong tokens", func(t *testing.T) {
+		w := enroll.NewWindow(now)
+		w.Open(time.Minute)
+		for i := 0; i < enroll.MaxAttempts; i++ {
+			_ = w.Consume(make([]byte, 32))
+		}
+		s := w.State()
+		if s.Open || s.Ended != enroll.EndedAttempts {
+			t.Fatalf("a window shut by wrong tokens reports %+v", s)
+		}
+		if s.AttemptsLeft != 0 {
+			t.Errorf("%d attempts left after exhausting them", s.AttemptsLeft)
+		}
+	})
+
+	t.Run("spent", func(t *testing.T) {
+		w := enroll.NewWindow(now)
+		token, _ := w.Open(time.Minute)
+		if err := w.Consume(token[:]); err != nil {
+			t.Fatal(err)
+		}
+		s := w.State()
+		if s.Open || s.Ended != enroll.EndedPaired {
+			t.Fatalf("a window a phone walked through reports %+v", s)
+		}
+	})
+
+	t.Run("closed by the owner", func(t *testing.T) {
+		w := enroll.NewWindow(now)
+		w.Open(time.Minute)
+		w.Close()
+		s := w.State()
+		if s.Open || s.Ended != enroll.EndedClosed {
+			t.Fatalf("a window the owner shut reports %+v", s)
+		}
+	})
+}
+
+// **Only Consume burns an attempt**, which makes five looser than it reads: a dropped connection, a
+// TLS handshake that failed, a request that never reached the gate - none of them costs the caller
+// anything and none of them moves this counter. Said here as a test rather than as a sentence,
+// because the Mac app reports the number and an owner reading "3 of 5 attempts left" would otherwise
+// be told a count of the wrong events.
+func TestOnlyASpentAttemptCountsAgainstTheWindow(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	w := enroll.NewWindow(func() time.Time { return at })
+	w.Open(time.Minute)
+
+	// Reads that are not attempts.
+	for i := 0; i < 20; i++ {
+		w.IsOpen()
+		w.State()
+	}
+	if left := w.State().AttemptsLeft; left != enroll.MaxAttempts {
+		t.Fatalf("%d attempts left after twenty reads, want %d", left, enroll.MaxAttempts)
+	}
+
+	_ = w.Consume(make([]byte, 32))
+	if left := w.State().AttemptsLeft; left != enroll.MaxAttempts-1 {
+		t.Fatalf("%d attempts left after one wrong token, want %d", left, enroll.MaxAttempts-1)
+	}
+}
+
+// Re-opening is what the owner means by pressing the button again, and it resets the count and the
+// reason with the secret they belonged to. A panel that still said "closed after five wrong
+// attempts" over a freshly minted code would be describing the previous one.
+func TestReopeningForgetsWhyTheLastWindowEnded(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	w := enroll.NewWindow(func() time.Time { return at })
+	w.Open(time.Minute)
+	for i := 0; i < enroll.MaxAttempts; i++ {
+		_ = w.Consume(make([]byte, 32))
+	}
+
+	w.Open(time.Minute)
+	s := w.State()
+	if !s.Open || s.Ended != enroll.EndedNever || s.AttemptsLeft != enroll.MaxAttempts {
+		t.Fatalf("a re-opened window still carries the last one's ending: %+v", s)
+	}
+}

@@ -8,14 +8,17 @@ import (
 	"time"
 )
 
-// maxAttempts is how many wrong tokens a window survives before it closes.
+// MaxAttempts is how many wrong tokens a window survives before it closes.
 //
 // This is not the defence against guessing. The token is 32 bytes from crypto/rand, and no number of
 // attempts an attacker can make in five minutes moves that needle. What the counter is for is the
 // window nobody is using: the owner opened a panel, something else started talking to the port, and
 // the code is still on screen. Five is enough for a phone that retried a dropped connection, and
 // small enough that a window under noise shuts instead of standing open until its expiry.
-const maxAttempts = 5
+// Exported because the Mac app reports the remaining count to the owner, and a panel that says "2
+// attempts left" needs the denominator from the side that enforces it rather than from a constant
+// somebody copied.
+const MaxAttempts = 5
 
 // MaxTTL is the longest a window may be open, and [Open] will not exceed it whatever it is asked for.
 //
@@ -123,6 +126,9 @@ type Window struct {
 	token    [32]byte
 	expiry   time.Time
 	attempts int
+	// ended is why the last window stopped accepting a token, and it is the only thing here that
+	// outlives the secret it describes. It carries no secret of its own - see [Ending].
+	ended Ending
 }
 
 // NewWindow returns a closed window that reads the time from now.
@@ -186,6 +192,10 @@ func (w *Window) Open(ttl time.Duration) ([32]byte, time.Time) {
 	w.expiry = w.now().Add(ttl).Truncate(time.Second).UTC()
 	w.attempts = 0
 	w.open = true
+	// The reason the LAST window ended goes with it. Re-pressing the button is what an owner does
+	// when a code goes stale, and a panel still saying "closed after five wrong attempts" over a
+	// freshly minted code would be describing the previous one.
+	w.ended = EndedNever
 	return token, w.expiry
 }
 
@@ -194,7 +204,7 @@ func (w *Window) Open(ttl time.Duration) ([32]byte, time.Time) {
 func (w *Window) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.closeLocked()
+	w.closeLocked(EndedClosed)
 }
 
 // IsOpen reports whether a token would still be accepted right now.
@@ -210,7 +220,7 @@ func (w *Window) IsOpen() bool {
 
 // Consume spends the token: nil exactly once, for the right bytes, inside the window.
 //
-// Success closes the window. A wrong token counts against maxAttempts and closes it on the fifth.
+// Success closes the window. A wrong token counts against MaxAttempts and closes it on the fifth.
 // Either way, a caller that gets nil back is the only caller that will.
 func (w *Window) Consume(token []byte) error {
 	w.mu.Lock()
@@ -222,7 +232,7 @@ func (w *Window) Consume(token []byte) error {
 	if !w.now().Before(w.expiry) {
 		// Refused AT the expiry, not after it: the payload states that instant as when the offer
 		// stops being accepted, and the phone will have stopped offering by then.
-		w.closeLocked()
+		w.closeLocked(EndedExpired)
 		return refused{causeExpired}
 	}
 	// ConstantTimeCompare, and its whole slice against the whole argument. It returns 0 on a length
@@ -230,12 +240,12 @@ func (w *Window) Consume(token []byte) error {
 	// caller sending the wrong number of bytes has not sent the token.
 	if subtle.ConstantTimeCompare(w.token[:], token) != 1 {
 		w.attempts++
-		if w.attempts >= maxAttempts {
-			w.closeLocked()
+		if w.attempts >= MaxAttempts {
+			w.closeLocked(EndedAttempts)
 		}
 		return refused{causeToken}
 	}
-	w.closeLocked()
+	w.closeLocked(EndedPaired)
 	return nil
 }
 
@@ -245,7 +255,7 @@ func (w *Window) liveLocked() bool {
 		return false
 	}
 	if !w.now().Before(w.expiry) {
-		w.closeLocked()
+		w.closeLocked(EndedExpired)
 		return false
 	}
 	return true
@@ -258,9 +268,84 @@ func (w *Window) liveLocked() bool {
 // secret is not sitting in a live heap object for the rest of the bridge's uptime, where a core
 // dump, a crash reporter or a future debug handler would find it. The only copy that should outlive
 // the window is the one on the owner's screen, which they can close.
-func (w *Window) closeLocked() {
+func (w *Window) closeLocked(ended Ending) {
 	w.open = false
 	w.token = [32]byte{}
 	w.expiry = time.Time{}
 	w.attempts = 0
+	w.ended = ended
+}
+
+// Ending says why the window that is no longer open stopped accepting a token.
+//
+// # Why this exists, and why it is on THIS side of the package
+//
+// **"It expired" and "it closed after five wrong attempts" are different things to tell an owner**,
+// and the panel showing the code cannot guess which it was: both present as a code that stopped
+// working, and they lead to different next moves - press the button again, or go and look at what
+// is talking to the port.
+//
+// [ErrRefused] deliberately refuses to say any of this, because the caller it answers is an
+// unauthenticated stranger and the cause tells them whether a window is open at all and whether
+// their guess had the right shape. The note on that error anticipated exactly this accessor: the
+// decision about what an OWNER may be told belongs inside this package, reached by a deliberate call
+// rather than by an error string that travels to a stranger by default. So the two paths are
+// separate by construction - [State] is reachable only from the local control socket, and nothing
+// that builds a reply to an anonymous connection can see it.
+//
+// It carries no secret. Not the token, not a count of who asked, and nothing that survives a
+// restart - a bridge that restarts has no window open and nothing to explain.
+type Ending string
+
+const (
+	// EndedNever is a window nobody has opened, and a window that is open right now. There is
+	// nothing to explain in either case, and the zero value being this one is deliberate.
+	EndedNever Ending = ""
+	// EndedExpired is a window that ran out. Nobody necessarily tried the token.
+	EndedExpired Ending = "expired"
+	// EndedAttempts is a window closed by MaxAttempts wrong tokens.
+	EndedAttempts Ending = "attempts"
+	// EndedPaired is a window a phone walked through. Consume succeeds at most once and closes it.
+	EndedPaired Ending = "paired"
+	// EndedClosed is the owner closing the pairing panel.
+	EndedClosed Ending = "closed"
+)
+
+// State is what the owner's own machine may be told about the window.
+//
+// A value rather than a set of accessors, because every field describes the SAME instant: a caller
+// that asked "is it open" and then "when does it expire" would be asking about two, and the second
+// answer can be about a window the first one did not see.
+type State struct {
+	// Open reports whether a token would still be accepted right now. Consults the clock, so a
+	// window that has run out reports itself closed - and, in passing, records that it expired.
+	Open bool
+	// Expiry is when the open window stops being accepted, and it is the value [Open] returned:
+	// truncated to the second, in UTC, and already clamped to [MaxTTL]. Zero when nothing is open.
+	Expiry time.Time
+	// AttemptsLeft is how many more wrong tokens this window survives.
+	//
+	// **Only [Consume] burns one.** A dropped connection, a TLS handshake that failed, a request
+	// that never reached the gate - none of them costs the caller anything and none of them moves
+	// this counter, which makes five looser than it reads. Reported rather than assumed because the
+	// Mac app shows the number and an owner reading it should be reading a count of the events it
+	// actually describes.
+	AttemptsLeft int
+	// Ended is why the last window stopped, and it is meaningful only while Open is false.
+	Ended Ending
+}
+
+// State is the window as the owner's machine may see it. See [Ending] for why this exists here and
+// not as a message on a refusal.
+func (w *Window) State() State {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// liveLocked, not a field read: a window whose time has passed has to notice by itself, or the
+	// panel says nothing about a code that stopped working an instant ago. It also records the
+	// expiry, which is the answer this call is being asked for.
+	if !w.liveLocked() {
+		return State{Ended: w.ended}
+	}
+	return State{Open: true, Expiry: w.expiry, AttemptsLeft: MaxAttempts - w.attempts}
 }
