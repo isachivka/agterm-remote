@@ -24,8 +24,15 @@ import Foundation
 /// `BoundaryTests` was written before this file existed and checks both by reading the source.
 public struct BridgeSupervisor: Sendable {
 
-    /// The bridge's launchd job, as `bridge/launchd/install.sh` installs it.
-    public static let label = "dev.isachivka.agtermremote"
+    /// The bridge's launchd job.
+    ///
+    /// **Not the app's own bundle identifier**, which is `dev.isachivka.agtermremote`. The rename that
+    /// brought this file over collapsed two distinct strings into one, and a job label equal to the
+    /// bundle id of the app that supervises it is wrong in both directions: `launchctl print` would
+    /// name the app when asked about the bridge, and a future `bootstrap` would install a job under
+    /// the identifier macOS already associates with an application. `BridgeSupervisorTests` reads the
+    /// bundle identifier out of Info.plist and fails if the two are ever the same string again.
+    public static let label = "dev.isachivka.agterm-remote-bridge"
 
     /// What ran, so a test can assert the exact argv rather than the shape of a string.
     public struct Invocation: Equatable, Sendable {

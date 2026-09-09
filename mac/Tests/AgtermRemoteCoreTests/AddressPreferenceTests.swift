@@ -101,4 +101,66 @@ struct AddressPreferenceTests {
         let keys = store.defaults.persistentDomain(forName: store.suite)?.keys.sorted() ?? []
         #expect(keys == [AddressPreference.key])
     }
+
+    /// **The invariant, performed rather than asserted in prose.**
+    ///
+    /// The seven cases above each write a parse-shaped address, so every one of them passed while
+    /// `write` accepted values `read` would call malformed. This runs the whole shared table through
+    /// the store and back and demands the same value out — which is what "a stored address is always
+    /// one somebody could have typed" actually means.
+    @Test func everyRowInTheSharedTableSurvivesTheStore() throws {
+        for row in DialAddressTests.table {
+            let store = scratch()
+            defer { store.discard() }
+            let address = DialAddress(host: row.host, port: row.port)
+
+            try AddressPreference.write(address, to: store.defaults)
+
+            #expect(try AddressPreference.read(from: store.defaults).get() == address)
+            #expect(store.defaults.string(forKey: AddressPreference.key) == row.rendered)
+        }
+    }
+
+    /// **`DialAddress.init` is public and validates nothing**, so `write` has to.
+    ///
+    /// Each of these stored happily and read back `.malformed`, or read back as a *different host* —
+    /// which is worse, because nothing reports it and the phone is simply pointed somewhere else. The
+    /// first is not invented: `DialAddress(host: "-", port: 0)` is constructed in `main.swift` today
+    /// as a placeholder for a status line, and it was one call away from the store.
+    @Test func anAddressTheReaderWouldNotAcceptIsRefusedBeforeItIsStored() {
+        let cases: [(DialAddress, String)] = [
+            (DialAddress(host: "h", port: 0), "port 0 is not a port"),
+            (DialAddress(host: "h", port: 70000), "port 70000 is not a port"),
+            (DialAddress(host: "[weird", port: 443), "an unclosed bracket"),
+            (DialAddress(host: "[fe80::1]", port: 8443), "brackets are syntax, not part of the host"),
+            (DialAddress(host: " h ", port: 1), "the spaces are not part of the host"),
+        ]
+        for (address, why) in cases {
+            let store = scratch()
+            defer { store.discard() }
+
+            #expect(throws: AddressPreference.WriteRefusal.self, "\(why)") {
+                try AddressPreference.write(address, to: store.defaults)
+            }
+            // And nothing was written. A refusal that stored the value anyway would be worse than no
+            // check at all: the sentence would say refused and the store would say saved.
+            #expect(store.defaults.string(forKey: AddressPreference.key) == nil)
+            #expect(AddressPreference.read(from: store.defaults) == .failure(.unset))
+        }
+    }
+
+    /// A refusal on the way in must reach the owner as **the address is the problem**, not as a
+    /// failed save and not as a refusal from the editor — three different sentences for three
+    /// different situations.
+    @Test func aRefusedWriteReachesTheCallerAsNotWritten() {
+        let store = scratch()
+        defer { store.discard() }
+
+        let outcome = SaveAddress { try AddressPreference.write($0, to: store.defaults) }
+            .save("agterm.example-homelab.invalid:8443")
+
+        // A parse-shaped address is not refused by the store, so this one saves. The point is that
+        // the seam is real: `SaveAddress` can now actually receive a throw from the default writer.
+        guard case .saved = outcome else { return #expect(Bool(false), "\(outcome)") }
+    }
 }

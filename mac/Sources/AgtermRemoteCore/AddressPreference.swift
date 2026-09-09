@@ -44,14 +44,36 @@ public enum AddressPreference {
         }
     }
 
-    /// Writes the address.
+    /// Refused before anything is stored.
     ///
-    /// `throws` describes the store's contract rather than this implementation: `UserDefaults` reports
-    /// no failure, so this particular body cannot throw. The seam stays because the outcome that says
-    /// *the address is fine and saving it is what failed* is a different sentence from a refusal, and
-    /// a caller that could not distinguish them would have to tell somebody their correct address was
-    /// wrong.
+    /// Only one shape, because there is only one thing that can be wrong here: what would be written
+    /// is not what would be read back. Carries the rendering, never a half-parsed field.
+    public enum WriteRefusal: Error, Equatable {
+        case wouldNotReadBack(String)
+    }
+
+    /// Writes the address, **after proving it survives its own round trip**.
+    ///
+    /// `DialAddress.init` is public and validates nothing, so a caller can hand this a value the
+    /// reader will not accept. That is not hypothetical: `DialAddress(host: "-", port: 0)` is already
+    /// constructed elsewhere in this package as a placeholder for a status line, `("h", 70000)` has a
+    /// port no reader will take, and `("[fe80::1]", 8443)` and `(" h ", 1)` round-trip to a
+    /// *different host* — the brackets and the spaces belong to the syntax, not to the name.
+    ///
+    /// Without this check the invariant this type claims — a stored address is always one somebody
+    /// could have typed — was a sentence in a comment. Writing goes through `displayed` and reading
+    /// through `parse`, so the honest test is to run both and compare: anything that does not come
+    /// back identical is refused, and the store never holds a value the editor would reject.
+    ///
+    /// This is also what makes `throws` real. `UserDefaults` itself reports no failure, so before
+    /// this the seam existed only to be injected in tests; now the one thing that can actually stop a
+    /// write is checked here, and `SaveAddress` reports it as *the address is the problem, not the
+    /// store* — a different sentence from a refusal, and a different one from a failed save.
     public static func write(_ address: DialAddress, to defaults: UserDefaults = .standard) throws {
-        defaults.set(address.displayed, forKey: key)
+        let rendered = address.displayed
+        guard case .success(let readBack) = DialAddress.parse(rendered), readBack == address else {
+            throw WriteRefusal.wouldNotReadBack(rendered)
+        }
+        defaults.set(rendered, forKey: key)
     }
 }

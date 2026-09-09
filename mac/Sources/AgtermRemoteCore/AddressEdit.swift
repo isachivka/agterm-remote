@@ -94,10 +94,9 @@ public enum AddressEdit {
     ///
     /// A two-label name like `example-homelab.invalid` is the homelab's *suffix* — the name every
     /// other service hangs off. It resolves. It answers. Something on the other end completes a TLS
-    /// handshake and it is a media server, or a photo library, or the router's own web interface. A code
-/// built for it
-    /// pairs perfectly and then never connects, and nothing in the pairing flow can tell the owner
-    /// why, because from the phone's side the handshake simply fails later.
+    /// handshake and it is a media server, or a photo library, or the router's own web interface. A
+    /// code built for it pairs perfectly and then never connects, and nothing in the pairing flow can
+    /// tell the owner why, because from the phone's side the handshake simply fails later.
     static func bareSuffixExplanation(_ host: String) -> String {
         "\"\(host)\" looks like the suffix your whole homelab hangs off, not the bridge's own name. "
             + "That name answers — it belongs to every other service behind the same router — so a code "

@@ -6,9 +6,9 @@ import PackageDescription
 // terminal, no control socket of its own, no place to type a command. The phone is the terminal, and
 // this is the thing that lets the phone find the Mac and prove that it may.
 //
-// The library target exists so the parts worth testing are testable without a Mac app: the address
-// and its file are ordinary values and ordinary file I/O, and `swift test` runs them with no window,
-// no menu bar and no signing.
+// The library target exists so the parts worth testing are testable without a Mac app: the address,
+// its store, the status model and the menu are ordinary values over an injectable seam, and
+// `swift test` runs them with no window, no menu bar and no signing.
 let package = Package(
     name: "AgtermRemote",
     platforms: [.macOS(.v14)],

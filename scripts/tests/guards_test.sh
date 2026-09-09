@@ -125,10 +125,12 @@ cyr "em dash"          'the bridge \342\200\224 once paired \342\200\224 answers
 cyr "curly quote"      'the owner\342\200\231s own words\n'                                      0
 cyr "greek test data"  'the constant \317\200 and the angle \316\261\n'                          0
 
-# A binary asset whose bytes happen to land in a Cyrillic range. D0 B0 is a valid two-byte sequence
-# on its own, so the pattern matches it; the file is not valid UTF-8, so it is not text and the match
-# is not a character. An icon reported as Cyrillic is how this guard would get deleted.
-cyr "binary asset"     '\211PNG\r\n\320\260\377\376\320\261\n'                                   0
+# Bytes that are not valid UTF-8, under a name that claims to be text. D0 B0 is a valid two-byte
+# sequence on its own, so the pattern matches it, but the file cannot be decoded and the match is not
+# a character - so the guard neither reports Cyrillic nor reports OK. It refuses, because the same
+# "cannot decode" is what UTF-16 Russian looks like. A genuine binary asset is skipped by its
+# EXTENSION instead, which the loop cases at the end of this file cover in both directions.
+cyr "undecodable bytes under a text name" '\211PNG\r\n\320\260\377\376\320\261\n'                 1
 
 # Outside a repository, `git ls-files` fails and yields nothing. An empty listing must never be read
 # as an empty tree.
@@ -148,5 +150,79 @@ got="$(cd sub && run "$cyrillic")"
 printf 'the bridge answers\n' > candidate.txt && git add -A
 got="$(cd sub && run "$cyrillic")"
 [ "$got" = "0" ] || { echo "FAIL cyrillic from a subdirectory, clean tree: expected 0 got $got"; fail=1; }
+
+# --- check-no-cyrillic.sh: THE LOOP, not the pattern ----------------------------------------------
+#
+# Everything above feeds the guard one ordinary file and checks the verdict. These cases feed it the
+# files whose NAME, ENCODING or stray BYTES decide whether the loop ever reads them at all - which is
+# where all three of the holes found in review lived, and none of them was visible to a self-test that
+# only ever ran the pattern against a probe:
+#
+#   1. `git ls-files` C-quotes any path with a byte above ASCII, so the guard's own existence test
+#      failed on it and the file was skipped in silence. A source file named in Russian - the file
+#      likeliest of all to be written in Russian - reported OK.
+#   2. One NUL byte made grep call a .swift file binary and skip it, while the same NUL is valid
+#      UTF-8 and passed the decode check. Russian around it went green.
+#   3. UTF-16 and CP1251 could not be decoded, and "cannot decode" was treated as "nothing to see".
+#
+# Each case gets a fresh `loop/` directory so a fixture from the previous one cannot decide this one.
+loop_fixture() { # name, expected exit; the fixture is written by the caller into loop/
+  git add -A
+  got="$(run "$cyrillic")"
+  if [ "$got" -ge 2 ]; then
+    echo "FAIL $1: guard aborted with exit $got (its self-test failed)"; fail=1; return
+  fi
+  [ "$got" = "$2" ] || { echo "FAIL $1: expected $2 got $got"; fail=1; }
+}
+fresh_loop() { rm -rf loop && mkdir loop; }
+
+russian='// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271 \321\215\321\202\320\276\n'
+english='// nothing to see here\n'
+
+# 1. A Cyrillic FILE NAME. Both halves: a Russian body must be caught, and an English body under the
+#    same name must not be - the name is how the file is reached, never a verdict on its contents.
+fresh_loop; printf '%b' "$russian" > "loop/$(printf 'Modal\320\236\320\272\320\275\320\276.swift')"
+loop_fixture "cyrillic filename, russian body" 1
+fresh_loop; printf '%b' "$english" > "loop/$(printf 'Modal\320\236\320\272\320\275\320\276.swift')"
+loop_fixture "cyrillic filename, english body" 0
+
+# 2. A NUL byte in an otherwise ordinary source file. Again both halves.
+fresh_loop; printf '%b\000\n' "$russian" > loop/nul.swift
+loop_fixture "nul byte, russian body" 1
+fresh_loop; printf '%b\000\n' "$english" > loop/nul.swift
+loop_fixture "nul byte, english body" 0
+
+# 3. Encodings this guard cannot read. Refused rather than skipped, and refused whatever they say:
+#    the guard cannot know what it cannot decode, and "I could not read it" must never render as OK.
+fresh_loop; printf '%b' "$russian" | iconv -f UTF-8 -t UTF-16 > loop/utf16.swift
+loop_fixture "utf-16 russian" 1
+fresh_loop; printf '%b' "$russian" | iconv -f UTF-8 -t CP1251 > loop/cp1251.swift
+loop_fixture "cp1251 russian" 1
+fresh_loop; printf '%b' "$english" | iconv -f UTF-8 -t UTF-16 > loop/utf16-english.swift
+loop_fixture "utf-16 english is refused too, not read" 1
+
+# 4. A binary asset carrying bytes that land in a Cyrillic range by chance. Skipped BY EXTENSION, and
+#    the extension is on a list somebody wrote down - so the same bytes under an extension nobody
+#    listed are refused instead of waved through. A guard that reports Cyrillic in an icon gets
+#    deleted; a guard that trusts any unreadable file gets walked around.
+fresh_loop; printf '\211PNG\r\n\032\n\320\260\377\376\320\261' > loop/icon.png
+loop_fixture "binary asset, listed extension" 0
+fresh_loop; printf '\211PNG\r\n\032\n\320\260\377\376\320\261' > loop/blob.dat
+loop_fixture "the same bytes, unlisted extension" 1
+fresh_loop; printf '\211PNG\r\n\032\n\320\260\377\376\320\261' > loop/ICON.PNG
+loop_fixture "the extension list is case-insensitive" 0
+
+# 5. Valid UTF-8 with no extension at all - a shell script, a LICENSE - is read like anything else.
+fresh_loop; printf '%b' "$russian" > loop/Makefile
+loop_fixture "no extension, russian body" 1
+fresh_loop; printf '%b' "$english" > loop/Makefile
+loop_fixture "no extension, english body" 0
+
+# 6. A file in a SUBDIRECTORY of a subdirectory, because `git ls-files -z` and the path resolution
+#    around it are the mechanism every case above depends on.
+fresh_loop; mkdir -p loop/a/b; printf '%b' "$russian" > loop/a/b/deep.swift
+loop_fixture "nested path" 1
+
+rm -rf loop && git add -A
 
 exit "$fail"

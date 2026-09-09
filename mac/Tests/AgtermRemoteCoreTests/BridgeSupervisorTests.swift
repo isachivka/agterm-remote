@@ -24,7 +24,7 @@ struct BridgeSupervisorTests {
         try supervisor(log).start()
 
         #expect(log.invocations == [.init(executable: "/bin/launchctl",
-                                          arguments: ["kickstart", "gui/501/dev.isachivka.agtermremote"])])
+                                          arguments: ["kickstart", "gui/501/dev.isachivka.agterm-remote-bridge"])])
     }
 
     /// **The one that matters after a re-pair.** `main.go` reads `phone-cert.pem` once at startup, so
@@ -35,7 +35,7 @@ struct BridgeSupervisorTests {
 
         try supervisor(log).restart()
 
-        #expect(log.invocations.first?.arguments == ["kickstart", "-k", "gui/501/dev.isachivka.agtermremote"])
+        #expect(log.invocations.first?.arguments == ["kickstart", "-k", "gui/501/dev.isachivka.agterm-remote-bridge"])
         #expect(log.invocations.first?.arguments.contains("-k") == true,
                 "without -k a running bridge keeps the old phone-cert.pem")
     }
@@ -47,7 +47,7 @@ struct BridgeSupervisorTests {
 
         try supervisor(log).stop()
 
-        #expect(log.invocations.first?.arguments == ["bootout", "gui/501/dev.isachivka.agtermremote"])
+        #expect(log.invocations.first?.arguments == ["bootout", "gui/501/dev.isachivka.agterm-remote-bridge"])
     }
 
     @Test func startingAfterAStopBootstrapsThePlistBack() throws {
@@ -65,7 +65,7 @@ struct BridgeSupervisorTests {
 
         try supervisor(log, uid: 502).start()
 
-        #expect(log.invocations.first?.arguments.last == "gui/502/dev.isachivka.agtermremote")
+        #expect(log.invocations.first?.arguments.last == "gui/502/dev.isachivka.agterm-remote-bridge")
     }
 
     /// **Only launchctl, only by absolute path.** Resolving it through PATH would run whichever
@@ -98,15 +98,15 @@ struct BridgeSupervisorTests {
     /// because `kickstart` exiting zero means the request was accepted, not that a process is alive.
     @Test func runningIsReadFromLaunchdRatherThanFromTheExitStatus() {
         let log = Log()
-        log.output = "dev.isachivka.agtermremote = {\n\tstate = running\n\tpid = 4242\n}"
+        log.output = "dev.isachivka.agterm-remote-bridge = {\n\tstate = running\n\tpid = 4242\n}"
 
         #expect(supervisor(log).isRunning())
-        #expect(log.invocations.first?.arguments == ["print", "gui/501/dev.isachivka.agtermremote"])
+        #expect(log.invocations.first?.arguments == ["print", "gui/501/dev.isachivka.agterm-remote-bridge"])
     }
 
     @Test func aLoadedButIdleJobIsNotRunning() {
         let log = Log()
-        log.output = "dev.isachivka.agtermremote = {\n\tstate = not running\n}"
+        log.output = "dev.isachivka.agterm-remote-bridge = {\n\tstate = not running\n}"
 
         #expect(!supervisor(log).isRunning())
     }
@@ -129,5 +129,33 @@ struct BridgeSupervisorTests {
         _ = supervisor(log)
 
         #expect(log.invocations.isEmpty)
+    }
+
+    /// **The launchd job label is not the app's bundle identifier**, and this reads the plist rather
+    /// than a copy of the string.
+    ///
+    /// The rename that brought this package over collapsed two distinct identifiers into one: the
+    /// label was the bridge's and the bundle id was the app's, and a blanket substitution made them
+    /// the same. Nothing failed — a wrong label is a job that is never found, reported as a bridge
+    /// that is not running — which is why it took a reader to notice and why it is asserted here.
+    @Test func theJobLabelIsNotTheAppsOwnBundleIdentifier() throws {
+        let plist = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources/AgtermRemote/Info.plist")
+        let text = try String(contentsOf: plist, encoding: .utf8)
+
+        // The value of CFBundleIdentifier: the <string> on the line after the key.
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let keyLine = lines.firstIndex(where: { $0.contains("<key>CFBundleIdentifier</key>") }),
+              keyLine + 1 < lines.count
+        else { return #expect(Bool(false), "Info.plist declares no CFBundleIdentifier") }
+        let bundleID = lines[keyLine + 1]
+            .replacingOccurrences(of: "<string>", with: "")
+            .replacingOccurrences(of: "</string>", with: "")
+            .trimmingCharacters(in: .whitespaces)
+
+        #expect(!bundleID.isEmpty, "the plist parse in this test found nothing, so it proves nothing")
+        #expect(BridgeSupervisor.label != bundleID,
+                "the bridge's launchd job is labelled with the app's own bundle identifier")
     }
 }
