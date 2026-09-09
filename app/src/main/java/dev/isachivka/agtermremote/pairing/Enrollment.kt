@@ -58,7 +58,14 @@ sealed interface EnrollResult {
      */
     data object NotTheLaptopInTheCode : EnrollResult
 
-    /** Nothing answered — including an address the phone will not dial at all. */
+    /**
+     * Nothing answered — including an address the phone will not dial at all.
+     *
+     * **Its reach ends at the pinned handshake.** Before that, a failure could mean anything and
+     * nothing has identified itself; after it, the far end has proved it is the laptop in the code,
+     * and every outcome from there is that laptop declining to finish. So this arm covers exactly
+     * two things: an address the phone refuses to dial, and a transport that never opened.
+     */
     data class Unreachable(val cause: Throwable) : EnrollResult
 }
 
@@ -98,22 +105,22 @@ sealed interface EnrollResult {
 object Enrollment {
 
     /**
-     * The sentence shown for a bridge that said no.
+     * The sentence shown for a bridge that said no, whichever way it said it.
      *
      * One value, because the bridge distinguishes nothing and the phone must not pretend it does. The
-     * causes it covers — an expired window, a token already spent, five wrong attempts, a panel that
-     * was closed — all have the same next step.
+     * causes it covers all have the same next step, and they arrive by three different routes:
+     *
+     *  - a bridge that answered `ok:false` — an expired window, a token already spent, five wrong
+     *    attempts, a panel that was closed. The reply is the same forty bytes on every one of them.
+     *  - a bridge whose window is shut, so the handshake failed on ALPN before a certificate was
+     *    presented and there was nothing to answer with.
+     *  - a bridge that completed the pinned handshake and then did not finish — its own two-second
+     *    deadline on the exchange produces exactly this.
+     *
+     * The phone cannot tell them apart even in principle, and inventing a distinction would be a
+     * diagnosis it cannot make.
      */
     const val REFUSED = "That pairing code did not work. Open a new one on your Mac and scan it."
-
-    /**
-     * Which is also what a spent or expired code produces, and deliberately the same sentence.
-     *
-     * The two arrive by different routes - a bridge that answered `ok:false`, and a bridge whose shut
-     * window means the handshake never completed - and the phone cannot tell them apart even in
-     * principle: the far end is silent about the first by design and says nothing at all about the
-     * second. One remedy, one sentence, and no invented distinction between them.
-     */
 
     /** The bridge pinned something that is not this phone, so the pairing would not survive. */
     const val MISMATCHED = "Your Mac pinned a different phone. Open a new pairing code and scan it."
@@ -219,16 +226,25 @@ object Enrollment {
                 }
             }
 
+            // **PAST THIS LINE NOTHING IS AN UNREACHABLE LAPTOP, AND THE BOUNDARY IS THE HANDSHAKE.**
+            //
+            // The far end has answered and PROVED WHO IT IS: it presented the certificate whose digest
+            // came off the owner's own screen. Every outcome from here is that laptop declining to
+            // finish, and the most ordinary of them is not exotic at all - the bridge puts a
+            // two-second deadline on the whole exchange and hangs up when it lapses, so "proved itself
+            // and then said nothing" is a state its own design produces.
+            //
+            // This is the same rule as the catch above, applied one boundary further in. It was not,
+            // once: a write failure, a read failure and a silent close all returned Unreachable, which
+            // said "your laptop is not answering" about a machine that had just authenticated itself.
             try {
                 driver.output.write(request(payload, identity, deviceName))
                 driver.output.flush()
                 val line = BufferedReader(InputStreamReader(driver.input, Charsets.UTF_8)).readLine()
-                    ?: return@use EnrollResult.Unreachable(
-                        IllegalStateException("the laptop closed the connection without answering"),
-                    )
+                    ?: return@use EnrollResult.Refused(REFUSED)
                 reply(line, payload, identity, store)
             } catch (e: Exception) {
-                EnrollResult.Unreachable(e)
+                EnrollResult.Refused(REFUSED)
             }
         }
     }
@@ -277,7 +293,9 @@ object Enrollment {
         val parsed = try {
             JSONObject(line)
         } catch (e: JSONException) {
-            return EnrollResult.Unreachable(e)
+            // Same boundary. A line that is not JSON came from a laptop that completed a pinned
+            // handshake, so it is a laptop that will not pair rather than one that is not there.
+            return EnrollResult.Refused(REFUSED)
         }
         // `error` is deliberately not read. It is the same string on every failure.
         if (!parsed.optBoolean("ok")) return EnrollResult.Refused(REFUSED)

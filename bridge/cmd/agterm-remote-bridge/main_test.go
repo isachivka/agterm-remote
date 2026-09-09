@@ -544,3 +544,44 @@ func writeOnLinkPair(t *testing.T, dir string) (certPath, keyPath string) {
 	}
 	return certPath, keyPath
 }
+
+// **The command line must refuse what the Mac's type cannot express.**
+//
+// control.FrontDoor has three cases on purpose: a plain outer hop that also serves TLS on this port
+// is a bridge nothing can reach, and a type that cannot say it beats a rule that rejects it. That
+// argument holds for the Mac and stops at this binary's flags, which are a second way in - and a
+// type forbidding a state is worth nothing if the flags beside it permit the same state.
+func TestTheFlagsRefuseAHopNothingCanReach(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		scheme    enroll.Scheme
+		onLinkTLS bool
+		cert, key string
+		refused   bool
+	}{
+		{name: "the straight-through case", scheme: enroll.SchemePlain},
+		{name: "a proxy in front, plain to this port", scheme: enroll.SchemeTLS},
+		{name: "a proxy that expects TLS back", scheme: enroll.SchemeTLS, onLinkTLS: true},
+		{name: "the same with explicit files", scheme: enroll.SchemeTLS, cert: "c.pem", key: "k.pem"},
+		{
+			name: "plain outer hop with TLS on this port", scheme: enroll.SchemePlain,
+			onLinkTLS: true, refused: true,
+		},
+		{
+			name: "the same by naming files", scheme: enroll.SchemePlain,
+			cert: "c.pem", key: "k.pem", refused: true,
+		},
+		{name: "a certificate with no key", scheme: enroll.SchemeTLS, cert: "c.pem", refused: true},
+		{name: "a key with no certificate", scheme: enroll.SchemeTLS, key: "k.pem", refused: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := checkHopFlags(c.scheme, c.onLinkTLS, c.cert, c.key)
+			if c.refused && err == nil {
+				t.Fatal("this combination describes a bridge nothing can reach and must be refused")
+			}
+			if !c.refused && err != nil {
+				t.Fatalf("a legitimate deployment was refused: %v", err)
+			}
+		})
+	}
+}

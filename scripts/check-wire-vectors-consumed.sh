@@ -1,22 +1,33 @@
 #!/usr/bin/env bash
 #
-# Fails when the Android tests stop reading the shared wire vectors, or start reading a copy.
+# Fails when a hand-written reader of the wire format stops reading the shared vectors, or reads a copy.
 #
 # `wire/enroll-payload-vectors.json` and `wire/enroll-payload-reject-vectors.json` are the contract
-# between two hand-written implementations of one format: the Go encoder in bridge/internal/enroll
-# and the Kotlin decoder that reads the QR code. They cannot be compiled against each other and
-# nothing else in either build connects them. The bytes in those files are the connection.
+# between hand-written implementations of one format that cannot be compiled against each other, and
+# nothing else in any build connects them. The bytes in those files are the connection. There are
+# THREE readers now:
+#
+#   - the Go encoder and decoder in bridge/internal/enroll, held by the bridge job re-deriving them;
+#   - the Kotlin decoder that reads the QR code, which faces a camera and is held to BOTH files;
+#   - the Swift reader in mac/Tests, which decodes codes the bridge has just minted, and is held to
+#     the ACCEPT file. Not the reject file: those are the contract for a decoder parsing bytes a
+#     stranger holds up, and that reader talks to a control socket on the same machine.
+#
+# The third one is why this guard now covers `mac/`. It was not held to anything, and it drifted the
+# moment the payload reached version 2 - it went on reading version 1's offsets, every suite stayed
+# green, and a person noticed afterwards. That is precisely the failure this file exists to make
+# impossible, and it happened in a directory this file was not looking at.
 #
 # WHICH GIVES TWO WAYS TO LOSE IT, and neither one fails a build:
 #
-#   1. The Kotlin side stops reading them. A decoder that pins nothing passes every test it has while
-#      disagreeing with the encoder about anything the tests do not happen to cover - and the symptom
-#      is a phone that will not pair, found by a person holding it. The predecessor project had
-#      exactly this shape and exactly this failure.
-#   2. Somebody copies the files into the app module. This is the worse one, because it looks like it
-#      works: the copy is what the Kotlin test pins, the original is what the Go test pins, both
-#      suites are green, and they are pinning different bytes. wire/README.md says "never `cp` them
-#      into src/" for this reason; that sentence is a rule, and this is the part that enforces it.
+#   1. A reader stops reading them. One that pins nothing passes every test it has while disagreeing
+#      with the encoder about anything the tests do not happen to cover - and the symptom is a phone
+#      that will not pair, found by a person holding it. The predecessor project had exactly this
+#      shape and exactly this failure.
+#   2. Somebody copies the files into a module. This is the worse one, because it looks like it
+#      works: the copy is what one suite pins, the original is what another pins, both are green, and
+#      they are pinning different bytes. wire/README.md says "never `cp` them into src/" for this
+#      reason; that sentence is a rule, and this is the part that enforces it.
 #
 # WHAT THIS CANNOT SEE, so that a green run is not read as more than it is:
 #
@@ -126,18 +137,24 @@ done
 
 . "$(cd "$(dirname "$0")" && pwd)/lib/tracked-files.sh"
 
-# Only the app module. The Go side's use of these files is asserted by the bridge job re-deriving
-# them, and a pathspec that reached the whole tree would let this guard's own text, or wire/README.md,
-# satisfy the requirement that the ANDROID TESTS mention them.
-guard_pathspec=("app/")
+# The two modules that hold hand-written readers. The Go side's use of these files is asserted by the
+# bridge job re-deriving them, and a pathspec that reached the whole tree would let this guard's own
+# text, or wire/README.md, satisfy the requirement that a TEST mentions them.
+guard_pathspec=("app/" "mac/")
 
-# If this is ever empty the answer is not OK. The app module arriving, moving or being renamed is
-# exactly when this guard has to say something.
-guard_nothing_scanned="The app module is gone from the listing. If it moved, move this guard with it."
+# If this is ever empty the answer is not OK. A module arriving, moving or being renamed is exactly
+# when this guard has to say something.
+guard_nothing_scanned="The app and mac modules are gone from the listing. If they moved, move this guard with them."
 
-# The two facts the walk collects, and the one it collects them for.
+# The three facts the walk collects, and the one it collects them for.
+#
+# Per module, not per file, because the requirement is per reader: the Kotlin side owes both halves
+# of the contract, and the Swift side owes the accept half. A single pair of flags would let the
+# Android tests satisfy the requirement on behalf of a Swift reader that reads nothing - which is the
+# exact state this guard was extended to catch.
 seen_accept=0
 seen_reject=0
+seen_accept_mac=0
 
 examine() { # $1 = path, $2 = the file to read, $3 = what it is
   # A copy of either vector file, anywhere under the app module. Checked by NAME first, because that
@@ -173,12 +190,15 @@ examine() { # $1 = path, $2 = the file to read, $3 = what it is
     fi
   done
 
-  # The reference. Only from a test source: a mention in main/ would be the app shipping a path into
-  # a repository that is not on the phone.
+  # The reference. Only from a test source: a mention in main/ or Sources/ would be a shipped
+  # application carrying a path into a repository that is not on the machine running it.
   case "$1" in
     app/src/test/*|app/src/androidTest/*)
       mentions "$2" "$accept" && seen_accept=1
       mentions "$2" "$reject" && seen_reject=1
+      ;;
+    mac/Tests/*)
+      mentions "$2" "$accept" && seen_accept_mac=1
       ;;
   esac
   return 1
@@ -190,16 +210,21 @@ guard_walk "$root" "check-wire-vectors-consumed.sh" examine
 # assumed, because a pipeline anywhere in the walk would put it in a subshell and both flags would
 # read 0 forever - a guard that always fails is noticed, but one that always fails for the wrong
 # reason gets its assertion deleted rather than its cause found.
-for pair in "accept:$seen_accept:$accept" "reject:$seen_reject:$reject"; do
-  half="${pair%%:*}"; rest="${pair#*:}"; seen="${rest%%:*}"; name="${rest#*:}"
+for row in \
+  "accept:$seen_accept:$accept:Android test source:Kotlin decoder" \
+  "reject:$seen_reject:$reject:Android test source:Kotlin decoder" \
+  "accept:$seen_accept_mac:$accept:mac/Tests source:Swift reader"; do
+  IFS=: read -r half seen name where who <<EOF
+$row
+EOF
   if [ "$seen" -eq 0 ]; then
-    echo "::error::No Android test source names wire/$name."
-    echo "    The $half half of the wire contract is not pinned on the Kotlin side, so the decoder"
-    echo "    and the Go encoder can disagree with nothing to say so. The symptom of that is a phone"
-    echo "    that will not pair, found by a person holding it, and it is what wire/ exists to"
-    echo "    prevent. Read it from the repository root - see wire/README.md - never from a copy."
+    echo "::error::No $where names wire/$name."
+    echo "    The $half half of the wire contract is not pinned by the $who, so it and the Go"
+    echo "    encoder can disagree with nothing to say so. The symptom of that is a phone that will"
+    echo "    not pair, found by a person holding it, and it is what wire/ exists to prevent. Read it"
+    echo "    from the repository root - see wire/README.md - never from a copy."
     guard_found=$((guard_found + 1))
   fi
 done
 
-guard_finish "the Android tests read both shared wire vector files, and hold no copy of either."
+guard_finish "every hand-written reader names the shared wire vectors, and none holds a copy."

@@ -138,6 +138,46 @@ data class EnrollPayload(
 }
 
 /**
+ * Why a decoder said no, in the vocabulary `wire/README.md` names.
+ *
+ * **This is a wire contract, not screen copy.** Every value here is the same sentence to a person -
+ * that is not a pairing code - and the whole point of naming them apart is that a test on this side
+ * can assert what Go's reject test has always asserted: that each vector is refused for the reason
+ * the file gives, and not merely refused.
+ *
+ * [wire] is the string in `enroll-payload-reject-vectors.json`, so the two sides are compared against
+ * one spelling rather than against two enums somebody keeps in step by hand.
+ *
+ * `unsupported-version` is deliberately absent: it is [EnrollDecode.UnsupportedVersion], because it
+ * is the one refusal an owner is told apart from the others.
+ */
+enum class EnrollRefusal(val wire: String) {
+    /** Not the standard padded base64 alphabet, or a length that is not a multiple of four. */
+    NotStandardBase64("not-standard-base64"),
+
+    /** Zero bytes. Valid base64 of nothing, so the refusal comes from the payload parser. */
+    EmptyPayload("empty-payload"),
+
+    /** Shorter than the fixed part of the layout its version names. */
+    TooShort("too-short"),
+
+    /** A host length above [EnrollCodec.MAX_FIELD]. Refused before anything is allocated for it. */
+    HostLengthOverCeiling("host-length-over-ceiling"),
+
+    /** A host length of zero. A payload naming no host is nothing the phone can act on. */
+    EmptyHost("empty-host"),
+
+    /** The buffer is not the length its own header describes - short, long, or a trailing byte. */
+    LengthMismatch("length-mismatch"),
+
+    /** The host bytes are not UTF-8. Refused rather than repaired into a different host. */
+    HostNotUtf8("host-not-utf8"),
+
+    /** A scheme byte this build does not know: a Mac that can arrange something this phone cannot. */
+    UnsupportedScheme("unsupported-scheme"),
+}
+
+/**
  * What reading a pairing code produced.
  *
  * Three outcomes and not two, because **"this Mac is newer than this app" and "that is not a pairing
@@ -167,13 +207,19 @@ sealed interface EnrollDecode {
     /**
      * Not a pairing code, or a damaged one.
      *
-     * One outcome for every other refusal on purpose. `wire/README.md` names eight refusal kinds and
-     * requires that a decoder distinguish only the version; the rest - not base64, empty, too short,
-     * a length over the ceiling, an empty host, a buffer that is not the length its own header
-     * describes, a host that is not UTF-8 - all mean the same thing to the person holding the phone,
-     * and all have the same remedy.
+     * **One outcome to a person, and [refusal] is not for them.** Every kind here means the same
+     * thing to somebody holding a phone - that is not a pairing code, scan again - and only the
+     * version earns a different sentence, which is why it is a different arm.
+     *
+     * [refusal] exists because this decoder is one of three implementations of a wire format and the
+     * only one facing a camera. Go's reject test pins the kind as well as the vector name, so a
+     * change that makes a reject case valid, or refused for a different reason, goes red there; this
+     * side asserted only that the answer was no. That asymmetry is exactly the shape that let the
+     * padding premise stand wrong in three files until a reject vector caught it.
+     *
+     * **Nothing on a screen may branch on it.** It is the contract's field, not the copy's.
      */
-    data object NotAPairingCode : EnrollDecode
+    data class NotAPairingCode(val refusal: EnrollRefusal) : EnrollDecode
 }
 
 /**
@@ -270,11 +316,11 @@ object EnrollCodec {
      * accepts more than the other does is how they stop agreeing.
      */
     fun readText(text: String): EnrollDecode {
-        if (text.length % 4 != 0) return EnrollDecode.NotAPairingCode
+        if (text.length % 4 != 0) return EnrollDecode.NotAPairingCode(EnrollRefusal.NotStandardBase64)
         val bytes = try {
             Base64.getDecoder().decode(text)
         } catch (e: IllegalArgumentException) {
-            return EnrollDecode.NotAPairingCode
+            return EnrollDecode.NotAPairingCode(EnrollRefusal.NotStandardBase64)
         }
         return read(bytes)
     }
@@ -288,7 +334,7 @@ object EnrollCodec {
      * version comes before every length so that a payload from a future version is reported as one.
      */
     fun read(bytes: ByteArray): EnrollDecode {
-        if (bytes.isEmpty()) return EnrollDecode.NotAPairingCode
+        if (bytes.isEmpty()) return EnrollDecode.NotAPairingCode(EnrollRefusal.EmptyPayload)
 
         val version = bytes[0].toInt() and 0xFF
 
@@ -305,7 +351,7 @@ object EnrollCodec {
             else -> return EnrollDecode.UnsupportedVersion(version)
         }
 
-        if (bytes.size < fixedLength) return EnrollDecode.NotAPairingCode
+        if (bytes.size < fixedLength) return EnrollDecode.NotAPairingCode(EnrollRefusal.TooShort)
 
         // Version 1 said nothing about how to reach the address and every implementation of it opened
         // a plain connection, so that is what it decodes to. A scheme this build does not know is a
@@ -315,27 +361,28 @@ object EnrollCodec {
         val scheme = if (version == VERSION_LEGACY) {
             StreamKind.DirectTcp
         } else {
-            StreamKind.fromWire(bytes[1].toInt() and 0xFF) ?: return EnrollDecode.NotAPairingCode
+            StreamKind.fromWire(bytes[1].toInt() and 0xFF)
+                ?: return EnrollDecode.NotAPairingCode(EnrollRefusal.UnsupportedScheme)
         }
 
         val hostLength = u16(bytes, at)
         // Both halves matter and neither implies the other. The ceiling stops a hostile length
         // becoming an allocation; the length check below stops it becoming a read past the end -
         // 4096 is a comfortable allocation and still far past the end of an 85-byte buffer.
-        if (hostLength > MAX_FIELD) return EnrollDecode.NotAPairingCode
+        if (hostLength > MAX_FIELD) return EnrollDecode.NotAPairingCode(EnrollRefusal.HostLengthOverCeiling)
         // A payload naming no host is nothing the phone can act on.
-        if (hostLength == 0) return EnrollDecode.NotAPairingCode
+        if (hostLength == 0) return EnrollDecode.NotAPairingCode(EnrollRefusal.EmptyHost)
 
         // One check for short and for long: the length the header describes is the only length this
         // payload may have. A trailing byte is the tail of a second message, or somebody probing for
         // a parser that ignores what it does not understand.
-        if (bytes.size != fixedLength + hostLength) return EnrollDecode.NotAPairingCode
+        if (bytes.size != fixedLength + hostLength) return EnrollDecode.NotAPairingCode(EnrollRefusal.LengthMismatch)
 
         // Refused rather than repaired. `String(bytes, UTF_8)` substitutes a replacement character
         // for every bad byte and returns happily, which would arrive at a DIFFERENT host from the one
         // the owner is looking at - so the decoder reports rather than substitutes.
         val host = utf8OrNull(bytes.copyOfRange(at + 2, at + 2 + hostLength))
-            ?: return EnrollDecode.NotAPairingCode
+            ?: return EnrollDecode.NotAPairingCode(EnrollRefusal.HostNotUtf8)
 
         var cursor = at + 2 + hostLength
         val port = u16(bytes, cursor)

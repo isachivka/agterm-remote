@@ -246,8 +246,21 @@ struct BridgeIntegrationTests {
 /// rather than by calling the encoder that produced it.
 ///
 /// **That is the whole value of it.** A Go helper the Swift side imports would prove the encoder
-/// agrees with itself. This is a second reader, written from `wire/`'s field list, and a change to the
+/// agrees with itself. This is a THIRD reader, written from `wire/`'s field list, and a change to the
 /// format on either side shows up here as a decode that stops making sense.
+///
+/// ### It reads the shared vectors, and that is not optional
+///
+/// It did not, once, and it drifted: version 2 landed, this stayed on version 1's offsets, and
+/// nothing went red — a human noticed afterwards. The other two readers are held to
+/// `wire/enroll-payload-vectors.json` by their own suites and by
+/// `scripts/check-wire-vectors-consumed.sh`; this one is now held to the same file by
+/// `WireVectorsTests`, and the guard covers `mac/` so that dropping the reference is a deliberate act
+/// with a red check on it.
+///
+/// It also used to validate less than the other two — no scheme check, no trailing-byte check, no
+/// UTF-8 check — which is worth naming rather than quietly fixing: **a lenient third reader is worse
+/// than no third reader**, because it agrees with everything and therefore pins nothing.
 struct EnrolmentPayload {
 
     let version: UInt8
@@ -258,7 +271,9 @@ struct EnrolmentPayload {
     let fingerprint: String
     let expiry: UInt32
 
-    enum Malformed: Error { case notBase64, tooShort, unknownVersion(UInt8) }
+    enum Malformed: Error {
+        case notBase64, tooShort, unknownVersion(UInt8), unknownScheme(UInt8), trailingBytes, hostNotUTF8
+    }
 
     init(base64: String) throws {
         guard let data = Data(base64Encoded: base64) else { throw Malformed.notBase64 }
@@ -279,10 +294,25 @@ struct EnrolmentPayload {
             at = 2
         default: throw Malformed.unknownVersion(version)
         }
+        // A scheme this build does not know is a Mac that can arrange something this reader cannot,
+        // and it must not be treated as either known one.
+        guard scheme == 1 || scheme == 2 else { throw Malformed.unknownScheme(scheme) }
         guard raw.count >= at + 2 + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
         let hostLength = Int(raw[at]) << 8 | Int(raw[at + 1])
-        guard raw.count >= at + 2 + hostLength + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
-        host = String(decoding: raw[(at + 2)..<(at + 2 + hostLength)], as: UTF8.self)
+        // **Exactly, not at least.** The length the header describes is the only length the payload
+        // may have; a trailing byte is the tail of a second message, or somebody probing for a parser
+        // that ignores what it does not understand. This read `>=` and would have accepted both.
+        guard raw.count == at + 2 + hostLength + 2 + 32 + 32 + 4 else {
+            throw raw.count < at + 2 + hostLength + 2 + 32 + 32 + 4
+                ? Malformed.tooShort : Malformed.trailingBytes
+        }
+        // Refused rather than repaired. `String(decoding:as:)` substitutes a replacement character
+        // for every bad byte and returns happily, which arrives at a DIFFERENT host from the one on
+        // the owner's screen - the same trap the other two readers name.
+        guard let decoded = String(bytes: raw[(at + 2)..<(at + 2 + hostLength)], encoding: .utf8) else {
+            throw Malformed.hostNotUTF8
+        }
+        host = decoded
         var cursor = at + 2 + hostLength
         port = Int(raw[cursor]) << 8 | Int(raw[cursor + 1])
         cursor += 2

@@ -234,6 +234,32 @@ class EnrollmentTest {
         assertTrue("nothing answered, so nothing refused: $result", result is EnrollResult.Unreachable)
     }
 
+    /**
+     * **The same rule at the next boundary, which the first fix stopped short of.**
+     *
+     * Once the pinned handshake has completed, the far end has answered AND proved it is the laptop
+     * in the code - it presented the certificate whose digest the owner's own screen produced. A
+     * failure after that is not an unreachable laptop under any reading, and the bridge's own
+     * two-second deadline on the exchange reaches it: a laptop that hangs up before replying is
+     * ordinary, not exotic.
+     *
+     * Reporting it as unreachable is the defect this result type exists to prevent, one layer down
+     * from where it was fixed.
+     */
+    @Test
+    fun `a laptop that proved itself and then said nothing is a refusal`() {
+        val fake = startThatHangsUpAfterTheHandshake()
+        val store = store()
+
+        val result = enrol(payloadFor(fake), store = store)
+
+        assertTrue(
+            "the laptop completed a pinned handshake, so it is not unreachable: $result",
+            result is EnrollResult.Refused,
+        )
+        assertNull(store.read())
+    }
+
     @Test
     fun `a refused enrolment pins nothing`() {
         val fake = start(refused())
@@ -353,6 +379,10 @@ class EnrollmentTest {
     private fun start(reply: (JSONObject) -> String): FakeBridge =
         FakeBridge(bridge, reply).also { running = it }
 
+    /** The laptop, proving its identity and then saying nothing - which is what its deadline does. */
+    private fun startThatHangsUpAfterTheHandshake(): FakeBridge =
+        FakeBridge(bridge, accepted(), hangUpAfterTheHandshake = true).also { running = it }
+
     /** The same laptop with its pairing window shut: it offers the API protocol and nothing else. */
     private fun startWithTheWindowShut(): FakeBridge =
         FakeBridge(bridge, accepted(), offers = "agterm/api-1").also { running = it }
@@ -377,6 +407,13 @@ class EnrollmentTest {
          * certificate is looked at. That is the state this fixture exists to reproduce.
          */
         private val offers: String = ENROL,
+        /**
+         * Complete the handshake and then hang up without answering.
+         *
+         * The bridge's own two-second deadline on the exchange produces exactly this, so it is not a
+         * contrived state: a laptop that proved its identity and then said nothing.
+         */
+        private val hangUpAfterTheHandshake: Boolean = false,
     ) : Closeable {
 
         @Volatile var request: JSONObject? = null
@@ -425,6 +462,7 @@ class EnrollmentTest {
                     }
                     socket.startHandshake()
                     negotiated = socket.applicationProtocol
+                    if (hangUpAfterTheHandshake) return
                     val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
                     val line = reader.readLine() ?: return
                     linesRead++

@@ -276,12 +276,69 @@ class EnrollPayloadTest {
 
         byKind.filterKeys { it != "unsupported-version" }.values.flatten().forEach { v ->
             val name = v.getString("name")
-            assertEquals(
+            assertTrue(
                 "$name is damage, not a version - it must not tell the owner to update",
-                EnrollDecode.NotAPairingCode,
-                EnrollCodec.readText(v.getString("text")),
+                EnrollCodec.readText(v.getString("text")) is EnrollDecode.NotAPairingCode,
             )
         }
+    }
+
+    /**
+     * **Every reject vector is refused FOR THE REASON THE FILE NAMES, not merely refused.**
+     *
+     * Go's reject test has always pinned the kind as well as the name, so a change that turns a
+     * reject case valid — or refused by accident, for a different reason — goes red there. This side
+     * asserted only that the decoder said no, and **this side is the one facing the camera**: it
+     * parses bytes a stranger holds in front of a lens, before any authentication exists.
+     *
+     * The asymmetry is not hypothetical. The padding premise was wrong in three places for months
+     * and it was a reject vector that caught it; a vector that starts being refused for the wrong
+     * reason is the same class of drift with nothing left to catch it.
+     *
+     * The refusal kind is for this test and for the wire contract. **It is not for the screen** —
+     * see [EnrollDecode.NotAPairingCode], which is deliberately one outcome to a person.
+     */
+    @Test
+    fun `every reject vector is refused for the reason the vectors name`() {
+        val kinds = mapOf(
+            "not-standard-base64" to EnrollRefusal.NotStandardBase64,
+            "empty-payload" to EnrollRefusal.EmptyPayload,
+            "too-short" to EnrollRefusal.TooShort,
+            "host-length-over-ceiling" to EnrollRefusal.HostLengthOverCeiling,
+            "empty-host" to EnrollRefusal.EmptyHost,
+            "length-mismatch" to EnrollRefusal.LengthMismatch,
+            "host-not-utf8" to EnrollRefusal.HostNotUtf8,
+            "unsupported-scheme" to EnrollRefusal.UnsupportedScheme,
+        )
+
+        rejected().forEach { v ->
+            val name = v.getString("name")
+            val refusal = v.getString("refusal")
+            if (refusal == "unsupported-version") return@forEach
+            val want = kinds[refusal]
+                ?: fail("$name names a refusal kind this test does not know: $refusal") as Nothing
+
+            val got = EnrollCodec.readText(v.getString("text"))
+            assertTrue("$name was not refused at all: $got", got is EnrollDecode.NotAPairingCode)
+            assertEquals(
+                "$name must be refused as $refusal",
+                want,
+                (got as EnrollDecode.NotAPairingCode).refusal,
+            )
+        }
+    }
+
+    /**
+     * The file's kinds and this build's are the same set. A kind added on the Go side with nothing
+     * reading it here would otherwise sit unasserted, which is how the two decoders start disagreeing
+     * about which codes exist.
+     */
+    @Test
+    fun `the vectors name no refusal kind this decoder cannot produce`() {
+        val named = rejected().map { it.getString("refusal") }.toSet()
+        val known = EnrollRefusal.entries.map { it.wire }.toSet() + "unsupported-version"
+
+        assertEquals(known, named)
     }
 
     // --- The same refusals through the byte entry point -----------------------------------------
