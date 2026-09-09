@@ -66,7 +66,8 @@ class BridgeConnection private constructor(
                     // **The key is `split` and the field is `splitPane`, deliberately.** The wire name
                     // outlived its meaning: renaming the key would make this phone read nothing from a
                     // Mac app the owner has not updated yet and offer the toggle NEVER, which is worse
-                    // than the defect that distinction fixes. Read the bridge's `api.Session.SplitPane`.
+                    // than the defect that distinction fixes. Read the bridge's
+                    // `api.Session.SplitPane`.
                     splitPane = it.optBoolean("split"),
                     // `optString` returns "" for a field that is absent, and absent is exactly what
                     // an idle session sends - so the two arrive here as the same thing and both

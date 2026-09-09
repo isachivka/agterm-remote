@@ -23,9 +23,10 @@ import org.junit.Test
 /**
  * Folding a workspace, and the memory it must not fight.
  *
- * The owner asked for this, and the risk is not that folding fails to fold. It is that folding changes the rows on screen, the restore
- * is keyed on the rows on screen, and the list therefore jumps under their thumb every time they press
- * a header. That is what [collapsingDoesNotMoveTheListUnderTheirThumb] is for; the rest is the feature.
+ * The owner asked for this, and the risk is not that folding fails to fold. It is that folding
+ * changes the rows on screen, the restore is keyed on the rows on screen, and the list therefore
+ * jumps under their thumb every time they press a header. That is what
+ * [collapsingDoesNotMoveTheListUnderTheirThumb] is for; the rest is the feature.
  *
  * **Every name in this file is invented.** Ids and counts are what is asserted.
  */

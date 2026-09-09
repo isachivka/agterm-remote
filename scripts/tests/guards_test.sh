@@ -72,7 +72,13 @@ check "allow-substring 127.0.0.10" "host 127.0.0.10"   1
 check "allow-substring 1.2.3.45"  "host 1.2.3.45"      1
 
 # Capitalised macOS home directories and uppercase hostnames are ordinary.
-check "capitalised home path" "/Users/Igor/.ssh/id"  1
+#
+# `Somebody`, and the name in this fixture is not a detail. Until 2026-09-09 it was the owner's own
+# given name, in the clear, in a public repository, inside the one directory built to stop exactly
+# that. No guard here could catch it: they exclude their own test files by necessity, since a
+# detector cannot be tested without strings that look like what it detects. That exclusion is a real
+# hole and this is what fell through it. Every fixture in this file is a placeholder; keep it so.
+check "capitalised home path" "/Users/Somebody/.ssh/id"  1
 check "uppercase ddns name"   "MYBOX.MYNETNAME.NET"  1
 
 # --- The fail-open cases -----------------------------------------------------------------------

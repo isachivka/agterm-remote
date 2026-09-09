@@ -363,9 +363,8 @@ fun AgtermScreen(
             //
             // Only on the list, and only when there is something to fold.
             // **A workspace is created from the list header, beside collapse-all**, which is where the
-            // owner asked for a control of its own. Unlike collapse-all it is shown even when the list is
-            // empty - that is
-            // precisely when they most need to make one.
+            // owner asked for a control of its own. Unlike collapse-all it is shown even when the
+            // list is empty - that is precisely when they most need to make one.
             if (watching == null) {
                 IconButton(
                     onClick = onCreateWorkspace,
@@ -404,8 +403,8 @@ fun AgtermScreen(
                 // It was composed only when the session had a second pane, on the absent-not-disabled
                 // ruling. That ruling is unchanged and stopped applying here: a control is absent when
                 // it can do NOTHING, and this one can always do something. There is always a left
-                // pane, and a right one can always be brought into existence: if it is not there, it is
-                // created and then shown.
+                // pane, and a right one can always be brought into existence: if it is not there, it
+                // is created and then shown.
                 //
                 // So there is no third state to draw and no screenshot to wait for. The control has
                 // exactly the two pictures it has always had.
@@ -739,8 +738,8 @@ fun AgtermScreen(
                         // describes a moment that has passed, and a card about it sitting over the
                         // terminal for the rest of the evening would be chrome, not news.
                         // One surface, two sources, precedence decided in one pure function.
-                        // **The session screen passes `mutation` now** - the pane toggle gave it one to
-                        // report. Before this it had no mutation of its own and left the argument
+                        // **The session screen passes `mutation` now** - the pane toggle gave it one
+                        // to report. Before this it had no mutation of its own and left the argument
                         // at its default.
                         // **The switch re-applies, and this is where it is triggered**.
                         //
@@ -1437,8 +1436,8 @@ private fun RenameDialog(
                 }
                 // **Delete lives here, and this is the owner's own design.**
                 //
-                // A long press, then this press: the two deliberate acts ARE the confirmation, so there
-                // is no confirmation dialog anywhere in this feature.
+                // A long press, then this press: the two deliberate acts ARE the confirmation, so
+                // there is no confirmation dialog anywhere in this feature.
                 //
                 // It is drawn INSIDE the body rather than beside Rename in the button row, and that is
                 // deliberate: the destructive action does not sit where a confirm button sits, and it

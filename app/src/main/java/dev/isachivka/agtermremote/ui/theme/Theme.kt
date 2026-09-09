@@ -30,8 +30,9 @@ data class AppColors(
     val successContainer: Color,
     val onSuccessContainer: Color,
     /**
-     * The third and faintest text weight: the `homelab · N of M` line, chevrons, "Installed:", the
-     * summary under a row that leads somewhere. Always subordinate to something directly above it.
+     * The third and faintest text weight: a label in front of a value, the workspace name beside a
+     * session, the summary under a row that leads somewhere. Always subordinate to something
+     * directly above it.
      */
     val onSurfaceSubtle: Color,
 )
@@ -88,8 +89,10 @@ private val AppColorScheme = darkColorScheme(
     inverseSurface = DesignTextPrimary,
     inverseOnSurface = DesignSurface,
 
-    // Four depths were used on one screen: the deleted launcher put a module tile (Low) beside a tile
-    // (Container) with an icon circle inside it (High), all on the background (Lowest).
+    // Four depths, and the design used all four on one screen: a card (Low) beside a card
+    // (Container) with a circle inside it (High), all on the background (Lowest). The screen that
+    // needed all four is gone; the ramp is kept because M3 asks for the whole ramp, and a hole in it
+    // would be filled by whoever needs the missing step.
     surfaceDim = DesignBackground,
     surfaceBright = DesignSurfaceHigh,
     surfaceContainerLowest = DesignBackground,

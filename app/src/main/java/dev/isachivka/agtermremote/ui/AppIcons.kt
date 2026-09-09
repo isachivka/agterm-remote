@@ -6,11 +6,18 @@ import dev.isachivka.agtermremote.R
 /**
  * Every icon this app draws, bundled rather than depended on.
  *
- * `androidx.compose.material:material-icons-extended` was the obvious alternative and was measured
- * rather than assumed: the artifact is 35,720,998 bytes, release builds here are not minified so it
- * would ship whole, the Compose BOM has it frozen at 1.7.8 while `compose-ui` moved to 1.11.4, and
- * the design is drawn in Material *Symbols*, which has moved on from Material *Icons* - so it would
- * have bought most of this list and left the rest to hand-author anyway.
+ * `androidx.compose.material:material-icons-extended` was the obvious alternative and was **measured
+ * rather than assumed**, which is why the numbers are here and not the conclusion alone: the
+ * artifact is 35,720,998 bytes; release builds in this project are not minified, so it would ship
+ * whole; the Compose BOM has it frozen at 1.7.8 while `compose-ui` has moved to 1.11.4; and
+ * unpacking its 11,105 classes showed that two of the glyphs the design called for were simply not
+ * in it. The design is drawn in Material *Symbols*, which has moved on from Material *Icons* - so 35
+ * MB would have bought most of the set and left the rest to hand-author anyway.
+ *
+ * The two glyphs that measurement named, `deployed_code` and `hard_drive`, belonged to the launcher
+ * and went with it. Their absence is no longer the reason - the numbers above are - but it is worth
+ * knowing that the gap was found by unpacking the artifact rather than by reading its documentation,
+ * because that is the only way it could have been found.
  *
  * Named for the glyph rather than for the use, deliberately. `Back` and `Key` would read better at
  * the call site right up until somebody has to check one against the design, and the design speaks
@@ -99,8 +106,8 @@ object AppIcons {
      * The split-pane indicator — the only glyphs here **derived from another app's toolbar**.
      *
      * agterm draws this picture on the Mac and the owner reads it instantly; the phone showing him the
-     * same one is most of the control's value. Measured from his screenshot rather than approximated —
-     * see the drawables' headers for the numbers.
+     * same one is most of the control's value. Measured from his screenshot rather than approximated
+     * — see the drawables' headers for the numbers.
      *
      * Two files rather than one mirrored at the call site: a mirrored drawable would depend on the
      * layout direction, and this picture is about which half of a WINDOW is lit, not about reading

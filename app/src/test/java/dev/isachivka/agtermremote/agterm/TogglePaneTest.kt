@@ -176,7 +176,8 @@ class TogglePaneTest {
      *
      * The maximize is refused. What the phone SHOWS is still Left, because every session has that pane
      * and reading it never needed the Mac's agreement — only his window layout did. He gets a note
-     * about the part that failed and keeps the terminal, which is the rule a fit refusal already follows.
+     * about the part that failed and keeps the terminal, which is the rule a fit refusal already
+     * follows.
      *
      * Written as a failure rather than a success because a passing maximize cannot tell "the icon moved
      * on its own" from "the icon moved because the call worked".

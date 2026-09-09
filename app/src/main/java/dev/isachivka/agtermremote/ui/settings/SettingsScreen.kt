@@ -66,7 +66,8 @@ fun SettingsScreen(
     pairingSection: (@Composable () -> Unit)? = null,
     /**
      * The styled-screen switch: null hides the section (a preview, a test), otherwise its state.
-     * Off by default at the store, not here — see [dev.isachivka.agtermremote.settings.StyledScreenStore].
+     * Off by default at the store, not here — see
+     * [dev.isachivka.agtermremote.settings.StyledScreenStore].
      */
     styledScreen: Boolean? = null,
     onStyledScreen: (Boolean) -> Unit = {},

@@ -14,8 +14,8 @@ import androidx.compose.ui.unit.sp
  * M3 scale disagree — a scale bent to fit one screen is a scale that fits nothing else.
  */
 val AppTypography = Typography(
-    // A screen's own title, at its largest. Large, light, and tightened, which is the design's one piece
-    // of real typographic character.
+    // A screen's own title, at its largest. Large, light, and tightened, which is the design's one
+    // piece of real typographic character.
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
@@ -31,14 +31,14 @@ val AppTypography = Typography(
         lineHeight = 36.sp,
         letterSpacing = (-0.3).sp,
     ),
-    // "Not built yet", inside the placeholder card.
+    // A screen's own heading, above the content it names.
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 20.sp,
         lineHeight = 26.sp,
     ),
-    // Tile titles and the headline of a status card.
+    // The headline of a card, and the session name in the terminal's header.
     titleMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
@@ -59,7 +59,7 @@ val AppTypography = Typography(
         fontSize = 15.sp,
         lineHeight = 24.sp,
     ),
-    // Subtitles, and the body of a status card.
+    // Subtitles, and the body of a card.
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
@@ -99,9 +99,9 @@ val AppTypography = Typography(
 /**
  * The same size, in the monospaced face.
  *
- * The design sets six things in Roboto Mono: the size chip, the release notes, the token how-to, the
- * download progress figures and the token field. What they have in common is that they are *data* —
- * a version, a byte count, whatever GitHub sent — rather than prose, and the monospace says so.
+ * The design sets in Roboto Mono everything that is *data* rather than prose: a fingerprint, an
+ * address, a column count, a session name, and the terminal itself. A proportional face makes those
+ * things read as sentences about the machine; the monospaced one says they came from it.
  *
  * An extension rather than a parallel scale. `MaterialTheme.typography.bodySmall.mono()` keeps one
  * type scale with two faces; a second `Typography` would have been two scales free to drift.

@@ -116,7 +116,8 @@ internal class PinnedTrust(
      * This is not an unreachable branch dressed as coverage: the platform calls it, and an empty
      * array is the correct answer. There are no accepted *issuers* because there is no issuer in this
      * design at all — each side self-signs and pins the other's exact bytes. Returning the pinned
-     * certificate here would describe it as a CA, which is the thing the trust model says must not exist.
+     * certificate here would describe it as a CA, which is the thing the trust model says must not
+     * exist.
      */
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }

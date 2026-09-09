@@ -82,11 +82,11 @@ class TerminalBoxMeasurementTest {
     /**
      * **The redesign's two new surfaces must take nothing from the box.**
      *
-     * The design adds a line saying what the fit is doing and a card that floats over the terminal when
-     * the connection drops and comes back. The measured width is half the bridge's fit cache key, so
-     * either of them taking width would silently re-key every calibration the owner has — the exact
-     * cost `FitToPhone` records for three earlier attempts, arriving through a layout change instead
-     * of through arithmetic.
+     * The design adds a line saying what the fit is doing and a card that floats over the terminal
+     * when the connection drops and comes back. The measured width is half the bridge's fit cache
+     * key, so either of them taking width would silently re-key every calibration the owner has —
+     * the exact cost `FitToPhone` records for three earlier attempts, arriving through a layout
+     * change instead of through arithmetic.
      *
      * The note is drawn ABOVE the box and the card is drawn OVER it, and this is what says so from
      * outside: the same parent, the same content, with an overlay present, must measure the same.

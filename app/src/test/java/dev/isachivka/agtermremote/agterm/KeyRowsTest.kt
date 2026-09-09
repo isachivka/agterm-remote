@@ -89,7 +89,8 @@ class KeyRowsTest {
     }
 
     /**
-     * **Six cells is the whole point of the fold, so the count is asserted rather than left to drift.**
+     * **Six cells is the whole point of the fold, so the count is asserted rather than left to
+     * drift.**
      *
      * The visible row is [KEYS_ON_THE_BAR] plus one cell for the fold, drawn by `TypingBar`. At the
      * owner's 424dp of usable bar width and a 6dp gap, six cells is 65.7dp each; seven would be 55.4
@@ -112,9 +113,9 @@ class KeyRowsTest {
     /**
      * **Every key that was on the bar before the fold is still on it. This is the test that matters.**
      *
-     * The owner's instruction, given while the fold was being written: *"HIDE, do not delete. Every key
-     * the owner named goes under the '…', not out of KEY_ROWS and not out of the bridge allowlist.
-     * Ctrl-D was deleted from both once; this must not repeat."*
+     * The owner's instruction, given while the fold was being written: *"HIDE, do not delete. Every
+     * key the owner named goes under the '…', not out of KEY_ROWS and not out of the bridge
+     * allowlist. Ctrl-D was deleted from both once; this must not repeat."*
      *
      * `Ctrl-D` is the precedent. It came off this bar and out of `internal/keys` in one commit on
      * 2026-07-31 because the owner said they did not know what it was for — and undoing that is a

@@ -92,10 +92,11 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
  * puts between its children. A terminal line is `TerminalBox`'s 20sp `LINE_HEIGHT_SP`. **The normal
  * state gives the terminal back 104dp, which is 5.2 lines of the owner's session.**
  *
- * **The last column is what the overpull changed.** The fold bought those lines by putting eight cells in
- * a row and shrinking every key 39%, and that shrink was the one thing it shipped unverified. Moving
- * `PgUp` and `PgDn` off the bar — they have a gesture now, see [TerminalPull] — leaves six cells and
- * **65.7dp a key, back above Material's 48dp minimum**, with the height saving untouched.
+ * **The last column is what the overpull changed.** The fold bought those lines by putting eight
+ * cells in a row and shrinking every key 39%, and that shrink was the one thing it shipped
+ * unverified. Moving `PgUp` and `PgDn` off the bar — they have a gesture now, see [TerminalPull] —
+ * leaves six cells and **65.7dp a key, back above Material's 48dp minimum**, with the height saving
+ * untouched.
  *
  * ### There is no close button
  *
@@ -188,8 +189,8 @@ fun TypingBar(
                 modifier = Modifier.weight(1f).testTag(TAG_TYPING_FIELD),
                 // **Still single line, and this is the one line of this file nobody may change
                 // casually.** PR #84 put a multiline field here and the owner reverted the lot, on
-                // the grounds that the field had brought a pile of bugs with it. The design describes how the bar
-                // LOOKS; it does not reopen what it does.
+                // the grounds that the field had brought a pile of bugs with it. The design
+                // describes how the bar LOOKS; it does not reopen what it does.
                 singleLine = true,
                 // A terminal is not prose. Autocorrect turning `cd` into `CD`, or capitalising the
                 // first word of every command, would silently send something other than what was
@@ -515,10 +516,11 @@ internal val KEYS_ON_THE_BAR: List<KeyCell> = listOf(
  * **The ten behind the ellipsis. Hidden — not deleted, and the difference is the whole rule.**
  *
  * Reported by the owner on 2026-08-21, from two weeks of using the thing daily: he had not once
- * pressed Ctrl-A, Ctrl-E, Backspace or the arrows. Seven of these are theirs by name. The eighth is `killline` — ^U — and that one is a judgement rather than a report: it
- * is the last member of the line-editing family whose other three they named, and a line-editing key
- * on a bar whose owner does no line editing is a cell spent on nothing. **If they press it, it comes
- * back to the front row; that is a label change, not a release.**
+ * pressed Ctrl-A, Ctrl-E, Backspace or the arrows. Seven of these are theirs by name. The eighth is
+ * `killline` — ^U — and that one is a judgement rather than a report: it is the last member of the
+ * line-editing family whose other three they named, and a line-editing key on a bar whose owner does
+ * no line editing is a cell spent on nothing. **If they press it, it comes back to the front row;
+ * that is a label change, not a release.**
  *
  * ### Why a fold and not a deletion
  *

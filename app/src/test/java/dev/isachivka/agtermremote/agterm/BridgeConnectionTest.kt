@@ -117,8 +117,8 @@ class BridgeConnectionTest {
      *
      * **An earlier version of this comment said the toggle vanished underneath him mid-session,
      * leaving him on the right pane with no way back. It cannot** — the session row is a snapshot
-     * taken at open and does not change while the screen is up. The mistake was reading two gates without asking when the
-     * value they read can change.
+     * taken at open and does not change while the screen is up. The mistake was reading two gates
+     * without asking when the value they read can change.
      */
     @Test
     fun `a session with a second pane decodes from the split key whatever agterm calls it`() {
