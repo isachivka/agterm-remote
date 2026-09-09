@@ -43,11 +43,70 @@
 // So there is no credential to check, and inventing one would be worse than useless: it would be a
 // secret on the same disk, readable by exactly the people who can already open the socket.
 //
-// # The one verb
+// # That permission now carries more weight than it did when the paragraph above was written
 //
-// Restore, and nothing else. It cannot resize to a width, cannot calibrate, cannot read a session and
-// cannot type — the whole point is an UNDO, and a local door that could do the other things would be a
-// second way to reach capabilities the pinned door spends a great deal of care rationing.
+// **`pair-open` opens the enrolment window, and nothing else in the repository can.** That window is
+// the single moment this bridge will talk to a phone it has never met — see internal/enroll, whose
+// entire argument for having an anonymous branch at all is "a window is seconds of the bridge's life
+// and requires a person at the Mac". enroll.MaxTTL caps the seconds. **THIS SOCKET IS WHAT MAKES THE
+// SECOND CLAUSE TRUE**, and it is the only thing that does.
+//
+// So a widened mode here is not a convenience regression. It hands anybody with an account on this
+// machine the ability to open an enrolment window while the owner is away from the screen, and the
+// pairing panel they would otherwise have had to walk past does not exist to stop them. The mode is
+// set explicitly rather than left to the umask, and it is read back off the disk by
+// TestTheDoorThatOpensAnEnrolmentWindowIsOwnerOnly rather than assumed.
+//
+// **The state directory's 0700 is load-bearing for this socket too**, not only for the key material
+// beside it. Between net.Listen creating the socket and the os.Chmod below, the file briefly carries
+// whatever the umask allowed — under `umask 0` that is 0777, for as long as those two lines take. The
+// gap cannot be closed from inside this package, because a unix socket has no mode argument on the
+// call that creates it; what closes it is that the containing directory is 0700, so nobody else can
+// traverse to the file during the window or at any other time. main chmods that directory explicitly,
+// for exactly this reason among others.
+//
+// # One request per connection
+//
+// **Connect, write one line, read one line, close.** This door does not pipeline: whatever follows the
+// first newline on a connection is never read, and the connection is closed as soon as the reply is
+// written. A caller that sends three verbs gets one answer and the other two are discarded in
+// silence — pinned by TestOnlyTheFirstRequestOnAConnectionIsServed so that whoever writes the Mac
+// panel finds it here rather than in a debugger.
+//
+// That is deliberate rather than a limitation, and it is the convention the far end already follows:
+// agterm's own control socket is one request per connection, and this is a local socket where a
+// connection costs a syscall pair and no handshake. The pinned front door is the opposite — it keeps
+// a connection and reads requests in a loop — because there a reconnect costs a TLS handshake over a
+// mobile network, which is the one thing that feature cannot afford. Neither answer is right for both.
+//
+// # The verbs
+//
+// Five, as a closed set, and the set is the interface: there is no dispatch table a future verb can be
+// added to from outside this file.
+//
+//   - `restore` — the undo. It cannot resize to a width, cannot calibrate, cannot read a session and
+//     cannot type. A local door that could do those things would be a second way to reach capabilities
+//     the pinned door spends a great deal of care rationing.
+//   - `status` — what the menu bar is drawn from: the bound address, the paired phones, whether agterm
+//     is answering, and what the enrolment window is doing.
+//   - `pair-open` — mint a code. **The only thing anywhere that can open an enrolment window.**
+//   - `pair-close` — shut it, which is what closing the panel means.
+//   - `unpair` — drop a paired phone.
+//
+// The last two are the destructive ones, and both say what they DID rather than `ok`: unpairing is
+// total in v1, because trust.Store.Replace keeps exactly one peer, so `ok` alone would let an owner
+// believe they had removed one of several.
+//
+// # What this door does NOT get to do
+//
+// It cannot enrol a phone. `pair-open` opens a window and hands back a code; the phone still has to
+// arrive over the pinned listener, negotiate `agterm/enroll-1`, and spend the token against
+// enroll.Window.Consume. Nothing here writes to the trust store except `unpair`, and nothing here can
+// add to it at all.
+//
+// It also has no opinion about the ADDRESS. It is handed the one the bridge is bound to and puts it in
+// the code unexamined — see [Pairing.Listening], where the reason a validator there would be actively
+// harmful is written down.
 package control
 
 import (
@@ -168,7 +227,7 @@ type windowReply struct {
 	Ended string `json:"ended,omitempty"`
 }
 
-// pairOpenReply is the code, and when it dies.
+// pairOpenReply is the code, when it dies, and whether it cost somebody else theirs.
 type pairOpenReply struct {
 	// Payload is the text the QR code carries: standard padded base64 of an enroll.Payload. The Mac
 	// app draws it and does not parse it.
@@ -176,6 +235,18 @@ type pairOpenReply struct {
 	// ExpiresAt is Unix seconds, and it is the same instant the payload carries - both come from
 	// what enroll.Window.Open returned. See [openWindow].
 	ExpiresAt int64 `json:"expires_at"`
+	// Replaced is true when a window was ALREADY OPEN and this call took it.
+	//
+	// enroll.Window.Open replaces rather than refuses: the previous token becomes worthless
+	// immediately and the attempt count starts again. That is what an owner means by pressing the
+	// button a second time, and it is right. What is not right is doing it SILENTLY - a second panel
+	// window kills the first one's code with nothing anywhere saying so, and the person looking at
+	// the dead QR scans it, is refused, and has no way to tell that from a broken bridge.
+	//
+	// So it is reported, and always present rather than omitted when false, because the panel's shape
+	// should not depend on the answer. What the Mac app does with it is the Mac app's business - the
+	// honest minimum is that the OTHER panel can stop showing a code that no longer works.
+	Replaced bool `json:"replaced"`
 }
 
 // pairCloseReply says whether there was anything to close. Nothing open is an ordinary answer rather
@@ -228,9 +299,16 @@ const (
 // rather than crashing on a nil window. That is the same reading internal/listener takes of a nil
 // Enrolment, and for the same reason - the absent case has to be the safer one.
 type Pairing struct {
-	// Listening is the address the bridge was told to serve on, and it is what a phone dials. It
-	// belongs to the owner and is never a value this repository chooses - see main, where it comes
-	// from --listen.
+	// Listening is the address the listener is BOUND to, and it is what a phone dials.
+	//
+	// The bound address rather than the --listen argument that produced it. They are the same string
+	// in this binary - net.Listen has already returned by the time this is built, so a failed bind
+	// cannot reach here - and the bound one is the truthful value of the two: it is what the socket
+	// is, not what somebody asked for. It costs nothing to be right by construction instead of by
+	// argument.
+	//
+	// It belongs to the owner and is never a value this repository chooses. Nothing here validates it
+	// either - see [dialTarget] for why a host guard would break the emulator's own pairing path.
 	Listening string
 	// Window is the enrolment window. **This socket is the only thing that can open it.**
 	Window *enroll.Window
@@ -320,6 +398,16 @@ func Listen(ctx context.Context, dir string, fit Fit, pairing *Pairing) (net.Lis
 	}
 	// **Set explicitly rather than left to the umask.** A umask of 0 would otherwise produce a
 	// world-writable socket, and "the permissions are usually right" is not a security property.
+	//
+	// **There is a gap above this line, and it is closed by the DIRECTORY rather than by anything
+	// here.** net.Listen creates the socket with whatever the umask allows - under `umask 0` that is
+	// 0777 - and it carries that mode until this call returns. It cannot be done in one step: a unix
+	// socket has no mode argument on the call that creates it, and neither does Go expose one. What
+	// makes the gap unreachable is that the containing directory is 0700, so nothing else on the
+	// machine can traverse to the file during those two lines or at any other time. main chmods that
+	// directory explicitly on every start, because MkdirAll applies a mode only when it CREATES -
+	// which makes that chmod load-bearing for this socket and not only for the key material beside
+	// it.
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = ln.Close()
 		return nil, err
@@ -360,6 +448,8 @@ func serve(ctx context.Context, ln net.Listener, fit Fit, pairing *Pairing) {
 	}
 }
 
+// handle serves ONE request and closes the connection. See the package comment: this door does not
+// pipeline, and whatever follows the first newline is never read.
 func handle(ctx context.Context, conn net.Conn, fit Fit, pairing *Pairing) {
 	defer conn.Close()
 	// Bounded, like every other wait in this bridge: a local caller that connects and says nothing
@@ -387,6 +477,18 @@ func handle(ctx context.Context, conn net.Conn, fit Fit, pairing *Pairing) {
 	dec.DisallowUnknownFields()
 	var req request
 	if err := dec.Decode(&req); err != nil {
+		reply(conn, errorReply{Error: "that is not a control request"})
+		return
+	}
+	// **A second token after the object is a different message, not slack.**
+	//
+	// Decode stops at the end of the first JSON value and says nothing about what follows, so
+	// `{"verb":"status"} junk` decoded cleanly and was answered as an ordinary status - which also
+	// means DisallowUnknownFields above is defeated by anything written outside the braces rather
+	// than inside them. enroll.Decode refuses a trailing byte for the same reason and says why: it is
+	// the tail of a second message, or somebody probing for a parser that ignores what it does not
+	// understand.
+	if dec.More() {
 		reply(conn, errorReply{Error: "that is not a control request"})
 		return
 	}
@@ -495,6 +597,10 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int) {
 		return
 	}
 
+	// Asked BEFORE the call, because Open is what destroys the answer. A window already open here
+	// means this call is about to make somebody's code stop working - see [pairOpenReply.Replaced].
+	replaced := p.Window.IsOpen()
+
 	// ONE call. Both the token and the expiry come from it.
 	token, expiry := p.Window.Open(time.Duration(ttlSeconds) * time.Second)
 
@@ -519,9 +625,9 @@ func openWindow(conn net.Conn, p *Pairing, ttlSeconds int) {
 	// The duration and nothing else. **Not the token, not the fingerprint, not the address**: this
 	// log is a file anything able to read the disk can read, and the token is the one secret in this
 	// package - enroll.Window keeps it off disk deliberately, and a line here would put it there.
-	log.Printf("control: an enrolment window is open for %s at the owner's request from this machine",
-		time.Duration(ttlSeconds)*time.Second)
-	reply(conn, pairOpenReply{Payload: text, ExpiresAt: expiry.Unix()})
+	log.Printf("control: an enrolment window is open for %s at the owner's request from this machine (replaced an open one: %t)",
+		time.Duration(ttlSeconds)*time.Second, replaced)
+	reply(conn, pairOpenReply{Payload: text, ExpiresAt: expiry.Unix(), Replaced: replaced})
 }
 
 // closeWindow is the owner closing the pairing panel.
@@ -591,22 +697,25 @@ func unpair(conn net.Conn, p *Pairing, fingerprint string) {
 	reply(conn, unpairReply{OK: true, Unpaired: true, Remaining: remaining})
 }
 
-// dialTarget splits the address the bridge was told to listen on into what a phone can dial.
+// dialTarget splits the bound address into the two fields the QR payload carries. **It applies no
+// policy to the host, and a guard here would be a bug rather than a missing feature.**
 //
-// **A wildcard is refused rather than put in a QR code.** `:8443` and `0.0.0.0:8443` are perfectly
-// good things to listen on and are not addresses anything can connect to, so a code carrying one
-// fails on the phone with a connection error - which points its owner at their network rather than at
-// the flag they passed. The bridge cannot guess which of its interfaces the phone should use; the Mac
-// app can, and it is the half of the product that owns the address.
+// The first version of this refused a wildcard - `:8443`, `0.0.0.0:8443` - on the reasoning that
+// those are fine things to listen on and are not addresses anything can connect to. It caught one
+// undialable spelling and passed three: `localhost`, `127.0.0.1` and `[::1]` all minted codes
+// happily. The obvious repair is to refuse loopback as well, and **that repair breaks the one
+// end-to-end path this project has**: the Android emulator reaches the bridge through `adb reverse`,
+// where the phone connects to `127.0.0.1` and that is exactly correct. A loopback refusal would turn
+// the emulator's pairing into a support question in service of a rule nothing asked for.
+//
+// So the host is whatever the bridge is bound to, unexamined. Which address a phone can reach is a
+// question about the owner's network, the router, and whether a tunnel is in front - none of which
+// this process can see, and all of which the Mac app either knows or can ask. The only refusals left
+// are structural: a string that is not a host and a port, and a port that is not a port.
 func dialTarget(listen string) (string, int, error) {
 	host, portText, err := net.SplitHostPort(listen)
 	if err != nil {
 		return "", 0, fmt.Errorf("the bridge is listening on %q, which is not a host and a port", listen)
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		return "", 0, fmt.Errorf(
-			"the bridge is listening on %q, which is every interface rather than an address a phone "+
-				"can dial; start it with the address the phone should use", listen)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 || port > 0xffff {

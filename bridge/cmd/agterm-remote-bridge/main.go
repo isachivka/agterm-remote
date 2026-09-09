@@ -299,9 +299,11 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// a person at the Mac", and this socket's 0600 is what makes the second clause true. The Mac app
 	// dials it; nothing else can.
 	pairing := &control.Pairing{
-		// The address the app chose, handed back to it by `status` so the panel and the bridge cannot
-		// disagree about where a phone should dial, and used to build the QR payload.
-		Listening: listenAddr,
+		// The address the listener is BOUND to, not the --listen argument that produced it. The two
+		// are the same string here - net.Listen has already returned above, so a failed bind never
+		// reaches this line - and the bound one is the truthful value of the two. `status` hands it
+		// back to the app and the QR payload carries it.
+		Listening: tcp.Addr().String(),
 		Window:    window,
 		Peers:     peers,
 		// The parsed leaf, which is also what the enrolment handler returns to a phone. The QR code
