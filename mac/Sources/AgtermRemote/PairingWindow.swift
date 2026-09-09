@@ -22,13 +22,14 @@ final class PairingWindow: NSObject, NSWindowDelegate {
     /// asked for neither.
     var isOpen: Bool { window != nil }
 
-    /// Handed what was typed, as one string. The view never saves the address itself: parsing,
-    /// refusing and writing live in `AddressEdit`/`SaveAddress`, where they are tested without a
-    /// window.
-    var onSave: ((String) -> Void)?
+    /// Handed what was typed: the address, and the port traffic arrives on at this Mac. The view
+    /// never saves either: parsing, refusing and writing live in `AddressEdit`/`SaveAddress` and
+    /// `ListenPortEdit`/`SaveListenPort`, where they are tested without a window.
+    var onSave: ((String, String) -> Void)?
 
     private var field = AddressField()
     private var addressBox: NSTextField?
+    private var portBox: NSTextField?
 
     /// What the address editor is saying right now — a refusal, or what was saved. Held here rather
     /// than in the view, because `show` rebuilds the window's contents around it and a sentence
@@ -147,7 +148,21 @@ final class PairingWindow: NSObject, NSWindowDelegate {
         row.orientation = .horizontal
         row.spacing = 8
 
-        let column = NSStackView(views: [caption("The address your phone will dial"), row])
+        // **The second port, and it is a field rather than a derivation.** A router that publishes
+        // one port and delivers to another is ordinary, and taking the bind from the dial address
+        // makes the bridge listen where nothing arrives - a perfect code and a phone that never
+        // connects. Empty means the two are the same, which is the straight-through case.
+        let port = NSTextField(string: arrivalPortText)
+        port.placeholderString = "same as above"
+        port.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        port.translatesAutoresizingMaskIntoConstraints = false
+        port.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        portBox = port
+
+        let column = NSStackView(views: [
+            caption("The address your phone will dial"), row,
+            caption(OnboardingCopy.arrivalPortHeading), port,
+        ])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 4
@@ -157,8 +172,12 @@ final class PairingWindow: NSObject, NSWindowDelegate {
         return column
     }
 
+    /// What the arrival-port box starts with, read from the store rather than remembered. Empty when
+    /// it follows the dial port, which is what an empty box means when it is saved.
+    var arrivalPortText = ""
+
     @objc private func saveTapped() {
-        onSave?(addressBox?.stringValue ?? "")
+        onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
     }
 
     /// What the editor says after a save or a refusal. Set by the app, from the outcome — the view does

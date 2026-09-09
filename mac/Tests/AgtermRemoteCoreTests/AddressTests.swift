@@ -18,6 +18,15 @@ struct AddressTests {
         #expect(Address.parse("") == .failure(.empty))
     }
 
+    /// **A port with nothing in front of it is not "you typed nothing".** `:8443` used to report
+    /// `.empty`, which is a sentence somebody can see is wrong while looking at their own text — and
+    /// a screen that is wrong about something visible is not trusted about anything else.
+    @Test func aPortWithNoHostSaysTheHostIsMissing() {
+        #expect(Address.parse(":8443") == .failure(.hostMissing))
+        #expect(Address.parse("") == .failure(.empty))
+        #expect(Address.parse("   ") == .failure(.empty))
+    }
+
     @Test func aHostWithNoPortIsNoPort() {
         #expect(Address.parse("example.test") == .failure(.noPort))
     }
@@ -71,6 +80,30 @@ struct AddressTests {
         for host in ["example.test", "agterm.example-homelab.invalid", "203.0.113.5", "fe80::1"] {
             #expect(!Address(host: host, port: 8443).listen.contains(host))
         }
+    }
+
+    /// **The dial port and the arrival port differ, and that is a topology rather than a mistake.**
+    ///
+    /// A router that publishes 8443 and proxies it to 8444 on this Mac is the case the source
+    /// project's runbook records as the one that cost it two failed pairings. Deriving the bind from
+    /// the dial address makes the bridge listen on 8443 while traffic lands on 8444 — a perfect code
+    /// and a phone that never connects.
+    @Test func theArrivalPortIsWhatTheBridgeBindsWhenItDiffers() {
+        let address = Address(host: "agterm.example-homelab.invalid", port: 8443)
+
+        #expect(address.listen(on: 8444) == "0.0.0.0:8444")
+        // And the dial address is untouched by it: the QR carries what the phone dials.
+        #expect(PairingCodeCommand.invocation(binary: "/opt/bin/x", address: address.dial).arguments
+            == ["qr", "--host", "agterm.example-homelab.invalid", "--port", "8443"])
+    }
+
+    /// No arrival port means follow the dial port — **stored as an absence, never as a copy**. A copy
+    /// goes stale the moment the address is edited, and it would go stale for the person with the
+    /// simplest setup.
+    @Test func theArrivalPortFollowsTheDialPortUntilItIsSet() {
+        #expect(Address(host: "example.test", port: 8443).listen(on: nil) == "0.0.0.0:8443")
+        #expect(Address(host: "example.test", port: 8443).listen == "0.0.0.0:8443")
+        #expect(Address(host: "example.test", port: 9000).listen(on: nil) == "0.0.0.0:9000")
     }
 
     /// One address, one shape, on both types. `Address` is the onboarding-shaped view of the value

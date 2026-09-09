@@ -19,6 +19,9 @@ public enum AddressError: Error, Equatable, Sendable {
     /// A port is there and is not a port: not a number, or a number outside 1–65535.
     case badPort
     case hostLooksLikeAURL
+    /// A port with nothing in front of it — `:8443`. Its own case because the string is not empty:
+    /// the person typed something, and being told otherwise is a sentence they can see is wrong.
+    case hostMissing
 }
 
 /// The address a phone dials, and — separately, and this is the whole point of the type — the address
@@ -74,7 +77,10 @@ public struct Address: Equatable, Sendable {
             return .success(Address(dial))
         case .failure(let why):
             let error: AddressError = switch why {
-            case .empty: .empty
+            // Not `.empty`: something WAS typed. `:8443` is a port with nothing in front of it, and
+            // answering "you typed nothing" to somebody looking at their own text is the kind of
+            // small lie that makes a person distrust the rest of the screen.
+            case .empty: .hostMissing
             // The three ways a port can fail to be findable are one answer here: nothing in this
             // string can be read as a port. The bracket lesson is `AddressEdit`'s to teach, in a
             // sentence, at the moment somebody is typing.
@@ -85,7 +91,20 @@ public struct Address: Equatable, Sendable {
         }
     }
 
-    /// **What the bridge is told to listen on: every interface, at the port the phone will dial.**
+    /// **What the bridge is told to listen on: every interface, at the port traffic ARRIVES on.**
+    ///
+    /// ### The port is a setting, not a derivation — and it used to be one
+    ///
+    /// This read `0.0.0.0:\(port)`, taking the port straight from the dial address. That is right for
+    /// a one-to-one port forward and **wrong for everything else**, and it walked back into a trap the
+    /// source project had already written down: a router that publishes 8443 and proxies it to 8444
+    /// on the Mac. Deriving the bind from the dial address makes this bridge listen on 8443 while the
+    /// router delivers to 8444 — a perfect pairing code and a phone that never connects, which is the
+    /// exact failure this whole app exists to prevent, arriving from the other direction.
+    ///
+    /// That project's pairing tool takes `--host` and `--port` with **no defaults, deliberately**, for
+    /// the same reason. So the arrival port is stored, editable, and merely *defaults* to the dial
+    /// port; `listen` without an argument is that default and nothing more.
     ///
     /// ### The host is dropped on purpose, and this is the decision Task 15 deferred to here
     ///
@@ -99,9 +118,21 @@ public struct Address: Equatable, Sendable {
     ///
     /// The wildcard is not a shrug either. A narrower bind — loopback — cannot be reached by a port
     /// forward, by Tailscale, by WireGuard or by a reverse proxy running anywhere but this machine,
-    /// which is every route in the onboarding text. The exposure the wildcard implies is the exposure
-    /// the owner arranged deliberately when they forwarded a port, and the protection against it is
-    /// the pinned client certificate the listener demands, not the address family it binds.
+    /// which is every route in the onboarding text: a tunnel hands this Mac an interface of its own,
+    /// and something bound to loopback is invisible on it.
+    ///
+    /// ### What the wildcard costs, said accurately
+    ///
+    /// This used to read *"the exposure the owner arranged deliberately when they forwarded a port"*.
+    /// **That is true of one route out of four and was asserted of all of them.** Somebody on
+    /// Tailscale, WireGuard or a Cloudflare Tunnel arranged the opposite of a port forward, and this
+    /// bind still opens the port on every interface this Mac ever joins — a café network included.
+    ///
+    /// Nothing here is broken by that: the API accepts only a connection presenting the pinned
+    /// phone's certificate, and the enrolment path is ALPN-gated, open for seconds at the owner's
+    /// request and compared in constant time. So it is **disclosure rather than a hole**, and it is
+    /// owed a sentence on the screen rather than a comment in a file — see
+    /// `OnboardingCopy.addressExposure`, which is what the owner actually reads.
     ///
     /// ### This string is a request, not a receipt
     ///
@@ -114,5 +145,12 @@ public struct Address: Equatable, Sendable {
     ///    Task 15: an IPv4-only listener coexists on the same port with the dual-stack socket above.
     ///    So even a local check that says *I am listening* can be true while a phone arriving over
     ///    IPv4 reaches something else entirely.
-    public var listen: String { "0.0.0.0:\(port)" }
+    public var listen: String { listen(on: nil) }
+
+    /// The bind, given the arrival port the owner set — or the dial port when they have set none.
+    ///
+    /// - Parameter arrivalPort: nil means *follow the dial port*, which is stored as an absence rather
+    ///   than as a copy. A copy would go stale the moment somebody changed the dial port, and the
+    ///   straight-through case is the one nobody should have to maintain by hand.
+    public func listen(on arrivalPort: Int?) -> String { "0.0.0.0:\(arrivalPort ?? port)" }
 }

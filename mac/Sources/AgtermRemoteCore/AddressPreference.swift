@@ -42,6 +42,13 @@ public enum AddressPreference {
     /// discard the proof it has already earned.
     public static let storedAtKey = "dialAddressStoredAt"
 
+    /// The port traffic arrives on at this Mac, when it is not the port the phone dials.
+    ///
+    /// **Absent means follow the dial port**, which is the straight-through case and the common one.
+    /// Storing a copy of the dial port instead would go stale the moment somebody edited the address,
+    /// and the person it went stale for would be the person with the simplest setup.
+    public static let listenPortKey = "listenPort"
+
     /// When a phone last completed enrolment through the address stored now.
     ///
     /// **Nil is the ordinary state and it is not an error.** It says the address is unproven, which
@@ -68,6 +75,24 @@ public enum AddressPreference {
     /// that is how a box and a code end up disagreeing about what is saved.
     public static func stored(in defaults: UserDefaults = .standard) -> String? {
         defaults.string(forKey: key)
+    }
+
+    /// The arrival port the owner set, or nil when they have not set one and it follows the dial port.
+    ///
+    /// A stored value outside 1–65535 is read as nil rather than handed on: `writeListenPort` refuses
+    /// to store one, so anything else in there was not put there by this app, and the safe reading of
+    /// a nonsense port is *there is no override*.
+    public static func listenPort(from defaults: UserDefaults = .standard) -> Int? {
+        guard defaults.object(forKey: listenPortKey) != nil else { return nil }
+        let stored = defaults.integer(forKey: listenPortKey)
+        return (1...65535).contains(stored) ? stored : nil
+    }
+
+    /// Sets the arrival port, or clears it back to following the dial port.
+    public static func writeListenPort(_ port: Int?, to defaults: UserDefaults = .standard) throws {
+        guard let port else { return defaults.removeObject(forKey: listenPortKey) }
+        guard (1...65535).contains(port) else { throw WriteRefusal.wouldNotReadBack("\(port)") }
+        defaults.set(port, forKey: listenPortKey)
     }
 
     /// Refused before anything is stored.
@@ -125,12 +150,25 @@ public enum AddressPreference {
     /// one, and crediting it would put a proven mark on a destination nothing has ever reached — the
     /// same class of mistake as a green tick for an address that merely resolves.
     ///
-    /// An address stored before this app recorded `storedAtKey` has no moment to compare against, so
-    /// it stays unproven. Unproven is the safe direction: it costs one scan and claims nothing.
+    /// ### The address that was already there
+    ///
+    /// An address stored by a build from before this rule existed has no moment to compare against.
+    /// Answering *unproven* forever was the first attempt and it contradicted the reason this file
+    /// gives for keeping the key name: shipped builds hold addresses, and the owner of one of them
+    /// has very likely had a phone paired for weeks. They would have been sent back into setup at
+    /// every launch, by a rule invented after their setup was finished.
+    ///
+    /// So an address with no timestamp is **backfilled as older than any enrolment**, once, here.
+    /// That credits it with an enrolment it did earn: the only address this app has ever stored is
+    /// the one in the store, and the only thing that writes a trust store is a phone completing
+    /// enrolment through it. From the next save onwards the ordinary rule applies.
     @discardableResult
     public static func recordEnrolment(
         at enrolment: Date?, in defaults: UserDefaults = .standard,
     ) -> Date? {
+        if defaults.string(forKey: key) != nil, defaults.object(forKey: storedAtKey) == nil {
+            defaults.set(Date.distantPast, forKey: storedAtKey)
+        }
         let proof = proof(enrolment: enrolment, addressStoredAt: defaults.object(forKey: storedAtKey) as? Date)
         if let proof {
             defaults.set(proof, forKey: provenKey)
