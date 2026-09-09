@@ -203,14 +203,21 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// real work either way. See internal/listener, where the argument exists precisely so this is
 	// said rather than defaulted.
 	//
+	// The enrolment side, as one object rather than five arguments to a function: it owns the rate
+	// limit over the only log line an anonymous caller can cause, and that limit is per bridge rather
+	// than per process. Flush on the way out, or a burst that stopped is never reported - the same
+	// hook internal/listener's failure counter has.
+	enrolment := enroll.NewHandler(window, peers, leaf, pairedPhone)
+	defer enrolment.Flush()
+
 	// The third argument is what a connection that negotiated `agterm/enroll-1` reaches, and the
 	// switch in listener.accept is what guarantees it reaches nothing else. Everything enrolment
-	// needs is closed over here rather than reachable from the API handler: the window, the trust
+	// needs is held by that handler rather than reachable from the API one: the window, the trust
 	// store, this bridge's certificate.
 	srv := listener.New(
 		enroll.ServerConfigFor(own, enroll.NewPinnedClients(peers).Certificates, window),
 		handler,
-		func(conn net.Conn) { enroll.Serve(conn, window, peers, leaf, pairedPhone) },
+		enrolment.Serve,
 		false)
 
 	tcp, err := net.Listen("tcp", listenAddr)
