@@ -101,8 +101,30 @@ jobs:
       # fails - which is the drift the vectors exist to catch, arriving here rather than in the
       # Kotlin suite weeks later. Fixing it means deciding which side is wrong, never re-running the
       # generator to make the red go green.
+      #
+      # `-count=1` is load-bearing. Without it the Go test cache answers `ok (cached)`, the generator
+      # never executes, and the diff below then compares a tampered wire/ against itself and passes.
+      # Reproduced both ways: warm, a hand-edited vector sailed through; with -count=1 it fails. The
+      # cache is cold on this runner today only because setup-go happens to have `cache: false` for
+      # an unrelated reason, so one line of caching added elsewhere would have turned this step green
+      # and blind with nothing in the diff to say so.
+      #
+      # And the generator is asserted to have RUN. `go test -run` prints `ok [no tests to run]` and
+      # exits 0 when its pattern matches nothing, so renaming either function would retire this check
+      # silently - a check that cannot fail, guarding a contract, reporting the word that means fine.
       - name: Re-derive the wire vectors
-        run: go test ./internal/enroll/ -tags vectors -run 'TestWrite.*Vectors'
+        run: |
+          set -euo pipefail
+          go test ./internal/enroll/ -tags vectors -count=1 -v -run 'TestWrite.*Vectors' \
+            | tee /tmp/vectors.log
+          for name in TestWriteVectors TestWriteRejectVectors; do
+            if ! grep -q "^--- PASS: $name " /tmp/vectors.log; then
+              echo "::error::$name did not run, so wire/ was not re-derived."
+              echo "    A -run pattern that matches nothing exits 0. If the generator was renamed,"
+              echo "    rename it here too; if it was deleted, this whole step goes with it."
+              exit 1
+            fi
+          done
       - name: Refuse vectors the generator does not reproduce
         working-directory: ${{ github.workspace }}
         run: |

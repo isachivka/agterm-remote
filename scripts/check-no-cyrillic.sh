@@ -14,6 +14,19 @@
 # rejected all of them would be switched off within a week, and then it would protect nothing. It
 # refuses the Cyrillic blocks and nothing else.
 #
+# WHAT IS TESTED WHERE. The self-test below proves the PATTERN: that it still matches every block and
+# still tolerates their neighbours, checked on every run so a broken pattern can never report a clean
+# tree. It cannot prove the LOOP - which files are read, which are skipped, and which are refused -
+# because a loop test needs a tree to walk. That lives in scripts/tests/guards_test.sh, which builds
+# a scratch repository and runs this script over it. Three holes lived in the loop and none of them
+# was visible to a self-test that only ever fed the pattern: a file skipped for its NAME, a file
+# skipped for one NUL byte, and a file skipped for its ENCODING.
+#
+# OUT OF SCOPE, deliberately: Cyrillic written as an escape sequence rather than as bytes - Swift's
+# \u{43F}, Java's \u043f, JSON's \u043F. Those are ASCII on disk and no byte scan can see them.
+# Catching them means a per-language decoder, and a guard that half-decodes source is a guard that
+# argues with the compiler. If it ever matters, it is a separate check with its own name.
+#
 # Usage: scripts/check-no-cyrillic.sh [path]      default: the whole working tree
 set -euo pipefail
 
@@ -67,11 +80,11 @@ pattern="$pattern|$ea$x99[$c80-$cbf]|$ea$x9a[$c80-$c9f]"
 # after it, so the probe cannot pass through a path the real scan does not use. A probe running its
 # own grep tests a copy of the pattern and passes happily while the real invocation is broken.
 #
-# -I skips binary files. Without it every PNG, keystore or compiled artefact that ever lands in this
-# tree is a stream of arbitrary bytes, some of which land in these ranges, and the guard starts
-# reporting Cyrillic in an icon. The loop below additionally refuses to believe a match in a file
-# that is not valid UTF-8, which is the same defence stated in the other direction.
-scan() { LC_ALL=C grep -InE -e "$pattern" "$1" 2>/dev/null; }
+# `-a`, NOT `-I`. Letting grep decide what is binary was a hole: grep calls any file holding a NUL
+# byte binary and skips it, while a NUL is perfectly valid UTF-8 - so one NUL pasted into a .swift
+# file laundered the Russian around it and the run went green. Deciding what is text is the loop's
+# job below, where the decision is explicit and testable; grep is told to read whatever it is given.
+scan() { LC_ALL=C grep -anE -e "$pattern" "$1" 2>/dev/null; }
 
 # --- The self-test ---------------------------------------------------------------------------------
 #
@@ -177,25 +190,79 @@ trap - EXIT
 # --- The scan --------------------------------------------------------------------------------------
 #
 # Tracked files only: a gitignored file is not what this protects, and text has to be tracked to be
-# pushed. The listing is captured and its status checked rather than piped straight into the loop. A
-# failing `git ls-files` yields an empty list, the loop never runs, and the script prints OK - a
-# guard reporting a clean tree precisely because it could not look at one.
-if ! files="$(git -C "$root" ls-files)"; then
+# pushed.
+#
+# `-z`, and it is not a nicety. Without it `git ls-files` renders a path containing any byte above
+# ASCII in C-quoted form - "Modal\320\236\320\272\320\275\320\276.swift", quotes and
+# backslash escapes included - because `core.quotePath` defaults to true. That name never matches a
+# file on disk, the `[ -f ]` test below fails, the loop skips the file IN SILENCE, and a source file
+# with a Cyrillic name and a Russian body reported OK. A file named in Russian is the likeliest file
+# in the tree to be written in Russian, so the one path the guard could not see was the one it most
+# needed to. `-z` emits raw bytes with a NUL terminator and no quoting at all.
+#
+# The listing goes to a file rather than a variable: a shell variable cannot hold a NUL byte, so
+# capturing `-z` output in one silently mangles every path.
+listing="$(mktemp)"
+trap 'rm -f "$listing"' EXIT
+if ! git -C "$root" ls-files -z > "$listing"; then
   echo "::error::check-no-cyrillic.sh could not list the tracked files in '$root'."
   echo "    Refusing to report a clean tree on the strength of an empty listing."
   exit 2
 fi
+if [ ! -s "$listing" ]; then
+  # A listing that came back empty is not an empty tree until somebody proves it is one. Every other
+  # failure this script has had produced the output that means "fine", which is the only output
+  # nobody investigates.
+  echo "::error::check-no-cyrillic.sh found no tracked files under '$root'."
+  echo "    A guard over an empty set is not a pass."
+  exit 2
+fi
+
+# Extensions whose files are not text and are not expected to be readable. A file with one of these
+# is skipped; anything else this script cannot decode is REFUSED, below. The list is here, in a diff,
+# rather than implied by a heuristic - which is the difference between a decision and an accident.
+binary_extensions="png jpg jpeg gif webp ico icns pdf zip jar apk aab keystore jks p12 woff woff2 \
+ttf otf mp3 mp4 mov so dylib dll a o bin wasm class ser gz bz2 xz zst 7z"
+
+is_binary_asset() { # $1 = path
+  local lower extension
+  lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  extension="${lower##*.}"
+  [ "$extension" = "$lower" ] && return 1   # no extension at all
+  case " $binary_extensions " in (*" $extension "*) return 0 ;; esac
+  return 1
+}
 
 found=0
-while IFS= read -r path; do
-  # ls-files prints repository-root-relative paths, so they are resolved against $root rather than
-  # against wherever this was invoked from.
+unreadable=0
+skipped=0
+while IFS= read -r -d '' path; do
   file="$root/$path"
   [ -f "$file" ] || continue
-  # A file that is not valid UTF-8 cannot contain a Cyrillic character; it contains bytes that happen
-  # to fall in these ranges. Believing such a match would make the guard fire on the first binary
-  # asset anybody commits, and a guard that fires on an icon is a guard that gets removed.
-  iconv -f UTF-8 -t UTF-8 < "$file" >/dev/null 2>&1 || continue
+
+  # A file this script cannot decode as UTF-8 is one of two things, and they have opposite answers.
+  #
+  # An icon is binary: its bytes are not characters, some of them land in these ranges by chance, and
+  # reporting Cyrillic in a PNG is how a guard gets deleted. It is skipped, and the extension that
+  # said so is on a list somebody wrote down.
+  #
+  # Anything else is text in an encoding this script cannot read - UTF-16, CP1251 - and Russian in
+  # either walks straight through a scan that skips what it cannot decode. Skipping it and printing
+  # OK is the exact failure this file's header warns about: reporting on a fraction of the tree while
+  # claiming to have checked all of it. So it is refused, loudly, and the run does not go green until
+  # somebody decides which of the two it is.
+  if ! iconv -f UTF-8 -t UTF-8 < "$file" >/dev/null 2>&1; then
+    if is_binary_asset "$path"; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    echo "::error file=$path::this file is not valid UTF-8, so this guard cannot read it"
+    echo "    Text in UTF-16 or CP1251 passes an encoding-blind scan untouched, so a file that"
+    echo "    cannot be decoded is never reported as clean. Convert it to UTF-8, or - if it really"
+    echo "    is a binary asset - add its extension to binary_extensions in this script."
+    unreadable=1
+    continue
+  fi
 
   if matches="$(scan "$file")"; then
     echo "::error file=$path::Cyrillic text was committed here"
@@ -206,12 +273,18 @@ while IFS= read -r path; do
     done
     found=1
   fi
-done <<< "$files"
+done < "$listing"
 
 if [ "$found" -ne 0 ]; then
   echo "::error::Every committed file in this repository is English. Cyrillic here is almost always"
   echo "    text carried over from the private repository this project was ported out of - translate"
   echo "    it or delete it, and check the rest of the same file before pushing again."
+fi
+if [ "$found" -ne 0 ] || [ "$unreadable" -ne 0 ]; then
   exit 1
 fi
-echo "OK: no Cyrillic in any tracked file."
+if [ "$skipped" -ne 0 ]; then
+  echo "OK: no Cyrillic in any tracked file ($skipped binary asset(s) skipped by extension)."
+else
+  echo "OK: no Cyrillic in any tracked file."
+fi
