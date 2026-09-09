@@ -240,18 +240,53 @@ struct QuarantineTests {
         #expect(Quarantine.wouldBeHeld(URL(fileURLWithPath: "/nowhere/agterm-remote-bridge")) == false)
     }
 
+    /// **Both doors, in the message printed before anything is spawned.**
+    ///
+    /// That message used to offer `xattr -dr` on its own, justified by "nothing has been spawned yet".
+    /// The justification was too narrow and the difference is not academic: an owner who double-clicked
+    /// the download and was turned away by Gatekeeper has already spent the one blocked exec that
+    /// makes removal permanently refused — on the binary and on the enclosing `.app` — so the command
+    /// answers "Operation not permitted" on the very path the paragraph names, and they conclude the
+    /// instructions are broken.
+    ///
+    /// So the Finder route is offered here as well as in `BridgeProcess.notReadySentence`, and the
+    /// command is presented as the one that may already be past.
+    @Test func theRefusalOffersTheFinderRouteAndNotOnlyACommandThatMayBeRefused() {
+        let bundled = URL(fileURLWithPath: "/Applications/AgtermRemote.app/Contents/Resources/agterm-remote-bridge")
+
+        let said = Quarantine.explanation(for: bundled)
+
+        #expect(said.contains("Finder"), "the door that always works is not offered")
+        #expect(said.contains(Quarantine.command(for: bundled)), "the command is gone entirely")
+        // And the caveat, so somebody who tries the command first is not left thinking it is broken.
+        #expect(said.contains("Operation not permitted"))
+    }
+
+    /// The other message, after the block has certainly happened, offers **only** the Finder route.
+    /// There is nothing conditional left to say there: the command cannot work by then.
+    @Test func theMessageAfterABlockedExecOffersNoCommandToRemoveTheAttribute() {
+        let bundled = URL(fileURLWithPath: "/Applications/AgtermRemote.app/Contents/Resources/agterm-remote-bridge")
+
+        let said = BridgeProcess.notReadySentence(executable: bundled, said: nil)
+
+        #expect(said.contains("Finder"))
+        #expect(!said.contains("xattr -dr"), "it offers a command macOS has already refused")
+    }
+
     /// **The app never writes an extended attribute, and never removes one.** It reads.
     ///
     /// Held at the source, the way `BoundaryTests` holds the list of processes this app may launch.
     ///
-    /// This is the whole of the rule, and it deliberately makes no claim about whether removal
-    /// *would* succeed. Two review rounds have carried a confident answer in opposite directions —
-    /// that macOS forbids it, then that it does not — and measurement here (unentitled, and from
-    /// inside the quarantined bundle, across approved and unapproved flags, with and without a UUID)
-    /// succeeded every time while review measured EPERM. The reason the app does not do it survives
-    /// either answer: quarantine is macOS's record that this code came from outside, and an app that
-    /// erases that record about itself has removed the only Gatekeeper signal a non-notarised
-    /// application is subject to.
+    /// This is the whole of the rule, and it stands whatever the answer to "would removal succeed"
+    /// turns out to be — which is worth saying, because three review rounds carried three answers.
+    /// It is settled now and the rule is narrower than any of them: **removal is refused if and only
+    /// if a blocked exec has already been attempted on that item.** Measurement here succeeded every
+    /// time because nothing had been blocked yet; review measured EPERM after the bundle's main
+    /// executable had run. Both were right about their own moment.
+    ///
+    /// The reason the app does not do it survives either way: quarantine is macOS's record that this
+    /// code came from outside, and an app that erases that record about itself has removed the only
+    /// Gatekeeper signal a non-notarised application is subject to.
     @Test func nothingInThisAppRemovesOrSetsAnExtendedAttribute() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -282,7 +282,7 @@ func TestTheReadyLineIsPrintedOnceTheListenerIsBound(t *testing.T) {
 	defer log.SetOutput(io.Discard)
 
 	done := make(chan error, 1)
-	go func() { done <- run(addr, filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", 0) }()
+	go func() { done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", 0) }()
 
 	deadline := time.Now().Add(20 * time.Second)
 	for !strings.Contains(said.String(), readyLine) {
@@ -332,4 +332,23 @@ func (b *safeBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.text.String()
+}
+
+// TestTheCodeNamesWhatAPhoneDialsRatherThanWhatIsBound pins the split that produced two failed
+// pairings in the project this one is descended from.
+//
+// **A wildcard bind is a fine thing to listen on and is not an address anything can connect to.** The
+// Mac app binds `0.0.0.0` because it cannot know which interface the router forwards to, and it knows
+// the name the owner published. Before this flag existed, the QR code carried the bound address, so
+// every code the app could mint named every interface and none of them — perfect on screen, and a
+// phone that never connects.
+//
+// The empty case is the person running this by hand from a terminal, who has one address and means it.
+func TestTheCodeNamesWhatAPhoneDialsRatherThanWhatIsBound(t *testing.T) {
+	if got := advertised("agterm.example-homelab.invalid:8443", "0.0.0.0:8444"); got != "agterm.example-homelab.invalid:8443" {
+		t.Fatalf("the code would name %q, which is the bind rather than the dial address", got)
+	}
+	if got := advertised("", "127.0.0.1:8443"); got != "127.0.0.1:8443" {
+		t.Fatalf("with nothing advertised the bound address must stand; got %q", got)
+	}
 }

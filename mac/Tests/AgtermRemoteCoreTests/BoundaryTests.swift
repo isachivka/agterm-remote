@@ -41,8 +41,23 @@ struct BoundaryTests {
         return found
     }
 
-    /// agterm's control socket, by both of the paths it is known by.
-    private static let sockets = ["agterm.sock", "control.sock", "Application Support/agterm"]
+    /// **agterm's control socket, by every spelling that identifies it as agterm's.**
+    ///
+    /// This list used to hold the bare name `control.sock`, and that was right while nothing in this
+    /// app had a control socket of its own. It does now: the bridge in this repository serves one, in
+    /// the state directory this app hands it, and the pairing panel is the thing that asks it for a
+    /// code. The bare name no longer distinguishes ours from agterm's — they are the same four
+    /// syllables — so the detector holds the part that does: the directory.
+    ///
+    /// The teeth are not weaker for it. What this forbids is naming **agterm's** socket, and the two
+    /// ways to name it are the file `agterm.sock` and a path through agterm's own support directory.
+    /// The rule that replaces the bare name is stronger than the bare name was, and it is
+    /// [onlyOneFileNamesAControlSocketAndItBuildsThePathFromAnInjectedDirectory] below: exactly one
+    /// source may say `control.sock` at all, and it may only join it to a directory it was handed.
+    private static let sockets = ["agterm.sock", "Application Support/agterm", "agterm/control.sock"]
+
+    /// The one file allowed to name a control socket, and the constant it must build the path from.
+    private static let controlSocketFile = "Sources/AgtermRemoteCore/UnixControlClient.swift"
 
     /// Every verb the bridge's allowlist holds, read off `bridge/internal/agterm`. If this app names
     /// one of them it is speaking a protocol it has no business speaking.
@@ -113,22 +128,28 @@ struct BoundaryTests {
         }
     }
 
-    /// **Making a code makes a picture and nothing else.**
+    /// **Exactly one file may name a control socket, and it may only build the path from a directory
+    /// it was handed.**
     ///
-    /// This test was once called *the only subcommand is qr*, and it kept passing after a second,
-    /// destructive subcommand was admitted — because it only ever looked at the `qr` invocation. **A
-    /// test whose name claims more than it checks is the same defect as a menu item that looks
-    /// pressable and is not**, so it is named for what it actually asserts: this one invocation, and
-    /// the destructive verbs it must never grow.
-    @Test func theCodeInvocationCanOnlyEverMakeACode() {
-        let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
+    /// This replaces the bare-name entry that left [sockets] when the app grew a control socket of its
+    /// own. A bare name matched ours and agterm's alike; this asks the question the bare name was
+    /// standing in for — *whose socket is it* — and answers it structurally. A second file naming one,
+    /// or this one hard-coding a path to it, fails here.
+    ///
+    /// It also names the *only* two things that make the socket ours: it is inside the state
+    /// directory this app passes the bridge with `--state-dir`, and that directory is
+    /// `~/.config/agterm-remote`, which is this app's own and belongs to no other installation. The
+    /// second half is `NoLegacyPathTests`'s.
+    @Test func onlyOneFileNamesAControlSocketAndItBuildsThePathFromAnInjectedDirectory() throws {
+        let named = try sources().filter { $0.text.contains("control.sock") }
 
-        let invocation = PairingCodeCommand.invocation(binary: "/opt/bin/bridgecert", address: address)
-
-        #expect(invocation.arguments.first == "qr")
-        for destructive in ["pin", "mint", "rotate", "delete"] {
-            #expect(!invocation.arguments.contains(destructive), "making a code can run \(destructive)")
-        }
+        #expect(named.map(\.name) == [Self.controlSocketFile], "a second file names a control socket")
+        let client = try #require(named.first).text
+        // The path is joined to what the caller passed, never to a directory this file chose. A
+        // literal home-relative path here would be a second answer to "where is the bridge", and a
+        // client looking in the wrong place reports a running bridge as down.
+        #expect(client.contains("stateDirectory.appending(path: Self.socketName)"))
+        #expect(!client.contains("homeDirectoryForCurrentUser"), "the client picks its own directory")
     }
 
     /// **Starting the bridge names no agterm socket and no agterm verb.**

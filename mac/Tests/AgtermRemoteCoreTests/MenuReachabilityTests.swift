@@ -13,39 +13,18 @@ import Testing
 /// of them. An action disabled everywhere is a feature that does not exist.
 struct MenuReachabilityTests {
 
-    /// Every combination the menu can actually be shown in.
-    private static func everyState() -> [(status: BridgeStatus?, hasAddress: Bool, atLogin: Bool)] {
-        let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
-        let statuses: [BridgeStatus?] = [
-            nil,
-            BridgeStatus(address: address, running: .running, reachable: .answered, identified: .ours),
-            BridgeStatus(address: address, running: .notRunning, reachable: .answered, identified: .ours),
-            BridgeStatus(address: address, running: .running, reachable: .noAnswer("refused"),
-                         identified: .notEstablished),
-            BridgeStatus(address: address, running: .notRunning, reachable: .noAnswer("refused"),
-                         identified: .notEstablished),
-            BridgeStatus(address: address, running: .running, reachable: .answered,
-                         identified: .notOurs(presented: "1111 2222")),
-            BridgeStatus(address: address, running: .running, reachable: .answered,
-                         identified: .notEstablished),
-        ]
-        var states: [(BridgeStatus?, Bool, Bool)] = []
-        for status in statuses {
-            for hasAddress in [true, false] {
-                for atLogin in [true, false] {
-                    states.append((status, hasAddress, atLogin))
-                }
-            }
-        }
-        return states
+    /// Every combination the menu can actually be shown in. Shared with `MenuActionsTests`, so the
+    /// two halves of the rule — reachable, and wired — are asked over the same world.
+    private static func everyState() -> [(paired: [PairedPhone], hasAddress: Bool, atLogin: Bool, bridge: BridgeState)] {
+        MenuActionsTests.everyState()
     }
 
     private static func enabledSomewhere(
-        _ menu: (BridgeStatus?, Bool, Bool) -> [MenuItem],
+        _ menu: ([PairedPhone], Bool, Bool, BridgeState) -> [MenuItem],
     ) -> Set<MenuAction> {
         var reachable: Set<MenuAction> = []
         for state in everyState() {
-            for item in menu(state.status, state.hasAddress, state.atLogin) where item.enabled {
+            for item in menu(state.paired, state.hasAddress, state.atLogin, state.bridge) where item.enabled {
                 reachable.insert(item.action)
             }
         }
@@ -56,8 +35,8 @@ struct MenuReachabilityTests {
     /// **reachable**, never whether it **does anything**. `MenuActionsTests` is the half that asks
     /// that, and it exists because this test passed on a menu of five inert items that shipped.
     @Test func everyActionIsEnabledInAtLeastOneReachableState() {
-        let reachable = Self.enabledSomewhere { status, hasAddress, atLogin in
-            MenuModel.items(status: status, hasAddress: hasAddress, launchesAtLogin: atLogin)
+        let reachable = Self.enabledSomewhere { paired, hasAddress, atLogin, bridge in
+            MenuModel.items(paired: paired, hasAddress: hasAddress, launchesAtLogin: atLogin, bridge: bridge)
         }
 
         let unreachable = Set(MenuAction.allCases).subtracting(reachable)
@@ -67,9 +46,9 @@ struct MenuReachabilityTests {
     /// **The control.** A check that cannot fail is not a check: this plants an action disabled
     /// everywhere and proves the detector above would have caught it.
     @Test func theReachabilityDetectorCatchesAnActionDisabledEverywhere() {
-        let crippled: (BridgeStatus?, Bool, Bool) -> [MenuItem] = { status, hasAddress, atLogin in
-            MenuModel.items(status: status, hasAddress: hasAddress, launchesAtLogin: atLogin).map {
-                $0.action == .showPairingCode
+        let crippled: ([PairedPhone], Bool, Bool, BridgeState) -> [MenuItem] = { paired, hasAddress, atLogin, bridge in
+            MenuModel.items(paired: paired, hasAddress: hasAddress, launchesAtLogin: atLogin, bridge: bridge).map {
+                $0.action == .pairPhone
                     ? MenuItem(action: $0.action, title: $0.title, enabled: false)
                     : $0
             }
@@ -77,17 +56,27 @@ struct MenuReachabilityTests {
 
         let reachable = Self.enabledSomewhere(crippled)
 
-        #expect(!reachable.contains(.showPairingCode), "the detector would have missed today's deadlock")
+        #expect(!reachable.contains(.pairPhone), "the detector would have missed today's deadlock")
     }
 
-    /// The menu is never empty and never loses an action: a state that renders nothing is the other
-    /// way to make a feature unreachable.
+    /// The menu is never empty and never loses an action it could offer: a state that renders nothing
+    /// is the other way to make a feature unreachable.
+    ///
+    /// **`unpair` is the one exception, and it is the point of the exception.** The item names a
+    /// phone; with no phone paired there is nothing for it to name, and an item reading *Unpair* over
+    /// an empty trust store asks somebody to destroy something they cannot see. So it is absent rather
+    /// than present-and-dead — which is why this asserts the whole menu MINUS that one, and asserts
+    /// separately that it appears the moment there is a phone.
     @Test func everyStateOffersTheWholeMenu() {
         for state in Self.everyState() {
             let items = MenuModel.items(
-                status: state.status, hasAddress: state.hasAddress, launchesAtLogin: state.atLogin)
+                paired: state.paired, hasAddress: state.hasAddress, launchesAtLogin: state.atLogin,
+                bridge: state.bridge)
 
-            #expect(items.map(\.action) == MenuAction.allCases)
+            let expected = state.paired.isEmpty
+                ? MenuAction.allCases.filter { $0 != .unpair }
+                : MenuAction.allCases
+            #expect(items.map(\.action) == expected)
         }
     }
 
@@ -95,7 +84,8 @@ struct MenuReachabilityTests {
     @Test func quitIsAlwaysAvailable() {
         for state in Self.everyState() {
             let items = MenuModel.items(
-                status: state.status, hasAddress: state.hasAddress, launchesAtLogin: state.atLogin)
+                paired: state.paired, hasAddress: state.hasAddress, launchesAtLogin: state.atLogin,
+                bridge: state.bridge)
 
             #expect(items.first { $0.action == .quit }?.enabled == true)
         }
@@ -104,21 +94,19 @@ struct MenuReachabilityTests {
     /// First run: no address yet. The way out must be open, and the code must not be offered for an
     /// address that does not exist.
     @Test func firstRunOffersTheWayOutAndNotACodeForNothing() {
-        let items = MenuModel.items(status: nil, hasAddress: false, launchesAtLogin: false)
+        let items = MenuModel.items(paired: [], hasAddress: false, launchesAtLogin: false)
 
-        #expect(items.first { $0.action == .setAddress }?.enabled == true)
-        #expect(items.first { $0.action == .showPairingCode }?.enabled == false)
+        #expect(items.first { $0.action == .setUp }?.enabled == true)
+        #expect(items.first { $0.action == .pairPhone }?.enabled == false)
     }
 
     /// Start and Stop are opposites; Restart is available either way, because a pin without a restart
     /// pins nothing and "restart" on a stopped bridge is simply "start it".
     @Test func startAndStopFollowTheBridgeAndRestartAlwaysWorks() {
-        let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
-        let up = BridgeStatus(address: address, running: .running, reachable: .answered, identified: .ours)
-        let down = BridgeStatus(address: address, running: .notRunning, reachable: .answered, identified: .ours)
-
-        let whenUp = MenuModel.items(status: up, hasAddress: true, launchesAtLogin: false)
-        let whenDown = MenuModel.items(status: down, hasAddress: true, launchesAtLogin: false)
+        let whenUp = MenuModel.items(
+            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .running(pid: 4242))
+        let whenDown = MenuModel.items(
+            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopped)
 
         #expect(whenUp.first { $0.action == .startBridge }?.enabled == false)
         #expect(whenUp.first { $0.action == .stopBridge }?.enabled == true)

@@ -43,14 +43,29 @@ import Foundation
 /// person who was never asked. Clearing it is also a bigger act than the press implies: the attribute
 /// is on every file of the bundle, so any useful removal is recursive over the whole application.
 ///
-/// **That argument stands on its own, and it is deliberately the only one here.** Two rounds of
-/// review have now carried a confident claim about whether `removexattr` *would* succeed — first
-/// that macOS forbids it, then that it does not. Measured here, from an unentitled process and from
-/// one running inside the quarantined bundle itself, across approved and unapproved flags and with
-/// and without a UUID field, removal **succeeded every time**; review measured `EPERM` after the
-/// bundle's main executable had run and I could not reproduce that in any configuration. Rather than
-/// pick a third guess, the design no longer rests on the answer: the app does not remove it because
-/// it must not, and `nothingInThisAppRemovesOrSetsAnExtendedAttribute` is what holds that.
+/// **That argument stands on its own, and it is deliberately the only one here.** It is worth saying
+/// that it does not rest on whether removal is *possible*, because three rounds of review carried
+/// three different confident claims about that — first that macOS forbids it, then that it does not,
+/// then a pair of measurements that disagreed.
+///
+/// ### The disagreement is settled, and the rule is narrower than either claim
+///
+/// **Removal is refused if and only if a blocked exec has already been attempted on that item.**
+/// Before that, `removexattr` succeeds — from an unentitled process, from inside the quarantined
+/// bundle, with approved and unapproved flags and with or without a UUID field, which is why removal
+/// succeeded every time it was measured *here*: nothing had been blocked yet. After a blocked exec it
+/// returns `EPERM` on the binary **and on the enclosing `.app`**, permanently, surviving the child's
+/// death — which is why review measured `EPERM` after the bundle's main executable had run. Both
+/// measurements were right about their own moment; neither was the rule.
+///
+/// The consequence is that `xattr -dr` is not a remedy that can be offered unconditionally. It works
+/// only while nothing has been refused an exec — and a downloaded app whose first double-click
+/// Gatekeeper turned away has already had one refused. See [explanation], which offers the Finder
+/// route beside the command for exactly that reason, and `BridgeProcess.notReadySentence`, which
+/// offers only the Finder route because by the time it is printed the block has certainly happened.
+///
+/// None of that changes what this app does: it does not remove the attribute because it must not, and
+/// `nothingInThisAppRemovesOrSetsAnExtendedAttribute` is what holds that.
 public enum Quarantine {
 
     /// The extended attribute macOS sets on anything that arrived from elsewhere.
@@ -111,11 +126,24 @@ public enum Quarantine {
         return String(decoding: buffer, as: UTF8.self)
     }
 
-    /// **What the owner is told, and the command that fixes it.**
+    /// **What the owner is told, and the two doors out of it.**
     ///
     /// The path in the instruction is the enclosing `.app` when there is one, because quarantine is
     /// set on every file of a downloaded bundle and clearing it from the bridge alone would leave the
     /// app itself still held. `-dr` — recursive — for the same reason.
+    ///
+    /// ### Why the command is not the only door offered, even here
+    ///
+    /// This is printed **before** anything is spawned, and that used to be the whole justification:
+    /// removal works until a blocked exec has been attempted, and nothing had been. The justification
+    /// was too narrow. *This app* has spawned nothing — but the owner may already have double-clicked
+    /// the downloaded application and been turned away by Gatekeeper, and that refusal is a blocked
+    /// exec on the bundle. From then on `xattr -dr` returns "Operation not permitted" on the very
+    /// path named below, and somebody following the instruction concludes the instructions are broken
+    /// rather than that they need a different door.
+    ///
+    /// So both doors are on the screen and the command is offered as the one that may already be
+    /// past. The Finder route works in either case, which is why it is first.
     public static func explanation(for executable: URL) -> String {
         """
             macOS has quarantined the bridge, so starting it would freeze it rather than run it.
@@ -125,13 +153,19 @@ public enum Quarantine {
             bridge itself, there is no window for you to approve it in. It would simply never start, \
             and nothing would say why.
 
-            Clear it in Terminal and press Start again:
+            Open the application once from the Finder — right-click it, choose Open, and allow it — \
+            then press Start again.
+
+            If you would rather clear it from Terminal, this does the same thing:
 
                 \(command(for: executable))
 
-            Agterm Remote will not do this for you. Quarantine is macOS's record that this app came \
-            from somewhere else, and an app that erased that record about itself — because you \
-            pressed Start — would be removing the one check you have on it.
+            That command stops working once macOS has refused to start something in this application, \
+            so if it answers "Operation not permitted", use the Finder route above instead.
+
+            Agterm Remote will not do either of these for you. Quarantine is macOS's record that this \
+            app came from somewhere else, and an app that erased that record about itself — because \
+            you pressed Start — would be removing the one check you have on it.
             """
     }
 

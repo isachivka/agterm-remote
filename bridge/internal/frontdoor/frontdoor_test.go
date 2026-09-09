@@ -292,3 +292,42 @@ func TestAnOfferedExtensionOrSubprotocolIsUpgradedAndNotNegotiated(t *testing.T)
 		}
 	}
 }
+
+// TestCloseDoesNotReturnBeforeTheRefusalCountIsWritten pins the ordering that made
+// TestAnonymousRequestsAreCountedNotLogged fail intermittently — twice on main before it was traced.
+//
+// The aggregate is flushed from the accept goroutine as it leaves. While Close returned as soon as
+// the inner listener was shut, that write landed at an unpredictable moment afterwards: after the
+// test that caused it had ended, and inside whatever the NEXT test had pointed the log at. A test
+// asserting that nothing was written then saw one line and named the wrong culprit.
+//
+// So the property is asserted directly rather than waited out with a sleep: by the time Close
+// returns, everything this listener was ever going to write has been written.
+func TestCloseDoesNotReturnBeforeTheRefusalCountIsWritten(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := Listen(inner)
+	addr := inner.Addr().String()
+
+	// One refusal, so there is something to flush. Anything else would make the assertion below pass
+	// on a listener that had nothing to say.
+	c := dial(t, addr)
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	readAll(t, c)
+
+	var written countingWriter
+	log.SetOutput(&written)
+	t.Cleanup(func() { log.SetOutput(io.Discard) })
+
+	_ = l.Close()
+
+	// No sleep. If Close returned early this is 0 now and 1 a moment later, which is the whole defect.
+	if n := written.lines.Load(); n != 1 {
+		t.Fatalf("Close returned with %d line(s) written; the refusal count must be out before it "+
+			"returns, or it lands in whatever the next caller pointed the log at", n)
+	}
+}

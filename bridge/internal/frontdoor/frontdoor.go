@@ -94,6 +94,9 @@ type Listener struct {
 	refusals *counter
 	closeOne sync.Once
 	done     chan struct{}
+	// stopped is closed by the accept loop on its way out, after the refusal count has been
+	// written. See [Listener.Close] for what rests on that ordering.
+	stopped chan struct{}
 }
 
 // Listen wraps a listener. Accept returns only successfully upgraded connections.
@@ -104,12 +107,17 @@ func Listen(inner net.Listener) *Listener {
 		slots:    make(chan struct{}, maxConcurrentUpgrades),
 		refusals: newCounter(),
 		done:     make(chan struct{}),
+		stopped:  make(chan struct{}),
 	}
 	go l.accept()
 	return l
 }
 
 func (l *Listener) accept() {
+	// Ordered: the count is written first, and only then is the shutdown announced. Close waits on
+	// the second, so a caller that has been told this listener is closed has already been told
+	// everything it was going to say.
+	defer close(l.stopped)
 	defer l.refusals.flush()
 	for {
 		conn, err := l.inner.Accept()
@@ -185,9 +193,28 @@ func (l *Listener) Accept() (net.Conn, error) {
 	}
 }
 
+// Close stops the listener and **does not return until the accept loop has finished**, which
+// includes writing the aggregate refusal count.
+//
+// # Why it waits, which it did not used to
+//
+// The count is flushed from the accept goroutine on its way out. Close used to return as soon as the
+// inner listener was closed, so that write landed at some unpredictable point afterwards - and a
+// caller that closed a listener and then changed where the log goes had its shutdown line delivered
+// somewhere else entirely. The package's own tests are exactly such a caller, and this was measured
+// as an intermittent failure of TestAnonymousRequestsAreCountedNotLogged: a straggling flush from a
+// PREVIOUS test's listener, arriving after that test had ended, counted as a per-request log line
+// against a test that had written none. It failed twice on main before it was traced.
+//
+// A test being wrong about which listener wrote a line is the small version. The general statement is
+// that "closed" meant "closing", and anything a caller does immediately afterwards - swapping the log
+// destination, asserting on what was written, tearing down the file the log points at - races a write
+// it has no way to wait for. Bounded by one Accept returning an error, so the wait is real but tiny.
 func (l *Listener) Close() error {
 	l.closeOne.Do(func() { close(l.done) })
-	return l.inner.Close()
+	err := l.inner.Close()
+	<-l.stopped
+	return err
 }
 
 func (l *Listener) Addr() net.Addr { return l.inner.Addr() }
