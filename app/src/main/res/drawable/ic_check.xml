@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A checkmark. **Hand-authored on the same 960 grid as the converted glyphs, not converted from a
+  Material SVG** - said plainly because every other header in this directory says where its path came
+  from, and claiming a conversion nobody performed is the kind of provenance that reads as checked.
+
+  Two segments and a round cap, which is the whole shape. Stroked rather than filled: a tick is a line,
+  and a stroke with a round join is a smaller thing to get wrong than an outline of one.
+
+  Drawn white and tinted at the call site, like the rest - except that its one caller passes a colour
+  with NO alpha on purpose. See TerminalBox: this glyph answers "now", and a fraction of it would be
+  answering "how far", which is the ramp's job.
+
+  Used by the overpull indicator, at the owner's word: a checkmark before the text rather than a
+  colour.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:pathData="M200,-520 L390,-330 L760,-700"
+            android:strokeColor="@android:color/white"
+            android:strokeWidth="110"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

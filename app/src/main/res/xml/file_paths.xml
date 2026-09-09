@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The only path this app shares, and it shares it with one app at a time: whichever one the owner
+  picks out of the share sheet.
+-->
+<paths>
+    <!--
+      The phone's own certificate, offered to the laptop through the share sheet. It is what removed the
+      adb-and-instrumentation route to pairing.
+
+      files-path again, for the same reason: app-internal storage, so nothing else on the phone can
+      swap the file between this app writing it and the receiving app reading it. The certificate is
+      public, so the risk is not disclosure - it is the owner pinning a certificate that is not this
+      phone's, which is why the screen shows the fingerprint to check.
+
+      A SUBDIRECTORY, deliberately. The paired laptop's profile lives in files/pairing/ and carries the
+      laptop's address; only files/pairing/outgoing/ is shareable, so that address is never inside the
+      exposed tree at all.
+
+      Must stay in step with CertificateHandover.DIRECTORY. The coupling is held by
+      PhoneProvisionsItselfTest.theCertificateBecomesSomethingTheOwnerCanSend, which calls shareIntent
+      for real - getUriForFile throws for a path this file does not cover.
+    -->
+    <files-path name="pairing" path="pairing/outgoing/" />
+    <!--
+      There was a `pairing_incoming` entry here, granting the system camera app write access to
+      files/pairing/incoming/scan.jpg. It went with the route: the viewfinder reads frames
+      in this process, so no other app is handed a place to write and nothing arrives from outside.
+
+      One grant fewer. Removing an entry from this file is the only change here that reduces what
+      another application may touch, which is worth a line rather than a silent deletion.
+
+      LeftoverScans deletes the directory itself on start, because a phone that ran the old build may
+      still be holding a photograph of the laptop's address.
+    -->
+</paths>

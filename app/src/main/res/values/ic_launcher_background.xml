@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The plate, and the colour the owner's own artwork was drawn on.
+
+      Light on purpose. The launcher derives a ring from this value and its hue is not controllable -
+      this beige produces a pale green one - so matching them exactly is not available. Both being
+      light is, and that is what makes the two read as a single shape instead of two.
+
+      Not matched to the app's dark theme, deliberately: a launcher icon sits among other people's
+      icons, not among this app's screens, and every icon on that home screen is a different colour.
+    -->
+    <color name="ic_launcher_background">#DFD9D2</color>
+</resources>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The checked half of the type control: the input bar is open.
+
+  Hand-built on the same 960 grid as ic_fit_width_on/off, so the two toggles in the same header read
+  as one family. A keyboard with a caret above it - the caret is what says "this is where your typing
+  goes", which is the thing the control turns on.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- The board. -->
+    <path android:fillColor="@android:color/white"
+        android:pathData="M160,480 h640 v280 h-640 z M200,520 v200 h560 v-200 z" />
+    <!-- Keys, two rows. -->
+    <path android:fillColor="@android:color/white" android:pathData="M240,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M340,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M440,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M540,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M640,560 h60 v50 h-60 z" />
+    <path android:fillColor="@android:color/white" android:pathData="M320,650 h300 v50 h-300 z" />
+    <!-- The caret above it: open, and pointing at where the typing lands. -->
+    <path android:fillColor="@android:color/white" android:pathData="M440,240 h60 v180 h-60 z" />
+</vector>

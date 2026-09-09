@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only additions. Merged into the debug manifest and absent from release.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+          A bare window for instrumentation - see ComposeHostActivity.
+
+          **windowSoftInputMode must match MainActivity's**, because that attribute is the thing being
+          verified: without it Android chooses between panning and resizing per screen, which is what
+          gave the terminal two different layouts with the same keyboard. A host that did not carry it
+          would let the test pass while the real screen still jumped.
+        -->
+        <activity
+            android:name="dev.isachivka.agtermremote.debug.ComposeHostActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.AgtermRemote" />
+    </application>
+</manifest>
