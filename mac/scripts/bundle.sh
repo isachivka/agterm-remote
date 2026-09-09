@@ -15,6 +15,17 @@
 #
 # Until this script existed the branch produced a binary nobody could launch, which is not a beta.
 #
+# # The bridge rides inside it
+#
+# The Go bridge is built here, for both architectures, and put in `Contents/Resources`. That is the
+# promise the whole macOS design rests on: somebody installs ONE thing. No `go install` first, no
+# launchd plist afterwards, and nothing left listening on a port once the app is dragged to the Bin -
+# the app spawns the bridge as its own child and it dies with the app.
+#
+# So this script now needs a Go toolchain, and says so rather than assembling an app whose two menu
+# items are permanently grey. `BundledBridge.url(in:)` is the Swift half of the same layout, and
+# `BundleLayoutTests` holds it to it.
+#
 # # What it does NOT do
 #
 # It does not install, does not copy into /Applications, does not register a login item, and does not
@@ -101,11 +112,82 @@ if [ ! -s "$APP/Contents/Resources/$declared.icns" ]; then
     exit 1
 fi
 
+# # The bridge, universal, and BEFORE signing for the third time in this file
+#
+# Same reason as the version and the icon: the signature seals Contents/Resources, so a binary added
+# afterwards produces a bundle macOS calls damaged rather than unsigned.
+#
+# ## Why both architectures
+#
+# The person who builds this is not necessarily the person who runs it. A thin arm64 bundle handed to
+# somebody on an Intel Mac is an app that opens, shows its menu, and has Start greyed forever with
+# nothing on screen to say why - the exact failure this task exists to remove. Two slices cost about
+# ten megabytes and remove the whole class.
+#
+# ## `-trimpath` is not decoration
+#
+# Without it the Go binary carries the absolute path of every source file it was compiled from -
+# `/Users/<whoever>/...`, straight through to whoever downloads the app. That is precisely the class
+# of personal value this project refuses to ship, and it is invisible to every guard script in
+# `scripts/`, because those read tracked text and this is a build artefact. So it is asserted below,
+# against the bytes, rather than trusted to a flag nobody re-reads.
+#
+# ## CGO_ENABLED=0 on both
+#
+# Not a cross-compilation workaround - it is already the default for the amd64 half. It is set on the
+# arm64 half so the two slices are the same program: cgo would give one of them the system resolver
+# and the other Go's own, and it would compile in paths of its own that `-trimpath` does not reach.
+BRIDGE="$APP/Contents/Resources/agterm-remote-bridge"
+
+if ! command -v go >/dev/null 2>&1; then
+    echo "refusing to build: no Go toolchain, and the bridge ships inside this bundle." >&2
+    echo "    Install Go 1.24 or newer and run this again. An app assembled without it would" >&2
+    echo "    launch with Start and Stop greyed out and nothing on screen saying why." >&2
+    exit 1
+fi
+
+slices="$(mktemp -d)"
+trap 'rm -rf "$slices"' EXIT
+
+for arch in arm64 amd64; do
+    (cd ../bridge && CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+        go build -trimpath -o "$slices/bridge-$arch" ./cmd/agterm-remote-bridge)
+done
+/usr/bin/lipo -create -output "$BRIDGE" "$slices/bridge-arm64" "$slices/bridge-amd64"
+chmod 755 "$BRIDGE"
+
+# Ad-hoc, and the binary in its own right. `go build` signs the arm64 slice it produces on this
+# machine and leaves the cross-compiled x86_64 one bare, so the joined file is half-signed:
+# `codesign -dv` reports adhoc off the arm64 slice while `codesign -v` says "not signed at all".
+# Signing it here makes both slices agree, which is what an Intel Mac needs to run it at all.
+codesign --force --sign - --timestamp=none "$BRIDGE" >/dev/null 2>&1
+
+# **Both architectures, checked rather than assumed.** `lipo -create` given one input succeeds and
+# produces a thin file; a typo in a GOARCH above would ship exactly that, and it would work perfectly
+# on the machine that built it.
+archs="$(/usr/bin/lipo -archs "$BRIDGE")"
+for want in x86_64 arm64; do
+    case " $archs " in
+        *" $want "*) ;;
+        *) echo "refusing to sign: the bridge is '$archs' and needs $want" >&2; exit 1 ;;
+    esac
+done
+
+# **The build machine's paths, searched for in the shipped bytes.** Measured both ways on 2026-09-09:
+# without `-trimpath` this binary carried 25 lines naming the builder's home directory; with it,
+# zero. This is the assertion that keeps that true after somebody edits the go build line.
+if LC_ALL=C grep -aq '/Users/' "$BRIDGE"; then
+    echo "refusing to sign: the bridge carries build-machine paths - is -trimpath still there?" >&2
+    LC_ALL=C grep -ao '/Users/[^"]\{0,60\}' "$BRIDGE" | sort -u | head -5 >&2
+    exit 1
+fi
+
 # Ad-hoc, and the whole bundle rather than the executable inside it: Gatekeeper and SMAppService both
 # read the bundle's signature, not the linker's.
 codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1
 
 echo "built    $APP"
+echo "         bridge  $archs, $(/usr/bin/du -h "$BRIDGE" | cut -f1 | tr -d ' '), no build paths"
 echo "         version $(/usr/bin/plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
 echo "         $(codesign -dv "$APP" 2>&1 | awk -F= '/^Signature/{print "signature " $2}')"
 echo
