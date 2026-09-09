@@ -225,4 +225,84 @@ loop_fixture "nested path" 1
 
 rm -rf loop && git add -A
 
+# --- check-no-cyrillic.sh: SYMLINKS, and the accounting that makes the next hole visible ----------
+#
+# A symlink's blob is the TARGET'S NAME, not whatever it points at, and both directions were wrong:
+#
+#   - a link whose target is named in Russian put Cyrillic straight into the blob, and on a fresh
+#     clone where the target is absent the link dangled, the existence test failed, and the guard
+#     printed OK. Reproduced on a real clone before it was fixed.
+#   - a link pointing OUT of the repository was scanned as though the far end's contents were the
+#     committed data, which is a false positive on content nobody committed.
+#
+# That was the fourth defect of one shape - the guard declining to look at something and saying
+# nothing - so the cases below also assert the ACCOUNTING, which is the fix for the shape rather than
+# for its members. Each family of skip has to appear in the summary as a number.
+out() { # runs the guard, echoes its stdout
+  "$@" 2>/dev/null || true
+}
+says() { # name, expected substring of the guard's output
+  got="$(out "$cyrillic")"
+  case "$got" in
+    (*"$2"*) ;;
+    (*) echo "FAIL $1: the summary never said \"$2\""; printf '%s\n' "$got" | sed 's/^/        /'; fail=1 ;;
+  esac
+}
+
+# The target's name is Russian; the link's own body is that name. Caught whether or not the target
+# is present, because the blob is read rather than the filesystem followed.
+fresh_loop
+target="$(printf 'loop/\321\201\320\265\320\272\321\200\320\265\321\202.txt')"
+printf 'nothing to see here\n' > "$target"
+ln -s "$(basename "$target")" loop/link.txt
+loop_fixture "symlink to a russian name, target present" 1
+rm -f -- "$target"                    # exactly what a fresh clone of a filtered checkout leaves
+git add -A
+loop_fixture "symlink to a russian name, target absent" 1
+says "the symlink is reported as a name" "read 1 symlink target name(s)"
+
+# A link pointing outside the repository at a file full of Russian. The blob is one line of path, so
+# this must be CLEAN - the content at the far end was never committed here.
+fresh_loop
+outside="$(mktemp -d)"
+printf '// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271\n' > "$outside/russian.swift"
+ln -s "$outside/russian.swift" loop/points-away.swift
+loop_fixture "symlink out of the repository is not the far end's content" 0
+rm -rf "$outside"
+
+# Tracked and then deleted from the working tree. Skipped in silence before; now read from the index,
+# because the blob is what would be pushed. The staging happens BEFORE the delete and is not repeated
+# afterwards - `git add -A` over a deleted file stages the deletion, which would untrack the very
+# thing this case is about.
+fresh_loop
+printf '// \320\275\320\265 \321\202\321\200\320\276\320\263\320\260\320\271\n' > loop/staged-then-deleted.swift
+git add -A && rm loop/staged-then-deleted.swift
+got="$(run "$cyrillic")"
+[ "$got" = "1" ] || { echo "FAIL staged, then deleted from the working tree: expected 1 got $got"; fail=1; }
+says "the index read is reported" "read 1 from the index"
+
+# Every family of skip is counted and named. A guard that declines to look at something without
+# saying so is how all four holes stayed invisible; these assert the numbers rather than the verdict.
+fresh_loop; printf '\211PNG\r\n\032\n\320\260\377\376\320\261' > loop/icon.png
+git add -A
+says "a declined binary asset is counted" "declined 1: binary asset(s)"
+says "the summary always states both totals" "declined 1)."
+
+fresh_loop; git add -A
+says "a clean run still states its totals" "declined 0)."
+
+# An unreadable file names its real cause. It used to be reported as invalid UTF-8, which is the
+# wrong cause and sends whoever reads it to convert an encoding that was never the problem.
+#
+# Tracked while it is still readable, then locked: `git add` cannot index a file it cannot open, so
+# staging afterwards would fail the test run rather than the guard.
+fresh_loop; printf 'tracked while readable\n' > loop/locked.txt
+git add -A && chmod 000 loop/locked.txt
+got="$(run "$cyrillic")"
+[ "$got" = "1" ] || { echo "FAIL an unreadable file is refused, not skipped: expected 1 got $got"; fail=1; }
+says "the permission message names its cause" "could not be opened for reading"
+chmod 644 loop/locked.txt
+
+rm -rf loop && git add -A
+
 exit "$fail"
