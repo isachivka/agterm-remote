@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -22,9 +23,23 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/trust"
 )
 
-// handlerFixture is a bridge identity, an empty trust store and a closed window - the state of a
-// laptop that has never paired anything, which is where every enrolment starts.
-func handlerFixture(t *testing.T) (*enroll.Window, *trust.Store, *x509.Certificate) {
+// handlerFixture is a bridge identity, an empty trust store, a closed window and the handler over
+// them - the state of a laptop that has never paired anything, which is where every enrolment starts.
+//
+// **The handler is built ONCE per fixture and shared by every exchange in a test**, which is
+// load-bearing rather than tidy: the refusal rate limiter is a field on it, so a helper that
+// constructed a handler per call would give every caller a fresh counter and make every bounded-log
+// assertion in this file pass for the wrong reason.
+func handlerFixture(t *testing.T) (*enroll.Window, *trust.Store, *x509.Certificate, *enroll.Handler) {
+	return handlerFixtureWith(t, nil)
+}
+
+func handlerFixtureWith(t *testing.T, paired func(trust.Peer)) (*enroll.Window, *trust.Store, *x509.Certificate, *enroll.Handler) {
+	t.Helper()
+	return handlerFixtureAt(t, time.Now, paired)
+}
+
+func handlerFixtureAt(t *testing.T, now func() time.Time, paired func(trust.Peer)) (*enroll.Window, *trust.Store, *x509.Certificate, *enroll.Handler) {
 	t.Helper()
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(io.Discard) })
@@ -34,7 +49,8 @@ func handlerFixture(t *testing.T) (*enroll.Window, *trust.Store, *x509.Certifica
 	if err != nil {
 		t.Fatal(err)
 	}
-	return enroll.NewWindow(time.Now), store, own
+	window := enroll.NewWindow(now)
+	return window, store, own, enroll.NewHandler(window, store, own, paired)
 }
 
 // exchange runs one request through the real handler and returns the one line it answered.
@@ -42,33 +58,33 @@ func handlerFixture(t *testing.T) (*enroll.Window, *trust.Store, *x509.Certifica
 // Over net.Pipe rather than a socket: the handler is given a net.Conn and the exchange is one line
 // each way, so a port would add a listener, an address and a teardown to assert nothing extra. The
 // end-to-end test in this package is where a real port earns its keep.
-func exchange(t *testing.T, window *enroll.Window, store *trust.Store, own *x509.Certificate, req enroll.Request) enroll.Reply {
+func exchange(t *testing.T, h *enroll.Handler, req enroll.Request) enroll.Reply {
 	t.Helper()
 	line, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return exchangeRaw(t, window, store, own, string(line)+"\n")
+	return exchangeRaw(t, h, string(line)+"\n")
 }
 
-func exchangeRaw(t *testing.T, window *enroll.Window, store *trust.Store, own *x509.Certificate, line string) enroll.Reply {
+func exchangeRaw(t *testing.T, h *enroll.Handler, line string) enroll.Reply {
 	t.Helper()
-	reply, err := rawExchange(t, window, store, own, line, nil)
+	reply, err := rawExchange(t, h, line)
 	if err != nil {
 		t.Fatalf("reading the reply: %v", err)
 	}
 	return reply
 }
 
-// rawExchange is the machinery, with the caller's callback and the decode error both visible - the
-// two things the tests below assert on that the convenience wrappers swallow.
-func rawExchange(t *testing.T, window *enroll.Window, store *trust.Store, own *x509.Certificate, line string, paired func(trust.Peer)) (enroll.Reply, error) {
+// rawExchange is the machinery, with the decode error visible - the one thing the convenience
+// wrappers swallow and two tests below assert on.
+func rawExchange(t *testing.T, h *enroll.Handler, line string) (enroll.Reply, error) {
 	t.Helper()
 	client, server := net.Pipe()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		enroll.Serve(server, window, store, own, paired)
+		h.Serve(server)
 	}()
 	// In a goroutine, and its error ignored on purpose: an oversized line is refused before it has
 	// all been read, so the write is expected not to finish.
@@ -87,11 +103,11 @@ func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 // --- The four behaviours -------------------------------------------------------------------------
 
 func TestSuccessfulEnrolmentPinsThePhoneAndReturnsTheBridgeCertificate(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, own, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb:        "enroll",
 		Token:       b64(code[:]),
 		Certificate: b64(phone.Raw),
@@ -132,11 +148,11 @@ func TestSuccessfulEnrolmentPinsThePhoneAndReturnsTheBridgeCertificate(t *testin
 }
 
 func TestAWrongTokenPinsNothing(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb:        "enroll",
 		Token:       b64(make([]byte, 32)),
 		Certificate: b64(phone.Raw),
@@ -153,10 +169,10 @@ func TestAWrongTokenPinsNothing(t *testing.T) {
 }
 
 func TestGarbageCertificatePinsNothing(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb:        "enroll",
 		Token:       b64(code[:]),
 		Certificate: b64([]byte("not a certificate")),
@@ -175,11 +191,11 @@ func TestGarbageCertificatePinsNothing(t *testing.T) {
 }
 
 func TestAnOversizedLineIsRefused(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	window.Open(time.Minute)
 
 	// 1 MiB of 'a' followed by a newline.
-	if reply := exchangeRaw(t, window, store, own, strings.Repeat("a", 1<<20)+"\n"); reply.OK {
+	if reply := exchangeRaw(t, h, strings.Repeat("a", 1<<20)+"\n"); reply.OK {
 		t.Fatal("an oversized request must be refused")
 	}
 	// It never reached the gate, so it cost the owner nothing: the window they opened is still the
@@ -245,9 +261,10 @@ func TestEveryRefusalIsTheSameWords(t *testing.T) {
 
 	var first string
 	for _, tc := range cases {
-		_, store, own := handlerFixture(t)
+		_, store, own, _ := handlerFixture(t)
+		// A handler over THIS case's window, since the window is what each case is about.
 		window := tc.window(t)
-		reply := exchange(t, window, store, own, tc.req)
+		reply := exchange(t, enroll.NewHandler(window, store, own, nil), tc.req)
 		if reply.OK {
 			t.Fatalf("%s: must be refused", tc.name)
 		}
@@ -269,11 +286,11 @@ func TestEveryRefusalIsTheSameWords(t *testing.T) {
 // The refusal must not carry the cause even by inclusion: ErrRefused's own text, and every
 // unexported cause behind it, would be a leak if a handler ever wrote err.Error() into the reply.
 func TestARefusalNamesNoCause(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, _, _, h := handlerFixture(t)
 	window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(make([]byte, 32)), Certificate: b64(phone.Raw)})
 
 	for _, leak := range []string{"window", "expired", "token", "certificate", "closed", "parse"} {
@@ -294,21 +311,21 @@ func TestARefusalNamesNoCause(t *testing.T) {
 // them counted, the owner's window could be closed from the network without the attacker ever
 // guessing at the secret.
 func TestNothingBeforeTheGateBurnsAnAttempt(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, _, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
 	// Far more than maxAttempts of each shape.
 	for i := 0; i < 20; i++ {
-		exchangeRaw(t, window, store, own, strings.Repeat("a", 1<<20)+"\n")
-		exchangeRaw(t, window, store, own, "{not json}\n")
-		exchangeRaw(t, window, store, own, `{"verb":"enroll","surprise":1}`+"\n")
-		exchange(t, window, store, own, enroll.Request{Verb: "sessions", Token: b64(code[:])})
-		exchange(t, window, store, own, enroll.Request{Verb: "enroll", Token: "!!!!"})
+		exchangeRaw(t, h, strings.Repeat("a", 1<<20)+"\n")
+		exchangeRaw(t, h, "{not json}\n")
+		exchangeRaw(t, h, `{"verb":"enroll","surprise":1}`+"\n")
+		exchange(t, h, enroll.Request{Verb: "sessions", Token: b64(code[:])})
+		exchange(t, h, enroll.Request{Verb: "enroll", Token: "!!!!"})
 	}
 
 	// The owner's code still works, which is the whole property.
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw)})
 	if !reply.OK {
 		t.Fatalf("100 refusals before the gate closed the owner's window: %s", reply.Error)
@@ -323,7 +340,7 @@ func TestNothingBeforeTheGateBurnsAnAttempt(t *testing.T) {
 // file is doing something. The paths below never touch the attempt counter, so they can be repeated
 // forever and must cost nothing that accumulates.
 func TestARefusalBeforeTheGateWritesNoLogLine(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, _, _, h := handlerFixture(t)
 	window.Open(time.Minute)
 
 	var lines atomic.Int32
@@ -331,10 +348,10 @@ func TestARefusalBeforeTheGateWritesNoLogLine(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(io.Discard) })
 
 	for i := 0; i < 20; i++ {
-		exchangeRaw(t, window, store, own, strings.Repeat("a", 1<<20)+"\n")
-		exchangeRaw(t, window, store, own, "{not json}\n")
-		exchange(t, window, store, own, enroll.Request{Verb: "sessions"})
-		exchange(t, window, store, own, enroll.Request{Verb: "enroll", Token: "!!!!"})
+		exchangeRaw(t, h, strings.Repeat("a", 1<<20)+"\n")
+		exchangeRaw(t, h, "{not json}\n")
+		exchange(t, h, enroll.Request{Verb: "sessions"})
+		exchange(t, h, enroll.Request{Verb: "enroll", Token: "!!!!"})
 	}
 
 	if n := lines.Load(); n != 0 {
@@ -346,7 +363,7 @@ func TestARefusalBeforeTheGateWritesNoLogLine(t *testing.T) {
 // The other half, so the test above is not passing because nothing is ever logged: a refusal the
 // OWNER can act on does reach their log, and it is bounded by the window rather than by the caller.
 func TestASpentAttemptIsLoggedForTheOwner(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, _, _, h := handlerFixture(t)
 	window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
@@ -355,7 +372,7 @@ func TestASpentAttemptIsLoggedForTheOwner(t *testing.T) {
 	log.SetFlags(0)
 	t.Cleanup(func() { log.SetOutput(io.Discard); log.SetFlags(log.LstdFlags) })
 
-	exchange(t, window, store, own, enroll.Request{
+	exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(make([]byte, 32)), Certificate: b64(phone.Raw)})
 
 	got := written.String()
@@ -384,13 +401,13 @@ func TestASpentAttemptIsLoggedForTheOwner(t *testing.T) {
 // treats one. It is also refused BEFORE the gate, so probing for fields is free for the attacker in
 // the only sense that matters here - it costs the owner's window nothing.
 func TestAnUnknownFieldIsRefused(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
 	line := `{"verb":"enroll","token":"` + b64(code[:]) + `","certificate":"` + b64(phone.Raw) +
 		`","admin":true}` + "\n"
-	if reply := exchangeRaw(t, window, store, own, line); reply.OK {
+	if reply := exchangeRaw(t, h, line); reply.OK {
 		t.Fatal("an unknown field must be refused, not ignored")
 	}
 	if len(store.Peers()) != 0 {
@@ -406,11 +423,11 @@ func TestAnUnknownFieldIsRefused(t *testing.T) {
 // their tools print.
 func TestAHostileNameIsRefusedAndPinsNothing(t *testing.T) {
 	for _, name := range []string{"a\x1b[2Jphone", "a\nphone", strings.Repeat("x", 65)} {
-		window, store, own := handlerFixture(t)
+		window, store, _, h := handlerFixture(t)
 		code, _ := window.Open(time.Minute)
 		_, phone := mint(t, "a phone")
 
-		reply := exchange(t, window, store, own, enroll.Request{
+		reply := exchange(t, h, enroll.Request{
 			Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw), Name: name})
 		if reply.OK {
 			t.Fatalf("%q must be refused as a name", name)
@@ -424,11 +441,11 @@ func TestAHostileNameIsRefusedAndPinsNothing(t *testing.T) {
 // A phone that sends no name still pairs. The field is optional, and the menu falls back to the
 // fingerprint - refusing here would make an optional field mandatory.
 func TestAPhoneWithNoNameStillPairs(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw)})
 	if !reply.OK {
 		t.Fatalf("a phone with no name was refused: %s", reply.Error)
@@ -441,19 +458,17 @@ func TestAPhoneWithNoNameStillPairs(t *testing.T) {
 // The callback is what the Mac app's menu is fed from, so it must see what was STORED - after the
 // write, with the fingerprint and the name the store holds - rather than what was asked for.
 func TestThePairedCallbackSeesWhatWasStored(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	var got []trust.Peer
+	window, store, _, h := handlerFixtureWith(t, func(p trust.Peer) { got = append(got, p) })
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	var got []trust.Peer
 	line, err := json.Marshal(enroll.Request{
 		Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw), Name: "the owner's phone"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := rawExchange(t, window, store, own, string(line)+"\n", func(p trust.Peer) {
-		got = append(got, p)
-	})
+	reply, err := rawExchange(t, h, string(line)+"\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,19 +489,17 @@ func TestThePairedCallbackSeesWhatWasStored(t *testing.T) {
 // A refusal must never fire it. The menu saying a phone paired when nothing was written is the one
 // failure the owner cannot detect from the phone's side.
 func TestThePairedCallbackDoesNotFireOnARefusal(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	fired := false
+	window, _, _, h := handlerFixtureWith(t, func(trust.Peer) { fired = true })
 	window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	fired := false
 	line, err := json.Marshal(enroll.Request{
 		Verb: "enroll", Token: b64(make([]byte, 32)), Certificate: b64(phone.Raw)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rawExchange(t, window, store, own, string(line)+"\n", func(trust.Peer) {
-		fired = true
-	}); err != nil {
+	if _, err := rawExchange(t, h, string(line)+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	if fired {
@@ -497,13 +510,13 @@ func TestThePairedCallbackDoesNotFireOnARefusal(t *testing.T) {
 // One phone, and pairing a second replaces it. That is store.Replace rather than Add, and it is the
 // v1 rule the owner sees: the phone they just scanned with is the one that reaches this laptop.
 func TestASecondEnrolmentReplacesTheFirst(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	_, first := mint(t, "the first phone")
 	_, second := mint(t, "the second phone")
 
 	for _, phone := range []*x509.Certificate{first, second} {
 		code, _ := window.Open(time.Minute)
-		reply := exchange(t, window, store, own, enroll.Request{
+		reply := exchange(t, h, enroll.Request{
 			Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw)})
 		if !reply.OK {
 			t.Fatalf("refused: %s", reply.Error)
@@ -554,7 +567,7 @@ func TestRefusalsThatCostNothingAreCountedNotLogged(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			window, store, own := handlerFixture(t)
+			window, _, _, h := handlerFixture(t)
 			tc.state(window)
 
 			var lines atomic.Int32
@@ -562,7 +575,7 @@ func TestRefusalsThatCostNothingAreCountedNotLogged(t *testing.T) {
 			t.Cleanup(func() { log.SetOutput(io.Discard) })
 
 			for i := 0; i < callers; i++ {
-				exchange(t, window, store, own, enroll.Request{
+				exchange(t, h, enroll.Request{
 					Verb: "enroll", Token: b64(make([]byte, 32))})
 			}
 
@@ -604,7 +617,7 @@ func TestACertificateThatCanNeverAuthenticateIsRefused(t *testing.T) {
 		{"a public key nothing implements", func(t *testing.T) []byte { return unknownAlgorithm(t) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			window, store, own := handlerFixture(t)
+			window, store, _, h := handlerFixture(t)
 			// The owner's real phone, already paired, which must survive.
 			_, paired := mint(t, "the owner's phone")
 			if err := store.Replace(trust.Peer{
@@ -617,7 +630,7 @@ func TestACertificateThatCanNeverAuthenticateIsRefused(t *testing.T) {
 			}
 
 			code, _ := window.Open(time.Minute)
-			reply := exchange(t, window, store, own, enroll.Request{
+			reply := exchange(t, h, enroll.Request{
 				Verb: "enroll", Token: b64(code[:]), Certificate: b64(tc.der(t))})
 
 			if reply.OK {
@@ -638,11 +651,11 @@ func TestACertificateThatCanNeverAuthenticateIsRefused(t *testing.T) {
 // extended-key-usage question belongs to the trust model rather than to this handler, and widening
 // these two checks into a general policy here is what this asserts has not happened.
 func TestAnUnusualButUsableCertificateStillPairs(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 
 	der := caCertificate(t)
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(code[:]), Certificate: b64(der)})
 	if !reply.OK {
 		t.Fatalf("this handler refused a certificate on grounds that are the trust model's: %s", reply.Error)
@@ -655,11 +668,11 @@ func TestAnUnusualButUsableCertificateStillPairs(t *testing.T) {
 // The name is echoed as STORED. keys.Label trims, so a phone that sent whitespace around its name
 // would otherwise display a name the owner's menu does not have.
 func TestTheReplyEchoesTheNameAsStored(t *testing.T) {
-	window, store, own := handlerFixture(t)
+	window, store, _, h := handlerFixture(t)
 	code, _ := window.Open(time.Minute)
 	_, phone := mint(t, "a phone")
 
-	reply := exchange(t, window, store, own, enroll.Request{
+	reply := exchange(t, h, enroll.Request{
 		Verb: "enroll", Token: b64(code[:]), Certificate: b64(phone.Raw), Name: "  the owner's phone  "})
 	if !reply.OK {
 		t.Fatalf("refused: %s", reply.Error)
@@ -721,7 +734,16 @@ func unknownAlgorithm(t *testing.T) []byte {
 
 // caCertificate is a certificate the pinning model would never have minted - a CA, with no client
 // extended key usage - and which is nonetheless usable: a real key, inside its dates.
+//
+// The identity is returned with it because this certificate is not only pinnable, it WORKS: the
+// end-to-end control enrols it and then completes an API handshake with it. See
+// TestACertificateTheTrustModelWouldNeverMintStillWorksEndToEnd.
 func caCertificate(t *testing.T) []byte {
+	der, _ := caIdentity(t)
+	return der
+}
+
+func caIdentity(t *testing.T) ([]byte, tls.Certificate) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -740,7 +762,7 @@ func caCertificate(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return der
+	return der, tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
 func bytesClone(b []byte) []byte {
@@ -756,4 +778,80 @@ func indexOf(haystack, needle []byte) int {
 		}
 	}
 	return -1
+}
+
+// **Two bridges in one process count separately, and this is asserted as an EQUALITY.**
+//
+// The counter was a package variable, which no test caught because every assertion about it was "no
+// more than one line" - and a shared counter satisfies that too, by rate-limiting one bridge's
+// diagnostics with another's traffic. Measured on the package-variable version: a hundred refusals
+// across two handlers printed zero lines where two were owed, and each bridge was silently swallowing
+// the other's report.
+//
+// So: two handlers, two windows, two stores, one clock. Fifty refusals each inside the interval, then
+// the clock rolls and each takes one more. **Exactly two lines, each naming exactly 51.** A shared
+// counter gives one line naming 101, and a shared interval gives the second handler silence.
+func TestTwoBridgesInOneProcessCountSeparately(t *testing.T) {
+	at := time.Unix(1_000_000, 0)
+	clock := func() time.Time { return at }
+
+	_, _, _, first := handlerFixtureAt(t, clock, nil)
+	_, _, _, second := handlerFixtureAt(t, clock, nil)
+
+	var written strings.Builder
+	log.SetOutput(&written)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(io.Discard); log.SetFlags(log.LstdFlags) })
+
+	// No window is open on either, so every one of these reaches the gate and is refused for a cause
+	// that costs the caller nothing - counted, not written.
+	for i := 0; i < 50; i++ {
+		exchange(t, first, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+		exchange(t, second, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+	}
+	if got := written.String(); got != "" {
+		t.Fatalf("100 refusals inside one interval wrote %q", got)
+	}
+
+	at = at.Add(2 * time.Minute)
+	exchange(t, first, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+	exchange(t, second, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+
+	got := written.String()
+	if n := strings.Count(got, "\n"); n != 2 {
+		t.Fatalf("two bridges owe two reports, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "51 attempts"); n != 2 {
+		t.Fatalf("each bridge must report its own 51, got:\n%s", got)
+	}
+}
+
+// And the flush is per bridge as well: flushing one must not empty the other's count.
+func TestFlushingOneBridgeLeavesTheOtherAlone(t *testing.T) {
+	at := time.Unix(1_000_000, 0)
+	clock := func() time.Time { return at }
+
+	_, _, _, first := handlerFixtureAt(t, clock, nil)
+	_, _, _, second := handlerFixtureAt(t, clock, nil)
+
+	for i := 0; i < 7; i++ {
+		exchange(t, first, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+	}
+	for i := 0; i < 3; i++ {
+		exchange(t, second, enroll.Request{Verb: "enroll", Token: b64(make([]byte, 32))})
+	}
+
+	var written strings.Builder
+	log.SetOutput(&written)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(io.Discard); log.SetFlags(log.LstdFlags) })
+
+	first.Flush()
+	if got := written.String(); !strings.Contains(got, "7 attempts") || strings.Count(got, "\n") != 1 {
+		t.Fatalf("the first bridge must report its own 7, got %q", got)
+	}
+	second.Flush()
+	if got := written.String(); !strings.Contains(got, "3 attempts") {
+		t.Fatalf("the second bridge's count was taken by the first one's flush: %q", got)
+	}
 }

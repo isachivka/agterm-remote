@@ -37,6 +37,9 @@ type bridge struct {
 	agterm  *agtermtest.Fake
 	handler *countingHandler
 	paired  chan trust.Peer
+	// enrolment is the handler the listener dispatches to, exposed so a test can flush its rate
+	// limiter the way a bridge does on the way out.
+	enrolment *enroll.Handler
 }
 
 // countingHandler is the API, and it counts. What it is FOR is the boundary test: an anonymous
@@ -75,12 +78,15 @@ func startBridge(t *testing.T) *bridge {
 	}
 
 	paired := make(chan trust.Peer, 4)
+	// One enrolment handler for this bridge, as main.go builds it: it owns the rate limit over the one
+	// log line an anonymous caller can cause, so it must be shared by every connection this listener
+	// serves and shared with nothing else.
+	enrolment := enroll.NewHandler(window, store, bridgeCert, func(p trust.Peer) { paired <- p })
+	t.Cleanup(enrolment.Flush)
 	srv := listener.New(
 		enroll.ServerConfigFor(bridgeOwn, enroll.NewPinnedClients(store).Certificates, window),
 		handler,
-		func(conn net.Conn) {
-			enroll.Serve(conn, window, store, bridgeCert, func(p trust.Peer) { paired <- p })
-		},
+		enrolment.Serve,
 		true)
 
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
@@ -92,7 +98,7 @@ func startBridge(t *testing.T) *bridge {
 	t.Cleanup(func() { cancel(); _ = tcp.Close() })
 
 	return &bridge{addr: tcp.Addr().String(), cert: bridgeCert, store: store, window: window,
-		agterm: fake, handler: handler, paired: paired}
+		agterm: fake, handler: handler, paired: paired, enrolment: enrolment}
 }
 
 func sessionTree() any {
@@ -380,22 +386,39 @@ func TestHeldEnrolmentConnectionsFlushedAfterTheWindowAreCountedNotLogged(t *tes
 	log.SetOutput(writerFunc(func(p []byte) (int, error) { lines.Add(1); return len(p), nil }))
 	t.Cleanup(func() { log.SetOutput(io.Discard) })
 
+	// A connection the exchange deadline released before this loop reached it is a refusal too, and
+	// with the deadline at two seconds that is a real outcome rather than a fault - so it is counted
+	// rather than failed on. What must never happen is either of them being SERVED.
+	answered, dropped := 0, 0
 	for i, conn := range conns {
 		if _, err := conn.Write([]byte(`{"verb":"enroll","token":"` +
 			base64.StdEncoding.EncodeToString(make([]byte, 32)) + `"}` + "\n")); err != nil {
-			t.Fatalf("flushing connection %d: %v", i, err)
+			dropped++
+			continue
 		}
 		var reply enroll.Reply
 		if err := json.NewDecoder(conn).Decode(&reply); err != nil {
-			t.Fatalf("connection %d got no answer: %v", i, err)
+			dropped++
+			continue
 		}
 		if reply.OK {
 			t.Fatalf("connection %d enrolled with a wrong token against a closed window", i)
 		}
+		answered++
+	}
+	if answered+dropped != held {
+		t.Fatalf("accounting: %d answered + %d dropped != %d", answered, dropped, held)
+	}
+	// Not vacuous: most of them have to have actually reached the handler and been refused in words,
+	// or this measures the deadline rather than the log.
+	if answered < held/2 {
+		t.Fatalf("only %d of %d connections reached the handler; this measured the deadline, not the "+
+			"log", answered, held)
 	}
 
 	n := lines.Load()
-	t.Logf("%d held connections flushed after the window closed: %d log lines", held, n)
+	t.Logf("%d held connections flushed after the window closed: %d answered, %d released by the "+
+		"deadline, %d log lines", held, answered, dropped, n)
 	if n > 1 {
 		t.Fatalf("%d held connections wrote %d log lines against one window; that is an anonymous "+
 			"write primitive against the owner's disk, which is what internal/listener refuses to "+
@@ -403,5 +426,61 @@ func TestHeldEnrolmentConnectionsFlushedAfterTheWindowAreCountedNotLogged(t *tes
 	}
 	if len(b.store.Peers()) != 0 {
 		t.Fatal("something was pinned")
+	}
+}
+
+// **The control on the two certificate refusals, and it is stronger than "it pairs".**
+//
+// This handler refuses what can never authenticate anybody and deliberately not what merely looks
+// unusual - the extended-key-usage question belongs to the trust model, in internal/pinning, and not
+// here. A certificate `pinning.Mint` would never produce (a CA, `KeyUsageCertSign` only, no client
+// extended key usage) is therefore not this handler's business to refuse, and the reason that is safe
+// rather than sloppy is that such a certificate genuinely works end to end: the trust model pins
+// bytes, so what a certificate SAYS about itself is not what the bridge decides on.
+//
+// So this enrols one and then reads a session list with it. If a future change starts refusing it
+// here, this fails and the change has to say whether it means to move a trust-model decision into the
+// enrolment handler.
+func TestACertificateTheTrustModelWouldNeverMintStillWorksEndToEnd(t *testing.T) {
+	b := startBridge(t)
+	code, _ := b.window.Open(time.Minute)
+	der, identity := caIdentity(t)
+
+	conn := dialBridge(t, b, nil, enroll.ProtoEnroll)
+	request, err := json.Marshal(enroll.Request{
+		Verb:        enroll.VerbEnroll,
+		Token:       base64.StdEncoding.EncodeToString(code[:]),
+		Certificate: base64.StdEncoding.EncodeToString(der),
+		Name:        "a phone that is also a CA",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(append(request, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	var reply enroll.Reply
+	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+		t.Fatal(err)
+	}
+	if !reply.OK {
+		t.Fatalf("the enrolment handler refused a certificate on the trust model's grounds: %s", reply.Error)
+	}
+
+	// And it is not merely stored: it completes a pinned mTLS handshake and reaches a verb.
+	api1 := dialBridge(t, b, &identity, enroll.ProtoAPI)
+	if got := api1.ConnectionState().NegotiatedProtocol; got != enroll.ProtoAPI {
+		t.Fatalf("negotiated %q", got)
+	}
+	if _, err := api1.Write([]byte(`{"verb":"sessions"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp api.Response
+	if err := json.NewDecoder(api1).Decode(&resp); err != nil {
+		t.Fatalf("the certificate paired but cannot connect, which is the failure this handler's two "+
+			"checks exist to prevent: %v", err)
+	}
+	if !resp.OK || len(resp.Sessions) != 1 {
+		t.Fatalf("it paired and connected but read nothing: %+v", resp)
 	}
 }
