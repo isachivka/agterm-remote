@@ -110,6 +110,13 @@ final class PairingWindow: NSObject, NSWindowDelegate {
             stack.addArrangedSubview(heading("No code is on screen"))
             stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
 
+        case .asking:
+            // Normally a millisecond. It is a state rather than a blank rectangle because the socket
+            // call is off the main thread now, and against a bridge that accepts and then stalls this
+            // is what is on screen for the client's whole timeout.
+            stack.addArrangedSubview(heading("Asking the bridge for a code"))
+            stack.addArrangedSubview(body(state.sentence ?? ""))
+
         case .showing(let payload, let expiresAt):
             stack.addArrangedSubview(code(for: payload))
             stack.addArrangedSubview(

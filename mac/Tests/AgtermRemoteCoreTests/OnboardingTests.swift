@@ -242,8 +242,8 @@ struct AddressPaneTests {
         "test this address", "test the address", "testaddress", "checkaddress", "probeaddress",
         "verifyaddress", "tryaddress", "testconnection", "checkconnection", "probetheaddress",
     ]
-    /// Applied to button titles only, so `BridgeStatus.Reachable` and every other honest use of the
-    /// word in code is untouched.
+    /// Applied to button titles only, so `IconState.nothingAnswered` and every other honest use of
+    /// the word in code is untouched.
     static let forbiddenInTitles = ["test", "check reach", "reachab", "probe", "verify", "try it"]
 
     /// Nil when the file is clean, otherwise what it does wrong. Pure, so a file that does not exist

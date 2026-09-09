@@ -111,13 +111,18 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
         )
     }
 
-    public func openPairing(ttl: TimeInterval) throws -> (payload: String, expiresAt: Date) {
+    public func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date) {
         // Whole seconds: the wire field is an integer count and the payload carries Unix seconds.
         // Rounded up rather than truncated, so a ttl expressed as a fraction never becomes zero — the
         // bridge refuses a non-positive ttl, correctly, and it would be this app's rounding that
         // produced it.
         let seconds = max(Int(ttl.rounded(.up)), 1)
-        let reply = try call(["verb": "pair-open", "ttl_seconds": seconds])
+        // **Omitted when empty rather than sent empty.** The bridge refuses unknown fields, and an
+        // empty `advertise` means "use yours" — which is what leaving the key out already says, in
+        // the one spelling the far end documents.
+        var request: [String: Any] = ["verb": "pair-open", "ttl_seconds": seconds]
+        if !advertise.isEmpty { request["advertise"] = advertise }
+        let reply = try call(request)
         guard let payload = reply["payload"] as? String, !payload.isEmpty,
             let expiry = reply["expires_at"] as? Int
         else {

@@ -122,15 +122,33 @@ struct PairingPanelModelTests {
 
     /// A bridge that cannot be asked is said out loud rather than shown as an empty square. The panel
     /// exists to hand somebody a code; when there is none, the reason is the whole content.
+    ///
+    /// **And it is a sentence.** The bridge's refusals are clauses — *"this bridge was built without a
+    /// pairing half"*, lowercase, no subject — and one of those dropped into a panel where every other
+    /// line is written for a person reads as a leaked internal string, which is what it was.
     @Test func aBridgeThatRefusesIsSaidRatherThanShownAsAnEmptyPanel() {
         let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
-        control.refuseOpenWith = FakeControl.Refusal.said("the bridge is not running")
+        control.refuseOpenWith = ControlFailure.refused("this bridge was built without a pairing half")
         let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) })
 
         model.open()
 
-        #expect(model.state == .unavailable("the bridge is not running"))
-        #expect(model.state.sentence?.contains("the bridge is not running") == true)
+        let said = model.state.sentence ?? ""
+        #expect(said.hasPrefix("The bridge would not make a code."), "the panel shows a raw fragment: \(said)")
+        #expect(said.contains("this bridge was built without a pairing half"), "it drops what was said")
+    }
+
+    /// A bridge that is not running is already a sentence, and it is used unchanged rather than
+    /// wrapped in a second one.
+    @Test func aBridgeThatIsNotRunningKeepsItsOwnSentence() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        control.refuseOpenWith = ControlFailure.notListening(path: "/nowhere/control.sock")
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) })
+
+        model.open()
+
+        #expect(model.state == .unavailable(ControlFailure.notListening(path: "/nowhere/control.sock").description))
+        #expect(model.state.sentence?.contains("The bridge is not running") == true)
     }
 
     /// The clock is not consulted for a panel that is not showing a code. A tick on a closed panel
@@ -173,11 +191,115 @@ struct PairingPanelModelTests {
         #expect(control.closed)
     }
 
+    // MARK: - The address the code names, read at the press
+
+    /// **The dial address rides on the mint.** It is editable while the bridge runs and nothing
+    /// restarts the bridge, so a value fixed at spawn goes stale the moment somebody saves a new one —
+    /// the app then says *your phone will dial X* beside a code that says Y.
+    @Test func theCodeIsMintedForTheAddressGivenAtThePress() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) })
+
+        model.open(advertising: "old.example-homelab.invalid:8443")
+        model.close()
+        model.open(advertising: "new.example-homelab.invalid:9443")
+
+        #expect(control.advertised == ["old.example-homelab.invalid:8443", "new.example-homelab.invalid:9443"])
+    }
+
+    // MARK: - The bridge going away under a live code
+
+    /// **A bridge that cannot be asked is not a reason to keep showing the code.** This used to fall
+    /// through to the clock: the bridge died, `status` threw, `try?` swallowed it, and a live-looking
+    /// code sat on screen for the rest of its five minutes. Somebody scans that and gets nothing,
+    /// which looks exactly like a broken phone.
+    @Test func aBridgeThatDiesUnderALiveCodeTakesTheCodeOffTheScreen() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 10) })
+        model.open()
+
+        control.refuseStatusWith = ControlFailure.notListening(path: "/tmp/gone/control.sock")
+        model.tick()
+
+        #expect(model.state == .unavailable(PairingPanelModel.bridgeStoppedAnswering))
+        #expect(model.state.sentence?.contains("no longer works") == true)
+    }
+
+    // MARK: - Nothing blocks the caller
+
+    /// **The measurement behind moving the round trips off the caller's thread.**
+    ///
+    /// Every verb is a blocking call to another process, bounded by five seconds against a bridge that
+    /// accepts and then stalls. On a one-second timer on the main thread that is an interface frozen
+    /// five seconds out of six — the same hang class `BridgeProcess.stop` was rebuilt to remove.
+    ///
+    /// The executor here never runs what it is handed, which is the strongest form of the assertion:
+    /// if `open` or `tick` touched the socket on the caller's thread, the fake would have recorded it.
+    @Test func openAndTickDoNotTouchTheSocketOnTheCallersThread() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        let held = HeldWork()
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) }, off: held.hold)
+
+        model.open()
+
+        #expect(control.opened.isEmpty, "open() minted a code on the caller's thread")
+        #expect(model.state == .asking, "the panel has nothing to draw while it waits")
+        held.run()
+        #expect(model.state == .showing(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300)))
+
+        model.tick()
+        #expect(control.statusCalls == 0, "tick() asked the bridge on the caller's thread")
+    }
+
+    /// A dismissal never waits for a socket either — the state is `.closed` before the round trip is
+    /// even scheduled. A window that would not go away while the bridge is stalled is the same defect
+    /// wearing the other coat.
+    @Test func closingIsImmediateEvenWhenTheBridgeIsStalled() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        let held = HeldWork()
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) }, off: held.hold)
+        model.open()
+        held.run()
+
+        model.close()
+
+        #expect(model.state == .closed)
+        #expect(!control.closed, "the dismissal waited for the bridge")
+        held.run()
+        #expect(control.closed, "the enrolment window outlived the panel")
+    }
+
+    /// **A late answer about a panel that is gone changes nothing — and shuts the window it opened.**
+    /// Otherwise a mint that landed after the owner walked away leaves the one anonymous branch of the
+    /// front door open for five minutes with no code anywhere on screen.
+    @Test func aMintThatLandsAfterTheOwnerClosedThePanelIsShutRatherThanDrawn() {
+        let control = FakeControl(payload: "AQA...", expiresAt: Date(timeIntervalSince1970: 300))
+        let held = HeldWork()
+        let model = PairingPanelModel(control: control, now: { Date(timeIntervalSince1970: 0) }, off: held.hold)
+        model.open()
+
+        model.close()
+        held.run()
+
+        #expect(model.state == .closed, "a code appeared on a panel the owner had closed")
+        #expect(control.closed, "the window that was minted for nobody was left standing")
+    }
+
+    /// Work that is only run when the test says so. The strongest available statement of "not on the
+    /// caller's thread": it is not on any thread until asked.
+    final class HeldWork {
+        private var pending: [() -> Void] = []
+        var hold: (@escaping () -> Void) -> Void { { [self] in pending.append($0) } }
+        func run() {
+            let due = pending
+            pending = []
+            due.forEach { $0() }
+        }
+    }
+
     // MARK: - The double
 
     final class FakeControl: ControlClient, @unchecked Sendable {
-
-        enum Refusal: Error, Equatable { case said(String) }
 
         private let payload: String
         private let expiresAt: Date
@@ -187,8 +309,10 @@ struct PairingPanelModelTests {
         var agterm = true
         var window: PairingWindowReport
         var refuseOpenWith: Error?
+        var refuseStatusWith: Error?
 
         private(set) var opened: [TimeInterval] = []
+        private(set) var advertised: [String] = []
         private(set) var closed = false
         private(set) var unpaired: [String] = []
         private(set) var statusCalls = 0
@@ -201,12 +325,14 @@ struct PairingPanelModelTests {
 
         func status() throws -> (listening: String, paired: [PairedPhone], agterm: Bool, window: PairingWindowReport) {
             statusCalls += 1
+            if let refuseStatusWith { throw refuseStatusWith }
             return (listening, paired, agterm, window)
         }
 
-        func openPairing(ttl: TimeInterval) throws -> (payload: String, expiresAt: Date) {
+        func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date) {
             if let refuseOpenWith { throw refuseOpenWith }
             opened.append(ttl)
+            advertised.append(advertise)
             window = PairingWindowReport(open: true, expiresAt: expiresAt, attemptsLeft: 5, ended: .never)
             return (payload, expiresAt)
         }
@@ -215,11 +341,4 @@ struct PairingPanelModelTests {
 
         func unpair(fingerprint: String) throws { unpaired.append(fingerprint) }
     }
-}
-
-/// **The refusal a Refusal renders as.** `PairingPanelState.unavailable` carries a sentence, and the
-/// sentence has to come from the error the control client threw — an enum case name in front of a
-/// message is not something anybody reads at 2am.
-extension PairingPanelModelTests.FakeControl.Refusal: CustomStringConvertible {
-    var description: String { switch self { case .said(let text): text } }
 }

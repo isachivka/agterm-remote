@@ -191,7 +191,25 @@ jobs:
           go-version: '1.24'
           cache: false
       - run: swift build
+      # **The bridge is built BEFORE the tests, and the ordering is the whole point of this step.**
+      #
+      # `swift test` used to run against nothing but the Swift half, and the Swift half was entirely
+      # green while the product could not mint a usable pairing code: the app binds the wildcard
+      # because a Mac cannot know which interface its router forwards to, the bridge minted the code
+      # from the address it was bound to because it had no other, and composed, every code named
+      # `0.0.0.0`. Two correct decisions and an unusable feature, found by a human running the path by
+      # hand. Nothing that reads one side's source could have caught it.
+      #
+      # This job already pins Go for the bundle further down, so building the binary here costs
+      # seconds. `AGTERM_REMOTE_BRIDGE` is what `BridgeIntegrationTests` looks for; with `CI` set, a
+      # missing binary FAILS those tests rather than skipping them, so this step cannot quietly stop
+      # feeding them.
+      - name: Build the bridge the integration tests run against
+        working-directory: ${{ github.workspace }}/bridge
+        run: go build -o "$RUNNER_TEMP/agterm-remote-bridge" ./cmd/agterm-remote-bridge
       - run: swift test
+        env:
+          AGTERM_REMOTE_BRIDGE: ${{ runner.temp }}/agterm-remote-bridge
       # **The bundle is built here, on every pull request, and not merely by whoever remembers.**
       #
       # Everything below this line is about an artefact rather than about source, and no guard in

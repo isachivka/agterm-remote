@@ -1073,3 +1073,74 @@ func TestAWildcardAddressIsWarnedAboutAndStillMintsACode(t *testing.T) {
 		}
 	}
 }
+
+// TestPairOpenNamesTheAddressTheCallerAskedFor is the second half of a defect whose first half was
+// fixed one layer too low.
+//
+// The bridge used to mint every code from the address it was BOUND to, which for the Mac app is the
+// wildcard - every interface, and therefore not one a phone can dial. That was fixed with a flag. But
+// a flag is read once, at spawn, and the dial address is editable while this process runs: the owner
+// saves a new one, is told "your phone will dial X", and the next code still says Y. Nothing restarts
+// the bridge, and nothing was going to.
+//
+// So the address rides on the mint, where it cannot be stale: whatever the caller names is what the
+// code says. An absent one still falls back to the process's answer, which is what a caller with one
+// address means.
+func TestPairOpenNamesTheAddressTheCallerAskedFor(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	// A host that is nothing like the bind, and a port that disagrees with it too - which is not a
+	// mistake but a forwarding router, the topology this whole second port exists for.
+	got := call(t, path,
+		`{"verb":"pair-open","ttl_seconds":300,"advertise":"agterm.example-homelab.invalid:9443"}`)
+	text, _ := got["payload"].(string)
+	payload, err := enroll.DecodeText(text)
+	if err != nil {
+		t.Fatalf("the phone cannot read the code this bridge would show: %v", err)
+	}
+	if payload.Host != "agterm.example-homelab.invalid" || payload.Port != 9443 {
+		t.Fatalf("the code points at %s:%d, want the address the caller named", payload.Host, payload.Port)
+	}
+
+	// And the process's own answer is still what `status` reports: this changes what a CODE says, not
+	// what the bridge believes about itself.
+	if s := call(t, path, `{"verb":"status"}`); s["listening"] != "203.0.113.5:8443" {
+		t.Errorf("status reports %v; a per-code address must not rewrite the bridge's own", s["listening"])
+	}
+}
+
+// An absent address is the caller with one address, and it still gets the process's.
+func TestPairOpenWithNoAddressFallsBackToTheProcessAnswer(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	got := call(t, path, `{"verb":"pair-open","ttl_seconds":300}`)
+	payload, err := enroll.DecodeText(got["payload"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Host != "203.0.113.5" || payload.Port != 8443 {
+		t.Errorf("the code points at %s:%d, want what the bridge was told it serves", payload.Host, payload.Port)
+	}
+	_ = b
+}
+
+// The same refusals apply to a per-call address as to the process's: a string that is not a host and
+// a port is refused rather than minted into a code nobody can use. Nothing about WHICH hosts are
+// reachable is decided here - see dialTarget.
+func TestPairOpenRefusesAnAddressThatIsNotOne(t *testing.T) {
+	b := newBridge(t)
+	path := servingWith(t, &fakeFit{}, b.pairing)
+
+	for _, bad := range []string{"agterm.example-homelab.invalid", "host:not-a-port", "host:0", "host:70000"} {
+		got := call(t, path, `{"verb":"pair-open","ttl_seconds":300,"advertise":"`+bad+`"}`)
+		if got["error"] == nil {
+			t.Errorf("%q was minted into a code: %#v", bad, got)
+		}
+		if b.window.IsOpen() {
+			t.Errorf("%q left an enrolment window open behind a refusal", bad)
+			b.window.Close()
+		}
+	}
+}

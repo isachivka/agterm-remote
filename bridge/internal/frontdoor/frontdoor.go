@@ -194,7 +194,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 }
 
 // Close stops the listener and **does not return until the accept loop has finished**, which
-// includes writing the aggregate refusal count.
+// includes writing the aggregate refusal count it had accumulated.
 //
 // # Why it waits, which it did not used to
 //
@@ -210,6 +210,20 @@ func (l *Listener) Accept() (net.Conn, error) {
 // that "closed" meant "closing", and anything a caller does immediately afterwards - swapping the log
 // destination, asserting on what was written, tearing down the file the log points at - races a write
 // it has no way to wait for. Bounded by one Accept returning an error, so the wait is real but tiny.
+//
+// # What this does NOT hold, said plainly
+//
+// **It waits for the accept loop, not for the handlers.** Each accepted connection is served on its
+// own goroutine, and one still in flight when Close returns can call record() afterwards - which is
+// counted into a window nothing will flush again, and which can itself log if that window has since
+// rolled. So a line after Close is still possible, and a refusal recorded after the flush is lost.
+//
+// Neither is worth a second wait here. The lost refusal is a count, off by however many connections
+// were mid-flight at shutdown, in a diagnostic whose whole purpose is "roughly how much noise was
+// there"; and waiting for the handlers would mean Close blocks on connections that are entitled to
+// their read deadline. It is written down rather than fixed because the earlier version of this
+// comment claimed everything had been written by the time Close returned, which was more than the
+// code did.
 func (l *Listener) Close() error {
 	l.closeOne.Do(func() { close(l.done) })
 	err := l.inner.Close()
