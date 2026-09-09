@@ -256,7 +256,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // macOS is holding it because the app arrived by download. The error's own words, not a
             // summary of them — a quarantine refusal is a paragraph carrying the command that fixes
             // it, and there is nowhere else the owner would ever see it.
-            notify("The bridge would not start.", "\(error)")
+            //
+            // `copyable` is the command, when there is one. See `notify`.
+            notify(
+                "The bridge would not start.", "\(error)",
+                copyable: (error as? BridgeProcess.Failure)?.copyable)
         }
     }
 
@@ -315,13 +319,57 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// Says something, always. An alert rather than a notification: this app has no notification
     /// permission and asking for one to report a menu toggle would be a second permission for a
     /// sentence.
-    private func notify(_ message: String, _ detail: String) {
+    ///
+    /// ### `copyable`, and why an alert needed one
+    ///
+    /// `NSAlert.informativeText` is **not selectable**. A shell command that appears only there is a
+    /// command the owner retypes by hand off the screen — and the one this exists for is
+    /// `xattr -dr com.apple.quarantine "/Applications/AgtermRemote.app"`, a line with a quoted
+    /// absolute path in it, typed from memory into a shell. Mistyping it is silent: they get an error
+    /// or, worse, clear the attribute from the wrong path.
+    ///
+    /// So the command gets an accessory view of its own: a selectable, monospaced field with a Copy
+    /// button beside it. The button lives inside the accessory rather than being a third alert
+    /// button, because an alert button dismisses the alert — copying would close the window that
+    /// explains what the copied thing is for.
+    private func notify(_ message: String, _ detail: String, copyable: String? = nil) {
         let alert = NSAlert()
         alert.messageText = message
         alert.informativeText = detail
         alert.alertStyle = .informational
+        if let copyable { alert.accessoryView = Self.copyableField(copyable) }
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    /// A selectable field holding `text`, and a button that puts it on the pasteboard.
+    private static func copyableField(_ text: String) -> NSView {
+        let field = NSTextField(labelWithString: text)
+        field.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        // Selectable, so somebody who prefers the mouse can drag it out; the button is for everyone
+        // else. `isEditable` stays false — this is not somewhere to type.
+        field.isSelectable = true
+        field.lineBreakMode = .byTruncatingMiddle
+        field.translatesAutoresizingMaskIntoConstraints = false
+
+        let copy = NSButton(title: "Copy", target: CopyTarget.shared, action: #selector(CopyTarget.copy(_:)))
+        copy.bezelStyle = .rounded
+        copy.identifier = NSUserInterfaceItemIdentifier(text)
+        copy.translatesAutoresizingMaskIntoConstraints = false
+
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
+        row.addSubview(field)
+        row.addSubview(copy)
+        NSLayoutConstraint.activate([
+            row.widthAnchor.constraint(equalToConstant: 420),
+            row.heightAnchor.constraint(equalToConstant: 24),
+            field.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            field.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            copy.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 8),
+            copy.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            copy.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
+        return row
     }
 
     /// Toggle "start at login", and **say what happened either way**.
@@ -464,6 +512,24 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
 private extension Result {
     var isSuccess: Bool { if case .success = self { true } else { false } }
+}
+
+/// The Copy button's target. A separate object because the alert's accessory view outlives no
+/// particular menu action, and the text to copy travels on the button's own identifier rather than in
+/// a captured closure — `NSButton`'s action is a selector, not a block.
+@MainActor
+final class CopyTarget: NSObject {
+    static let shared = CopyTarget()
+
+    @objc func copy(_ sender: NSButton) {
+        guard let text = sender.identifier?.rawValue else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        // Says it happened. A button that looks identical before and after is one people press twice
+        // and still do not trust.
+        sender.title = "Copied"
+        sender.isEnabled = false
+    }
 }
 
 let app = NSApplication.shared

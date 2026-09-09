@@ -198,21 +198,25 @@ chmod 755 "$staged"
 # Before the checks, not after: the checks are about what would ship, and what would ship is signed.
 codesign --force --sign - --timestamp=none "$staged" >/dev/null 2>&1
 
-# **Both architectures, checked rather than assumed.** `lipo -create` given one input succeeds and
+# **Exactly these two architectures - not "at least".** `lipo -create` given one input succeeds and
 # produces a thin file; a typo in a GOARCH above would ship exactly that, and it would work perfectly
-# on the machine that built it.
+# on the machine that built it. And a fat file can carry a THIRD slice that nothing here built, which
+# an "at least both" test waves through - so the set is compared rather than searched.
 archs="$(/usr/bin/lipo -archs "$staged")"
-for want in x86_64 arm64; do
-    case " $archs " in
-        *" $want "*) ;;
-        *) echo "refusing to build: the bridge is '$archs' and needs $want" >&2; exit 1 ;;
-    esac
-done
+if [ "$(printf '%s\n' $archs | sort | tr '\n' ' ')" != "arm64 x86_64 " ]; then
+    echo "refusing to build: the bridge is '$archs' and must be exactly x86_64 and arm64" >&2
+    exit 1
+fi
 
 # **The authoritative -trimpath check: Go's own record, one slice at a time.**
 #
 # `go version -m` on a universal binary reports a single slice. Both are thinned out and asked
 # separately, so a flag lost from one architecture cannot hide behind the other.
+#
+# The `go` on PATH is trusted here, and there is no way around that: the same `go` built the binary
+# this is asking about, so a shim that lies about the record could have written the record. Said
+# rather than chased - the check is against an honest toolchain making a mistake, which is the
+# failure that actually happens, not against a hostile one.
 for pair in "x86_64 amd64" "arm64 arm64"; do
     set -- $pair
     /usr/bin/lipo -thin "$1" -output "$slices/check-$1" "$staged"

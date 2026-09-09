@@ -16,45 +16,90 @@ import Foundation
 /// That is the shipped first-run experience for anybody who downloads a release, so it is checked
 /// **before** the spawn rather than diagnosed after it.
 ///
-/// ### Detect, do not repair — and **not** because we cannot
+/// ### The attribute's presence is NOT the condition. Its flags are.
 ///
-/// It would be convenient to say macOS forbids clearing this. It does not. Measured on the same
-/// machine and the same bundle: `removexattr` from an ordinary unentitled process **succeeds**, on
-/// the nested binary and on the `.app` directory alike, and `xattr -d` succeeds too. The app is
-/// perfectly able to erase its own quarantine.
+/// An earlier version of this file asked only whether the attribute existed, and that refused every
+/// application that works. Measured on this machine: **every** downloaded app in `/Applications` —
+/// all of them running fine — still carries `com.apple.quarantine`, with flags `01c1` or `03c1`.
+/// The attribute is never removed by approving an app; a bit is set in it.
 ///
-/// It must not, and the reason is not technical. Quarantine is the record that this code came from
-/// outside. This app is not notarised, so that record is the *only* Gatekeeper signal standing
-/// between the owner and whatever they actually downloaded — and an app that quietly deletes the
-/// evidence about itself, as a side effect of somebody pressing Start, has done the one thing the
-/// mechanism exists to prevent, on behalf of a person who was never asked. Clearing it is also a
-/// bigger act than the press implies: the attribute is on every file of the bundle, so any useful
-/// removal is recursive over the whole application.
+/// The bit is `0x0040`. Measured against this exact bundle, same binary, only the flags differing:
 ///
-/// So the owner is handed the command and runs it knowingly. Reading the attribute is enough for
-/// that, and reading it needs no entitlement.
+/// | flags  | the bridge |
+/// |--------|------------|
+/// | `0081` | frozen at exec — no output, no exit |
+/// | `0041` | runs to completion |
+///
+/// "Open Anyway" is the only route by which a downloaded copy launches at all, so the path every
+/// real owner takes ends with this bit set. Refusing on presence alone meant refusing them with a
+/// paragraph that was factually false — it said starting would freeze the bridge, and it would not.
+///
+/// ### Detect, do not repair
+///
+/// Quarantine is macOS's record that this code came from outside. This app is not notarised, so that
+/// record is the *only* Gatekeeper signal standing between the owner and whatever they actually
+/// downloaded — and an app that quietly deletes the evidence about itself, as a side effect of
+/// somebody pressing Start, has done the one thing the mechanism exists to prevent, on behalf of a
+/// person who was never asked. Clearing it is also a bigger act than the press implies: the attribute
+/// is on every file of the bundle, so any useful removal is recursive over the whole application.
+///
+/// **That argument stands on its own, and it is deliberately the only one here.** Two rounds of
+/// review have now carried a confident claim about whether `removexattr` *would* succeed — first
+/// that macOS forbids it, then that it does not. Measured here, from an unentitled process and from
+/// one running inside the quarantined bundle itself, across approved and unapproved flags and with
+/// and without a UUID field, removal **succeeded every time**; review measured `EPERM` after the
+/// bundle's main executable had run and I could not reproduce that in any configuration. Rather than
+/// pick a third guess, the design no longer rests on the answer: the app does not remove it because
+/// it must not, and `nothingInThisAppRemovesOrSetsAnExtendedAttribute` is what holds that.
 public enum Quarantine {
 
     /// The extended attribute macOS sets on anything that arrived from elsewhere.
     public static let attribute = "com.apple.quarantine"
 
-    /// Whether macOS considers this file to have come from somewhere else.
+    /// `QTN_FLAG_USER_APPROVED`. Set when somebody has answered Gatekeeper about this file — which,
+    /// for an unnotarised app, is the only way it ever launches.
+    public static let userApproved: UInt32 = 0x0040
+
+    /// **Whether macOS would freeze this binary at exec.**
     ///
-    /// - Parameter size: injected so the decision is testable without a file, and so the production
-    ///   path is one `getxattr` with a zero-length buffer — the size query, which allocates nothing.
-    public static func isSet(
-        on url: URL, size: (String, String) -> Int = Self.sizeOfAttribute,
+    /// Not "is it quarantined": see the table above. The attribute survives approval, so the question
+    /// is whether the approval bit is in it.
+    ///
+    /// - Parameter read: injected so the decision is testable without a file system.
+    public static func wouldBeHeld(
+        _ url: URL, read: (String, String) -> String? = Self.value,
     ) -> Bool {
-        size(url.path, attribute) >= 0
+        guard let raw = read(url.path, attribute) else { return false }
+        guard let flags = flags(in: raw) else {
+            // Present and unreadable. **Let it through**, deliberately: the cost of being wrong here
+            // is one silent hang, which the launch backstop catches and reports; the cost of being
+            // wrong the other way is refusing an application that works, with a false explanation.
+            // That was the defect this rule replaced.
+            return false
+        }
+        return flags & userApproved == 0
     }
 
-    /// `getxattr` for its size alone. Negative means the attribute is not there — or that the file is
-    /// not there, which is a case the caller has already excluded by locating the binary.
+    /// The flags field — the first of the four semicolon-separated fields, in hexadecimal.
+    /// `0081;6aa0e764;Safari;<uuid>` is a typical value; the UUID is often empty.
+    static func flags(in raw: String) -> UInt32? {
+        guard let field = raw.split(separator: ";", omittingEmptySubsequences: false).first else {
+            return nil
+        }
+        return UInt32(field, radix: 16)
+    }
+
+    /// The attribute's value, or nil when it is not set — or when the file is not there, which is a
+    /// case the caller has already excluded by locating the binary.
     ///
     /// `XATTR_NOFOLLOW` is deliberately NOT passed. The question is about the file that will be
     /// executed, and that is the one at the end of the link.
-    public static func sizeOfAttribute(_ path: String, _ name: String) -> Int {
-        getxattr(path, name, nil, 0, 0, 0)
+    public static func value(_ path: String, _ name: String) -> String? {
+        let size = getxattr(path, name, nil, 0, 0, 0)
+        guard size > 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard getxattr(path, name, &buffer, size, 0, 0) == size else { return nil }
+        return String(decoding: buffer, as: UTF8.self)
     }
 
     /// **What the owner is told, and the command that fixes it.**
@@ -63,8 +108,7 @@ public enum Quarantine {
     /// set on every file of a downloaded bundle and clearing it from the bridge alone would leave the
     /// app itself still held. `-dr` — recursive — for the same reason.
     public static func explanation(for executable: URL) -> String {
-        let target = enclosingBundle(of: executable) ?? executable
-        return """
+        """
             macOS has quarantined the bridge, so starting it would freeze it rather than run it.
 
             This happens to anything that arrives by download. Agterm Remote is signed ad-hoc rather \
@@ -74,12 +118,22 @@ public enum Quarantine {
 
             Clear it in Terminal and press Start again:
 
-                xattr -dr com.apple.quarantine "\(target.path)"
+                \(command(for: executable))
 
             Agterm Remote will not do this for you. Quarantine is macOS's record that this app came \
             from somewhere else, and an app that erased that record about itself — because you \
             pressed Start — would be removing the one check you have on it.
             """
+    }
+
+    /// **The command on its own, separate from the paragraph that explains it.**
+    ///
+    /// Separate because an `NSAlert`'s informative text cannot be selected, so a command buried in it
+    /// is one the owner retypes from the screen by hand — a `xattr -dr` line with a path in it, typed
+    /// from memory, into a shell. The caller puts this in something copyable.
+    public static func command(for executable: URL) -> String {
+        let target = enclosingBundle(of: executable) ?? executable
+        return "xattr -dr com.apple.quarantine \"\(target.path)\""
     }
 
     /// The `.app` this path is inside, or nil when it is not inside one — which is the ordinary case
