@@ -66,13 +66,36 @@ both items greyed. For development, put a locally built one beside the executabl
 (cd ../bridge && go build -o ../mac/.build/debug/agterm-remote-bridge ./cmd/agterm-remote-bridge)
 ```
 
-### `-trimpath`, and why the script re-checks it
+### `-trimpath`, and why a byte grep is not how you check it
 
 Without it the Go binary carries the absolute path of every source file it was compiled from —
-measured on 2026-09-09, 25 lines naming the builder's home directory, shipped to whoever downloads
-the app. None of the six guard scripts in `scripts/` can see this: they read tracked text, and the
-binary is never tracked. So `bundle.sh` greps the bytes it is about to sign for `/Users/` and refuses
-rather than trusting a flag nobody re-reads. CI repeats both checks.
+measured, 25 lines per slice naming the builder's home directory, shipped to whoever downloads the
+app. None of the six guard scripts in `scripts/` can see this: they read tracked text, and the binary
+is never tracked.
+
+The first version of this check grepped the bytes for `/Users/`. **It passed on a binary carrying 50
+source paths and 1400 toolchain paths** — reproduced by building from a checkout under `/private/tmp`,
+and equally true for a checkout on an external volume, under `/opt`, or in a Linux container. It was
+a test about *where the build happened* wearing the name of a test about *what shipped*.
+
+The real check is Go's own record. `-trimpath` is written into the build info of every binary it
+applies to, so `bundle.sh` asks for it directly — **per slice**, because `go version -m` reads one
+slice of a universal file and would otherwise answer for whichever half it picked:
+
+```sh
+lipo -thin x86_64 -output slice bridge && go version -m slice | grep -- '-trimpath=true'
+```
+
+`CGO_ENABLED=0` and the expected `GOARCH` come from the same record. The byte grep is kept below it
+as a cheaper second net, no longer as the guard. CI repeats all of it.
+
+### Nothing enters the bundle until it has passed
+
+Every check runs on a staged file outside the bundle, and a refusal removes the half-built `.app`
+altogether. The earlier arrangement wrote the binary into `Contents/Resources` first and refused
+afterwards, which left the offending artefact inside a bundle whose `_CodeSignature` no longer
+matched it: `codesign -dv` reported `Sealed Resources=none` and `spctl` failed, on a bundle a person
+can still double-click. It is now a complete signed bundle or none.
 
 ### Signing, and what a downloaded copy does
 
@@ -86,14 +109,31 @@ Ad-hoc is not notarised, and that is visible. Measured on macOS 26.6:
 
 - `spctl -a -t exec` on the assembled bundle: **rejected**. Expected — there is no Developer ID.
 - A copy carrying `com.apple.quarantine` (what a browser download gets) **hangs the bridge at spawn**.
-  The process exists and never reaches `main`, because Gatekeeper is waiting on a consent dialogue.
-  Since the app spawns the bridge rather than the person launching it, there is no dialogue to answer
-  and no error either: Start would appear to do nothing.
+  `Process.run()` succeeds and returns a pid, the child sits in `SN`, never reaches `main`, writes
+  nothing and never exits. Since the app spawns the bridge rather than the person launching it, there
+  is no dialogue to answer and no error either.
 - The same copy with the attribute stripped (`xattr -dr com.apple.quarantine`, or `ditto --noextattr`)
   runs immediately, and the bundle's signature survives the strip.
 
 A bundle built from source on the machine that runs it is never quarantined, so this is a property of
-*downloading* a release, not of building one.
+*downloading* a release, not of building one. It is, however, the **first-run experience of every
+person who downloads one**, so the app does not leave it as a button that does nothing:
+
+- **Quarantine is read before the spawn.** `getxattr` answers from an ordinary unentitled process, so
+  `BridgeProcess.start` refuses with a paragraph naming quarantine and carrying the `xattr -dr`
+  command, and nothing is spawned. Verified end to end against a real quarantined bundle: 0 processes
+  started, the message shown.
+- **The app will not clear it**, and not because it cannot — measured, `removexattr` from this process
+  *succeeds*, on the nested binary and on the `.app` alike. Quarantine is macOS's record that this
+  code came from outside; an app that erased that record about itself as a side effect of somebody
+  pressing Start would be deleting the only Gatekeeper signal a non-notarised app is subject to. A
+  test asserts the capability so nobody re-derives the false premise, and another asserts that no
+  source file here calls `removexattr` or `setxattr`.
+- **A spawn timeout is the generic backstop.** A child that is alive and has written nothing after
+  `BridgeProcess.silenceCeiling` (two seconds) is stopped and reported as *started but never said
+  anything* — which covers freezes that have nothing to do with Gatekeeper. It works because the
+  bridge announces its listening address on stderr immediately, so `arguments()` must never pass
+  `--log`; a test holds that in place.
 
 ## Layout
 

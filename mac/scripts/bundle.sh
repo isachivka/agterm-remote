@@ -71,6 +71,21 @@ swift build -c "$CONFIGURATION"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 
+# **Either a complete, signed bundle or none at all.**
+#
+# Every refusal below this line is a `exit 1` partway through assembly, and each one used to leave
+# whatever had been written so far: an .app with no bridge, or - worse, before the staging above - one
+# carrying a binary that leaked build paths, under an `_CodeSignature` that no longer matched it.
+# `codesign -dv` reported `Sealed Resources=none` and `spctl` failed on a bundle a person can still
+# double-click. A half-assembled application is not a smaller success, it is a different failure.
+finished=no
+cleanup() {
+    [ -n "${slices:-}" ] && rm -rf "$slices"
+    [ "$finished" = yes ] || rm -rf "$APP"
+    return 0
+}
+trap cleanup EXIT
+
 cp "$BUILD/AgtermRemote" "$APP/Contents/MacOS/AgtermRemote"
 cp Sources/AgtermRemote/Info.plist "$APP/Contents/Info.plist"
 
@@ -124,19 +139,38 @@ fi
 # nothing on screen to say why - the exact failure this task exists to remove. Two slices cost about
 # ten megabytes and remove the whole class.
 #
-# ## `-trimpath` is not decoration
+# ## `-trimpath` is not decoration, and a byte grep is not the way to check it
 #
-# Without it the Go binary carries the absolute path of every source file it was compiled from -
-# `/Users/<whoever>/...`, straight through to whoever downloads the app. That is precisely the class
-# of personal value this project refuses to ship, and it is invisible to every guard script in
-# `scripts/`, because those read tracked text and this is a build artefact. So it is asserted below,
-# against the bytes, rather than trusted to a flag nobody re-reads.
+# Without it the Go binary carries the absolute path of every source file it was compiled from,
+# straight through to whoever downloads the app - precisely the class of personal value this project
+# refuses to ship, and invisible to every guard script in `scripts/`, because those read tracked text
+# and this is a build artefact.
+#
+# This used to be checked by grepping the bytes for `/Users/`. **That check passed on a binary
+# carrying 50 source paths and 1400 toolchain paths**, reproduced by building from a checkout under
+# `/private/tmp` - and it would pass equally for a checkout on an external volume, under `/opt`, or on
+# any Linux or container build. It was a test about where the build happened, wearing the name of a
+# test about what the binary contains.
+#
+# The real check is Go's own record. `-trimpath` is written into the build info of every binary it
+# applies to, so it is asked for directly - PER SLICE, because `go version -m` reads one slice of a
+# universal file and answering for the other would be a coin toss. The byte grep is kept below it as a
+# second and cheaper net, no longer as the guard.
 #
 # ## CGO_ENABLED=0 on both
 #
 # Not a cross-compilation workaround - it is already the default for the amd64 half. It is set on the
 # arm64 half so the two slices are the same program: cgo would give one of them the system resolver
 # and the other Go's own, and it would compile in paths of its own that `-trimpath` does not reach.
+# Asserted per slice alongside the trimpath flag, from the same record.
+#
+# ## Nothing enters the bundle until it has passed
+#
+# Every check below runs on a STAGED file outside the bundle, and only a binary that passed all of
+# them is moved in. The previous arrangement wrote the binary into `Contents/Resources` first and
+# refused afterwards, which left the offending artefact on disk inside a bundle whose `_CodeSignature`
+# no longer matched it - `codesign -dv` then reported `Sealed Resources=none` and `spctl` failed,
+# on a bundle a person can still double-click. A refusal must leave nothing behind.
 BRIDGE="$APP/Contents/Resources/agterm-remote-bridge"
 
 if ! command -v go >/dev/null 2>&1; then
@@ -147,47 +181,75 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 slices="$(mktemp -d)"
-trap 'rm -rf "$slices"' EXIT
+staged="$slices/agterm-remote-bridge"
 
 for arch in arm64 amd64; do
     (cd ../bridge && CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
         go build -trimpath -o "$slices/bridge-$arch" ./cmd/agterm-remote-bridge)
 done
-/usr/bin/lipo -create -output "$BRIDGE" "$slices/bridge-arm64" "$slices/bridge-amd64"
-chmod 755 "$BRIDGE"
+/usr/bin/lipo -create -output "$staged" "$slices/bridge-arm64" "$slices/bridge-amd64"
+chmod 755 "$staged"
 
 # Ad-hoc, and the binary in its own right. `go build` signs the arm64 slice it produces on this
 # machine and leaves the cross-compiled x86_64 one bare, so the joined file is half-signed:
 # `codesign -dv` reports adhoc off the arm64 slice while `codesign -v` says "not signed at all".
 # Signing it here makes both slices agree, which is what an Intel Mac needs to run it at all.
-codesign --force --sign - --timestamp=none "$BRIDGE" >/dev/null 2>&1
+#
+# Before the checks, not after: the checks are about what would ship, and what would ship is signed.
+codesign --force --sign - --timestamp=none "$staged" >/dev/null 2>&1
 
 # **Both architectures, checked rather than assumed.** `lipo -create` given one input succeeds and
 # produces a thin file; a typo in a GOARCH above would ship exactly that, and it would work perfectly
 # on the machine that built it.
-archs="$(/usr/bin/lipo -archs "$BRIDGE")"
+archs="$(/usr/bin/lipo -archs "$staged")"
 for want in x86_64 arm64; do
     case " $archs " in
         *" $want "*) ;;
-        *) echo "refusing to sign: the bridge is '$archs' and needs $want" >&2; exit 1 ;;
+        *) echo "refusing to build: the bridge is '$archs' and needs $want" >&2; exit 1 ;;
     esac
 done
 
-# **The build machine's paths, searched for in the shipped bytes.** Measured both ways on 2026-09-09:
-# without `-trimpath` this binary carried 25 lines naming the builder's home directory; with it,
-# zero. This is the assertion that keeps that true after somebody edits the go build line.
-if LC_ALL=C grep -aq '/Users/' "$BRIDGE"; then
-    echo "refusing to sign: the bridge carries build-machine paths - is -trimpath still there?" >&2
-    LC_ALL=C grep -ao '/Users/[^"]\{0,60\}' "$BRIDGE" | sort -u | head -5 >&2
+# **The authoritative -trimpath check: Go's own record, one slice at a time.**
+#
+# `go version -m` on a universal binary reports a single slice. Both are thinned out and asked
+# separately, so a flag lost from one architecture cannot hide behind the other.
+for pair in "x86_64 amd64" "arm64 arm64"; do
+    set -- $pair
+    /usr/bin/lipo -thin "$1" -output "$slices/check-$1" "$staged"
+    settings="$(go version -m "$slices/check-$1")"
+    for want in "-trimpath=true" "CGO_ENABLED=0" "GOARCH=$2"; do
+        if ! printf '%s\n' "$settings" | grep -q -- "build.*$want"; then
+            echo "refusing to build: the $1 slice does not record $want." >&2
+            echo "    Go writes every non-default build setting into the binary, so a missing" >&2
+            echo "    -trimpath means the flag was not passed - not that it had no effect." >&2
+            printf '%s\n' "$settings" | sed 's/^/    /' >&2
+            exit 1
+        fi
+    done
+done
+
+# The second net, and no longer the guard. Cheap, and it catches a path that reached the binary by
+# some route Go did not record. It cannot be relied on alone: a build from anywhere outside /Users
+# passes it while leaking every source path it has.
+if LC_ALL=C grep -aq '/Users/' "$staged"; then
+    echo "refusing to build: the bridge carries build-machine paths." >&2
+    LC_ALL=C grep -ao '/Users/[^"]\{0,60\}' "$staged" | sort -u | head -5 >&2
     exit 1
 fi
+
+# Only now. Everything above happened outside the bundle, so a refusal leaves the bundle without a
+# bridge rather than with a bad one.
+mv "$staged" "$BRIDGE"
+chmod 755 "$BRIDGE"
 
 # Ad-hoc, and the whole bundle rather than the executable inside it: Gatekeeper and SMAppService both
 # read the bundle's signature, not the linker's.
 codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1
+# Past every refusal. The bundle stays.
+finished=yes
 
 echo "built    $APP"
-echo "         bridge  $archs, $(/usr/bin/du -h "$BRIDGE" | cut -f1 | tr -d ' '), no build paths"
+echo "         bridge  $archs, $(/usr/bin/du -h "$BRIDGE" | cut -f1 | tr -d ' '), -trimpath verified per slice"
 echo "         version $(/usr/bin/plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
 echo "         $(codesign -dv "$APP" 2>&1 | awk -F= '/^Signature/{print "signature " $2}')"
 echo

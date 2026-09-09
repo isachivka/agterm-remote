@@ -90,12 +90,14 @@ public final class BridgeProcess: @unchecked Sendable {
     /// `Contents/Resources/agterm-remote-bridge` — is a thing `bundle.sh` and this lookup have to
     /// agree about, and a second copy of it in this file is the way they would stop agreeing.
     ///
-    /// - Parameter isExecutable: injected so the order can be asserted without a file system.
+    /// - Parameter isExecutable: injected so the order can be asserted without a file system. Its
+    ///   default is `BundledBridge.isSpawnable`, which asks the type as well as the mode — a
+    ///   directory named `agterm-remote-bridge` passes `isExecutableFile` and cannot be spawned.
     public static func locate(
         resources: URL?,
         beside: URL,
         stateDir: URL,
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        isExecutable: (String) -> Bool = BundledBridge.isSpawnable,
     ) -> URL? {
         let candidates = [
             resources.map(BundledBridge.candidate(inResources:)),
@@ -115,9 +117,38 @@ public final class BridgeProcess: @unchecked Sendable {
     /// about the attempt after it.
     static let longEnoughToForget: TimeInterval = 30
 
-    public enum Failure: Error, Equatable {
+    /// **How long a spawned bridge may say nothing before it is treated as never having run.**
+    ///
+    /// Every signal this class has is about a process *existing*: spawned, alive, exited. None of
+    /// them separates a bridge that is working from one that was launched and froze — and freezing is
+    /// not hypothetical, it is what a quarantined copy does on every Mac that downloaded it. The
+    /// child sits in `SN`, writes nothing, exits never, and `.running(pid:)` is a true statement
+    /// about a process that will never answer a phone.
+    ///
+    /// So silence is the signal. **This depends on the bridge writing to stderr**, which it does
+    /// because `arguments()` never passes `--log` — a fact asserted by a test rather than left to
+    /// whoever next edits that function, because adding `--log` here would make this timer kill a
+    /// healthy bridge two seconds after every start.
+    ///
+    /// Two seconds. Measured against the real binary: it announces its identity and its listening
+    /// address within milliseconds of exec, so this is two orders of magnitude of headroom rather
+    /// than a race.
+    public static let silenceCeiling: TimeInterval = 2
+
+    public enum Failure: Error, Equatable, CustomStringConvertible {
         /// Nothing was spawned at all. Carries the sentence that is also in `.failed`.
         case couldNotStart(String)
+
+        /// **The sentence, and nothing around it.** The caller shows this to a person — `main.swift`
+        /// puts `"\(error)"` in an alert — and the default rendering of an enum with an associated
+        /// value would put `couldNotStart(` in front of it and a close bracket after. That mattered
+        /// the moment one of these grew past a line: the quarantine refusal is a paragraph with a
+        /// command in it, and it has to arrive looking like something written for the reader.
+        public var description: String {
+            switch self {
+            case .couldNotStart(let sentence): sentence
+            }
+        }
     }
 
     private let launcher: ProcessLauncher
@@ -126,6 +157,10 @@ public final class BridgeProcess: @unchecked Sendable {
     private let parentPID: Int32
     private let now: @Sendable () -> Date
     private let schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    /// The silence watch's own clock, **separate from the retry ladder's on purpose**. They are two
+    /// different waits, and a test that drives one by hand must not find itself driving the other.
+    private let watchForSilence: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    private let isQuarantined: @Sendable (URL) -> Bool
 
     private let lock = NSRecursiveLock()
     private var _state: BridgeState = .stopped
@@ -173,6 +208,12 @@ public final class BridgeProcess: @unchecked Sendable {
     ///   - schedule: how a retry waits. Asynchronous in production, deliberately: waiting inline
     ///     would hold this object's lock for up to four seconds on whatever thread the child died on,
     ///     and the main thread would then block behind it the next time somebody opened the menu.
+    ///   - watchForSilence: how the silence backstop waits. Its own parameter rather than a second
+    ///     use of `schedule`, so a test driving the retry ladder synchronously does not also fire a
+    ///     two-second timer on every launch it makes.
+    ///   - isQuarantined: whether macOS is holding the binary. Injected because the production answer
+    ///     comes from an extended attribute, and a test that had to create one would be a test about
+    ///     `xattr` rather than about what the menu says.
     public init(
         launcher: ProcessLauncher,
         executable: URL,
@@ -183,6 +224,11 @@ public final class BridgeProcess: @unchecked Sendable {
             delay, work in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
         },
+        watchForSilence: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = {
+            delay, work in
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
+        },
+        isQuarantined: @escaping @Sendable (URL) -> Bool = { Quarantine.isSet(on: $0) },
     ) {
         self.launcher = launcher
         self.executable = executable
@@ -190,6 +236,8 @@ public final class BridgeProcess: @unchecked Sendable {
         self.parentPID = parentPID
         self.now = now
         self.schedule = schedule
+        self.watchForSilence = watchForSilence
+        self.isQuarantined = isQuarantined
     }
 
     public var state: BridgeState { lock.withLock { _state } }
@@ -200,9 +248,22 @@ public final class BridgeProcess: @unchecked Sendable {
     /// the one failure the caller can act on synchronously and the one no retry repairs. A bridge
     /// that starts and then exits is reported through `state` and `onStateChange` instead, since by
     /// the time it has given up the press that caused it is long over.
+    /// **Asked before anything is spawned, because afterwards there is nothing to ask.**
+    ///
+    /// A quarantined binary spawns successfully and then freezes forever — see [Quarantine]. Every
+    /// signal this class has would report a healthy start, so the one moment this is answerable is
+    /// before the `Process.run` that produces no error.
+    ///
+    /// It is a refusal rather than a repair: `removexattr` is denied to an unsigned app, so the owner
+    /// is given the command instead of a silent failure to run it for them.
     public func start(listen: String, socket: String?) throws {
         try lock.withLock {
             if case .running = _state { return }
+            if isQuarantined(executable) {
+                let sentence = Quarantine.explanation(for: executable)
+                set(.failed(sentence))
+                throw Failure.couldNotStart(sentence)
+            }
             listenAddress = listen
             socketPath = socket
             // Pressing Start after a failure is a fresh five. The owner has just done something about
@@ -296,8 +357,62 @@ public final class BridgeProcess: @unchecked Sendable {
             handle(exit: status, run: mine)
         } else {
             set(.running(pid: started))
+            // Armed per launch, and it belongs to this launch: `mine` is checked when it fires, so a
+            // Stop, a retry or a fresh Start in the meantime makes it a no-op rather than a verdict
+            // about somebody else's child.
+            watchForSilence(Self.silenceCeiling) { [weak self] in
+                self?.giveUpIfItNeverSpoke(run: mine)
+            }
         }
         return nil
+    }
+
+    /// **The generic backstop: launched, alive, and has never said a word.**
+    ///
+    /// The quarantine check above names the cause this was built for, but it is not the only way a
+    /// child can be spawned and never run — a corrupted binary, a filesystem that stops answering,
+    /// whatever Gatekeeper does next year. All of them look identical from here: a live pid that
+    /// produces nothing. So the rule is about the symptom rather than about any one cause.
+    ///
+    /// It **stops** the child rather than leaving it. A bridge that has said nothing has not bound
+    /// the port either, so there is nothing to lose by ending it — and leaving a frozen process alive
+    /// under a menu that offers Start again is how one press becomes several stuck children.
+    ///
+    /// No retry. Five attempts at something that hangs are five hangs and forty-five seconds of a
+    /// menu saying `.starting`.
+    private func giveUpIfItNeverSpoke(run: Int) {
+        lock.withLock {
+            guard run == runID, !stopping else { return }
+            guard case .running(let alive) = _state else { return }
+            // It spoke. That is the whole test: the bridge announces its identity and its listening
+            // address on stderr as it comes up, and anything at all means exec succeeded.
+            if let said = launcher.lastOutput(of: alive), !said.isEmpty { return }
+
+            // Same shape as `stop()`: mark first so the exit this causes is not read as a crash and
+            // retried, and bump the generation so a retry already waiting is no longer ours to make.
+            stopping = true
+            generation += 1
+            launcher.terminate(alive)
+            pid = nil
+            set(.failed(Self.silenceSentence(executable: executable)))
+        }
+    }
+
+    /// What silence is reported as. Names the observation first and the likeliest cause second,
+    /// because the observation is a fact and the cause is an inference.
+    static func silenceSentence(executable: URL) -> String {
+        """
+        The bridge started but never said anything, so it has been stopped.
+
+        A working bridge announces the address it is listening on immediately. One that says nothing \
+        was launched and never ran. The usual reason on macOS is that the app arrived by download and \
+        is being held by Gatekeeper — check it with:
+
+            xattr -l "\(Quarantine.enclosingBundle(of: executable)?.path ?? executable.path)"
+
+        If `com.apple.quarantine` is listed, remove it with `xattr -dr com.apple.quarantine` on that \
+        same path and start the bridge again.
+        """
     }
 
     private func handle(exit status: Int32, run: Int) {
