@@ -17,23 +17,13 @@
     <string name="settings_styled_screen_title">Colours through zmx</string>
     <string name="settings_styled_screen_body">Read each pane through its zmx daemon (history --vt) so colours and bold reach the phone. Needs Live sessions on in agterm; a pane without a daemon shows plain text as before.</string>
     <string name="pairing_section">Laptop</string>
-    <string name="pairing_none_title">No laptop paired</string>
-    <string name="pairing_none_body">Pair this phone with your laptop to reach your terminal sessions from it. On the laptop, run bridgecert qr — it saves a pairing code to your Desktop. Open the image, then scan it with this phone or send it over and choose the file.</string>
-    <string name="pairing_scan">Scan the code</string>
-    <string name="pairing_choose_image">Choose an image instead</string>
     <!--
-      The label when choosing a file is the ONLY way in - no camera, or the permission refused. "Choose
-      an image instead" beside no other option reads as a bug, and this route is not a consolation: it
-      is the only one that has ever completed a pairing here.
+      The five states of the pairing screen. There were fourteen strings more than this, and what
+      removed them was enrolment: the phone no longer carries its certificate to the Mac by hand, so
+      there is no half-done pairing to describe, no command to print, and no fingerprint for a person
+      to compare before anything is stored.
     -->
-    <string name="pairing_choose_image_only">Choose the pairing code image</string>
-    <!--
-      Says what the camera was for and stops. No "open Settings" button - the owner refused on purpose,
-      and asking again in a different shape is the app arguing with them.
-    -->
-    <string name="pairing_camera_refused">Without camera access this app cannot read the code from your laptop\'s screen. You can still pair by choosing the image file.</string>
-    <string name="pairing_not_a_code">That image is not a pairing code. Scan again, or choose a different image.</string>
-    <string name="pairing_viewfinder_title">Point at the code on your laptop</string>
+    <string name="pairing_scan_title">Point at the code on your Mac</string>
     <string name="pairing_viewfinder_body">Hold the phone steady. It reads the code by itself — there is nothing to press.</string>
     <!--
       Shown only after several seconds of frames with nothing readable in them, and driven by the
@@ -42,7 +32,7 @@
       30%, and could not explain why - so "bigger is easier" is exactly the assumption this copy must
       not be built on. It suggests, it does not instruct.
     -->
-    <string name="pairing_viewfinder_struggling">Still nothing. Try moving closer, or steadying the phone — or choose the image file instead.</string>
+    <string name="pairing_viewfinder_struggling">Still nothing. Try moving closer, or steadying the phone — or paste the code text below.</string>
     <!--
       Manual only, and only while the viewfinder is open. Nothing turns this on by itself: a torch
       that lights automatically while a phone is pointed at somebody is a worse surprise than a dark
@@ -50,44 +40,32 @@
     -->
     <string name="pairing_viewfinder_torch_on">Turn on the light</string>
     <string name="pairing_viewfinder_torch_off">Turn off the light</string>
-    <string name="pairing_viewfinder_cancel">Stop scanning</string>
-    <string name="pairing_compare_title">Check this matches your laptop</string>
     <!--
-      The address is labelled and shown FIRST because it is the only part that can be wrong. Every
-      pairing code this laptop generates carries the same certificate, so the fingerprint matches even
-      when the host does not - and a code built for the wrong host pairs perfectly and then never
-      connects. The copy has to say which of the two answers which question, or the owner checks the
-      one that cannot fail and feels reassured.
+      No camera, or the owner refused it. Says what the camera was for and stops: there is no "open
+      Settings" button, because they refused on purpose and asking again in a different shape is the
+      app arguing with them. The route underneath is not a consolation - it needs no permission and it
+      is what the payload's base64 form exists to make possible.
     -->
-    <string name="pairing_compare_address_label">This phone will connect to</string>
-    <string name="pairing_compare_fingerprint_label">Your laptop\'s fingerprint</string>
-    <string name="pairing_compare_body">Check both against your laptop. The fingerprint says the code came from your laptop; the address says where this phone will look for it, and it is the one that can be wrong. If either differs, stop.</string>
-    <string name="pairing_confirm">They match — pair</string>
-    <string name="pairing_reject">They differ — stop</string>
+    <string name="pairing_no_camera_title">No camera to read the code</string>
+    <string name="pairing_no_camera_body">This app cannot use the camera, so it cannot read the code off your Mac\'s screen. Paste the code instead — the Mac shows it as text under the picture.</string>
     <!--
-      A key that still works and will not keep working. The cost is stated in the same breath as the
-      reason, because the owner has already been burned once by a button that replaced their key with
-      no warning at all - after which their laptop refused every connection and the app told them the
-      laptop was not answering.
+      Always on screen, under the viewfinder as well as instead of it. A scanner that will not read
+      would otherwise leave the owner with nowhere to go.
     -->
-    <string name="pairing_identity_old_title">This phone\'s key will stop working on its own</string>
-    <string name="pairing_identity_old_body">It was made in a way that expires when the phone locks, which is what kept breaking your connection. A new key fixes that for good. The cost: your laptop will stop recognising this phone until you send it the new certificate and pin it, exactly as you did when you first paired. The fingerprint below is the one your laptop trusts right now.</string>
-    <string name="pairing_identity_old_action">Make a new key and pair again</string>
-    <string name="pairing_identity_dead_title">This phone\'s key will not sign</string>
-    <string name="pairing_identity_dead_body">The key that proves who this phone is has stopped working, so the laptop will refuse it. A new key fixes that, and it ends the current pairing: your laptop trusts the fingerprint below and will not trust the new one until you pin it there. Nothing else on this phone changes.</string>
-    <string name="pairing_identity_dead_action">Make a new key and pair again</string>
-    <string name="pairing_no_lock_title">This phone has no screen lock</string>
-    <string name="pairing_no_lock_body">The key that proves who this phone is can only exist on a phone that locks. Set a PIN, pattern or password in Settings, then come back and pair. This app cannot set one for you.</string>
-    <string name="pairing_half_title">Your laptop does not know this phone yet</string>
-    <string name="pairing_half_body">The laptop is stored on this phone. Now the laptop needs this phone\'s certificate, or it will refuse the connection. Send it while you are still sitting at the laptop.</string>
-    <string name="pairing_half_send">Send the certificate</string>
-    <string name="pairing_half_command">bridgecert pin ~/Downloads/phone-cert.pem</string>
-    <string name="pairing_half_compare">bridgecert prints a fingerprint when it pins. It must match this one — if it does not, it pinned a different file.</string>
-    <string name="pairing_half_done">I have pinned it on the laptop</string>
+    <string name="pairing_paste_title">Paste the code instead</string>
+    <string name="pairing_paste_body">The code is text as well as a picture. Copy it from your Mac, send it to this phone however you like, and paste it here.</string>
+    <string name="pairing_pair">Pair</string>
+    <string name="pairing_working_title">Pairing…</string>
+    <string name="pairing_working_body">Talking to your Mac. Nothing is stored on this phone until it answers.</string>
+    <string name="pairing_failed_title">That did not work</string>
+    <string name="pairing_try_again">Try again</string>
     <string name="pairing_paired_title">Paired</string>
-    <string name="pairing_paired_body">This phone holds its own key, generated on the device and never shared. You have sent its certificate to the laptop. Whether the laptop accepted it is something only the laptop knows — your sessions appearing under Terminal is the proof.</string>
-    <string name="pairing_unpair">Forget this laptop</string>
-    <string name="pairing_fingerprint_description">Certificate fingerprint, %1$s</string>
+    <!--
+      The fingerprint is a receipt, not a task. It is what the Mac stored for this phone, so somebody
+      who wants to check the two screens against each other can - and nothing waits on them doing it,
+      which is the difference enrolment made.
+    -->
+    <string name="pairing_paired_body">Your Mac has pinned this phone. Below is the fingerprint it stored, if you want to check it against the Mac\'s menu.</string>
     <string name="agterm_title">Terminal</string>
     <string name="agterm_empty">No sessions are open on your laptop.</string>
     <string name="agterm_action_retry">Try again</string>
@@ -398,7 +376,7 @@
     <string name="agterm_fit_a11y">Fit the laptop\'s terminal to this phone, %1$d columns</string>
     <string name="agterm_fit_undo_a11y">Put the laptop\'s window back; it is fitted to %1$d columns</string>
     <string name="agterm_fit_recalibrate_a11y">Measure the laptop\'s terminal again</string>
-    <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Open pairing to make a new key.</string>
+    <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Reinstalling this app makes a new key; you will have to pair again afterwards.</string>
     <string name="agterm_action_disconnect">Disconnect</string>
     <!--
       The connection row, which replaced the "Sessions on your laptop" subtitle.

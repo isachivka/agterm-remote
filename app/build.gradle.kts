@@ -205,6 +205,50 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 }
 
+// **The shared wire vectors, onto the device, produced by the build and never by a `cp`.**
+//
+// A JVM test reads them from the repository root through the `wire.dir` property below. An
+// instrumented test cannot: the repository is not on the phone. `wire/README.md` names this exact
+// route for that case - a task that copies them into a generated resource directory - and the reason
+// is the one the whole `wire/` mechanism exists for: a file checked into `src/` is a copy that two
+// suites then pin separately, both green, disagreeing about which bytes are the contract. This copy
+// is produced on every build, lives under `build/`, is not tracked, and cannot be edited by hand.
+//
+// A plain `Copy` task cannot be used: AGP's source-set API refuses a `Provider`, and the variant API
+// that replaces it wires a task to a `DirectoryProperty`, which `Copy` does not expose. Hence the
+// six lines of task below, which exist entirely to have an output directory with a type.
+abstract class WireVectors : DefaultTask() {
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val source: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val into: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val directory = into.get().asFile
+        directory.mkdirs()
+        // Cleared first, so a vector file renamed upstream does not leave its old self behind for a
+        // test to keep reading.
+        directory.listFiles()?.forEach { it.delete() }
+        source.files.forEach { it.copyTo(directory.resolve(it.name), overwrite = true) }
+    }
+}
+
+val copyWireVectors by tasks.registering(WireVectors::class) {
+    source.from(rootProject.layout.projectDirectory.dir("wire").asFileTree.matching { include("*.json") })
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.deviceTests.forEach { (_, deviceTest) ->
+            deviceTest.sources.resources?.addGeneratedSourceDirectory(copyWireVectors, WireVectors::into)
+        }
+    }
+}
+
 // Unit tests that read a resource from the source tree are not tracked by Gradle unless the
 // directory is declared, and an untracked input means the task is UP-TO-DATE and DOES NOT RUN.
 //

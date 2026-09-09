@@ -1,188 +1,185 @@
 package dev.isachivka.agtermremote.pairing
 
 import android.Manifest
-import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
-import android.net.Uri
-import dev.isachivka.agtermremote.R
 import android.os.Build
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.security.GeneralSecurityException
+import java.security.cert.X509Certificate
 
 /**
- * The pairing section, wired to the platform.
+ * The pairing sequence, as the five states the screen renders.
  *
- * ### There is a camera in this application now, and what it cost
+ * ### Why this is a plain class and not a ViewModel
  *
- * The paragraph that used to be here said there was none, and gave a measurement: seventeen artifacts
- * without `camera-view` and thirty-nine with it. Those were **gross** counts including things this app
- * already ships, and the argument they supported was overtaken by a plainer fact — **the route that
- * needed no permission did not work.** On 2026-08-09 the owner could not pair by camera at all, and
- * the pairing was carried by the file route.
+ * It holds one value and one suspending call. A ViewModel would add a lifecycle to something that has
+ * none, and would put the thing under test behind a factory. What it does hold is Compose state, so
+ * the screen recomposes when it changes, and an instrumented test can read [state] directly and wait
+ * on it.
  *
- * Re-measured against the real classpath: `camera-compose` is 21 new artifacts, against
- * `camera-view`'s 37 with Guava and AppCompat inside the difference. The decoder is unchanged and
- * costs nothing — see [PairingCodeFrames].
+ * ### The enrolment is injected, and only the enrolment
  *
- * ### Two ways in, neither privileged
+ * Everything above it — reading the code, choosing the sentence, deciding which state to return to —
+ * is the real thing in every test. The seam is one lambda because a fake reaching any further up would
+ * be a test of the fake.
+ */
+class PairingFlow(private val enrol: suspend (EnrollPayload) -> EnrollResult) {
+
+    /** What the screen is showing. Scanning until something says the camera is not available. */
+    var state: PairingUi by mutableStateOf(PairingUi.Scanning)
+        private set
+
+    /**
+     * Where **Try again** goes back to, which is not always where pairing started.
+     *
+     * A phone whose owner refused the camera must not be sent to a viewfinder that will never open.
+     */
+    private var fallback: PairingUi = PairingUi.Scanning
+
+    /** No camera, or the owner said no. The paste field is the route, and it always works. */
+    fun cameraUnavailable() {
+        fallback = PairingUi.NeedsCamera
+        state = PairingUi.NeedsCamera
+    }
+
+    /**
+     * A code arrived — from the lens, or from the paste field. **There is one of these, on purpose.**
+     *
+     * The decode happens first and refuses without opening anything: this text was put in front of a
+     * camera, or on a clipboard, by anyone. Only a payload this build understands reaches the network.
+     */
+    suspend fun onCode(text: String) {
+        val decoded = EnrollCodec.readText(text)
+        PairingOutcome.of(decoded)?.let { state = it; return }
+
+        state = PairingUi.Working
+        state = PairingOutcome.of(enrol((decoded as EnrollDecode.Read).payload))
+    }
+
+    /** Back to whichever route this phone actually has. */
+    fun retry() {
+        state = fallback
+    }
+}
+
+/**
+ * The pairing screen, wired to the platform.
  *
- * **Scanning is what the owner asked for**: the code should be read through the camera, the way any
- * ordinary QR code is. [PairingViewfinder] reads frames continuously; the permission is requested
- * when it opens and nowhere else.
+ * ### The permission is asked once, when this screen opens
  *
- * **The file route stays, and reaching it never asks for anything.** `PairingCode`'s argument is
- * unchanged — a dark room, a cracked lens or a camera that will not focus must never block pairing —
- * and it is now load-bearing rather than considerate: it is the only route that has ever completed a
- * pairing in this project, including the one the owner is using today.
+ * This screen exists to pair, the camera is the way it is meant to be done, and the spec's onboarding
+ * is *camera permission → viewfinder → (fallback: paste the code)*. So the request happens here, on
+ * arrival, and nowhere else in the application.
+ *
+ * **A refusal is a supported state, not an error**, and there is deliberately no button that asks
+ * again: the owner refused on purpose, and a screen that immediately asks in a different shape is the
+ * app arguing with them. The paste field is under the refusal and needs no permission at all. A
+ * permission granted later in Settings is picked up the next time this screen is opened, because the
+ * check below is read rather than remembered.
+ *
+ * ### The store is written by the enrolment and by nothing here
+ *
+ * [PairedLaptop] is handed to [Enrollment], which writes it only after the reply has checked out. This
+ * file stores nothing, so a pairing that fails halfway leaves exactly what was there before.
  */
 @Composable
 fun PairingHost(
-    sequence: PairingSequence,
+    store: PairedLaptop,
     modifier: Modifier = Modifier,
+    enrol: suspend (EnrollPayload) -> EnrollResult = { payload -> defaultEnrol(payload, store) },
 ) {
     val context = LocalContext.current
-    // Read here rather than inside the lambda: resolving a resource off LocalContext bypasses the
-    // composition's own configuration, so it can hand back a string for the wrong locale after a
-    // configuration change. `stringResource` is the one that recomposes.
-    val shareSheetTitle = stringResource(R.string.pairing_half_send)
-    var state by remember { mutableStateOf(sequence.initial()) }
+    val scope = rememberCoroutineScope()
+    val flow = remember(store) { PairingFlow(enrol) }
 
-    val chooseImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            state = decodeInto(sequence, context, uri) ?: PairingState.NotAPairingCode
+    // Read rather than remembered: a permission revoked in Settings while this app sat in the
+    // background must be observed the next time it matters, and a cached `true` is how an app tells
+    // the owner something that stopped being true.
+    val hasCamera = remember(context) {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+    }
+    var permitted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+
+    val askForCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permitted = granted
+        if (!granted) flow.cameraUnavailable()
+    }
+
+    // Once per arrival at this screen. `Unit` rather than a changing key: asking again on every
+    // recomposition would put a system dialog in front of somebody who is typing into the paste field.
+    LaunchedEffect(Unit) {
+        when {
+            !hasCamera -> flow.cameraUnavailable()
+            permitted -> Unit
+            else -> runCatching { askForCamera.launch(Manifest.permission.CAMERA) }
+                // A device with no activity able to show the dialog is a device with no camera route.
+                .onFailure { flow.cameraUnavailable() }
         }
     }
 
-    // Whether the viewfinder is on screen. `remember` rather than `rememberSaveable`, deliberately:
-    // if the process is recreated the owner comes back to the pairing screen with the scanner CLOSED.
-    // Nothing is lost, because nothing has been decoded yet - and a scanner that reopened itself
-    // after a recreation would be a camera switching on without anybody asking it to.
-    var scanning by remember { mutableStateOf(false) }
-
-    // Whether THIS app has asked and been told no. It cannot be read from the platform, it is not a
-    // cache of the grant, and it resets with the process - the cost of that is one extra dialog after
-    // a restart, which is the harmless direction.
-    var refusedAlready by remember { mutableStateOf(false) }
-
-    // Asked when the viewfinder is opened, NEVER at launch, and never anywhere on the way to the file
-    // route. Refusal is not an error: `scanning` stays false, the screen re-reads CameraAccess on the
-    // next composition and explains itself with the file route still beneath it.
-    val askForCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        scanning = granted
-        refusedAlready = !granted
-    }
-
-    if (scanning) {
-        PairingViewfinder(
-            onDecoded = { profile ->
-                // Leaving this composition is what releases the camera - PairingViewfinder unbinds
-                // its use cases on dispose. An earlier version of this comment claimed the release
-                // happened here and it was FALSE: binding to the activity's lifecycle kept the camera
-                // open until the app was backgrounded, measured at +26s on 2026-08-09. A false
-                // comment about a lifecycle is worse than none, because the next person reads it
-                // instead of the dumpsys output.
-                scanning = false
-                state = sequence.onProfile(profile)
-            },
-            onCancel = { scanning = false },
-            modifier = modifier,
-        )
-        return
-    }
-
     PairingSection(
-        state = state,
-        // Read here rather than remembered: a permission revoked in Settings while this app sat in
-        // the background must be observed the next time it matters, and a cached `true` is how an
-        // app tells the owner something that stopped being true.
-        camera = CameraAccess.of(
-            hasCamera = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
-            permissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED,
-            refusedAlready = refusedAlready,
-        ),
-        // Every image type, because the owner's camera app decides the format and a filter that
-        // guessed wrong would hide the photograph they just took.
-        onChoose = { runCatching { chooseImage.launch(arrayOf("image/*")) } },
-        // The permission is requested HERE, on a deliberate tap, and nowhere else in this file. A
-        // permission already held opens the viewfinder with no dialog; one revoked in Settings comes
-        // back through this same path, which is why revocation needs no special case of its own.
-        onScan = {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED
-            ) {
-                scanning = true
-            } else {
-                runCatching { askForCamera.launch(Manifest.permission.CAMERA) }
-            }
-        },
-        onConfirm = { state = sequence.onFingerprintConfirmed(it) },
-        onReject = { state = sequence.onFingerprintRejected() },
-        onUnpair = { state = sequence.onUnpair() },
-        // The share sheet, not a file the owner has to go and find. runCatching because a device with
-        // nothing able to receive a PEM would otherwise crash on a button press, and "nothing happened"
-        // is a better outcome than a stack trace on the pairing screen.
-        onSendCertificate = {
-            runCatching {
-                context.startActivity(
-                    Intent.createChooser(
-                        CertificateHandover.shareIntent(context),
-                        shareSheetTitle,
-                    ),
-                )
-            }
-        },
-        onHandoverDone = { state = sequence.onHandoverDone(it) },
-        // The one destructive action on this screen, and it happens here because the owner pressed it.
-        onReplaceIdentity = { state = sequence.onReplaceIdentity() },
+        state = flow.state,
+        onCode = { text -> scope.launch { flow.onCode(text) } },
+        onRetry = flow::retry,
         modifier = modifier,
+        // The same callback the Pair button is given. The scanner has no path of its own.
+        viewfinder = { onText -> if (permitted) PairingViewfinder(onText = onText) },
     )
 }
 
 /**
- * Reads an image and runs it through the decoder.
+ * One enrolment, off the main thread, with this phone's identity.
  *
- * Returns null when the image cannot be read at all, which the caller reports as *not a pairing code*
- * — the same answer as an image that read fine and contained something else. The distinctions
- * available here are not ones the owner can act on.
+ * The identity is generated on first use and **never replaced here**. Replacing a key is what took the
+ * owner's pairing down on 2026-07-29, and the verdict that would trigger it — `SigningState.Unusable`
+ * — is deliberately broad, which is right for a sentence on a screen and was catastrophic as a
+ * deletion. A key that cannot sign therefore pairs and then cannot reach the API; that is a real gap,
+ * it is recorded in `docs/pairing.md`, and closing it belongs with the Settings screen that owns
+ * unpairing.
+ *
+ * `GeneralSecurityException` is caught because the alternative is a crash on a button press. It is
+ * reported through the same arm as an unreachable Mac would not be — a key that will not mint is this
+ * phone's problem, and the sentence says so.
  */
-private fun decodeInto(sequence: PairingSequence, context: Context, uri: Uri): PairingState? {
-    val bitmap = loadBitmap(context, uri) ?: return null
-    val pixels = IntArray(bitmap.width * bitmap.height)
-    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    val state = sequence.onImage(pixels, bitmap.width, bitmap.height)
-    bitmap.recycle()
-    return state
-}
-
-private fun loadBitmap(context: Context, uri: Uri): Bitmap? = runCatching {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        // ImageDecoder returns a hardware bitmap by default, whose pixels cannot be read back at all.
-        // getPixels on one throws, so the decode would fail on every photograph with no clue why.
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            decoder.isMutableRequired = false
+private suspend fun defaultEnrol(payload: EnrollPayload, store: PairedLaptop): EnrollResult =
+    withContext(Dispatchers.IO) {
+        val identity: X509Certificate = try {
+            PhoneIdentity.certificate()
+        } catch (e: GeneralSecurityException) {
+            return@withContext EnrollResult.Refused(NO_IDENTITY)
         }
-    } else {
-        @Suppress("DEPRECATION")
-        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        Enrollment.enroll(payload, identity, deviceName(), store)
     }
-}.getOrElse {
-    runCatching {
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-    }.getOrNull()
-}
+
+/**
+ * What the Mac's menu will show beside this phone's fingerprint.
+ *
+ * The model, which is what the owner would call this phone when they see it in a list. **Not
+ * `Settings.Global.DEVICE_NAME`**, which is a name a person chose and often their own — this string
+ * leaves the device and is stored on the Mac.
+ */
+private fun deviceName(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+
+/** The key would not mint. Nothing about the Mac is wrong, so the sentence must not blame it. */
+private const val NO_IDENTITY =
+    "This phone could not make the key that proves who it is. Try again, and if it keeps failing, " +
+        "restart the phone."

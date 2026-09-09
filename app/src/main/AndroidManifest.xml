@@ -21,12 +21,11 @@
 
       It is here because a live viewfinder reads frames in OUR process. The route it replaces needed
       no permission precisely because the capture happened inside the system camera app, and that
-      route did not work: on 2026-08-09 the owner could not pair by camera at all, and the pairing was
-      carried by the file route.
+      route did not work: on 2026-08-09 the owner could not pair by camera at all.
 
       What this costs, stated: a dialog the owner sees, can refuse, and can revoke later. So refusal
-      is a supported state and not an error - see CameraAccess - and choosing a FILE never triggers
-      the request at all. The file route is the only one that has ever completed a pairing here.
+      is a supported state and not an error - the pairing screen shows the paste field instead, which
+      needs no permission and is a route the payload's base64 form exists to make possible.
     -->
     <uses-permission android:name="android.permission.CAMERA" />
 
@@ -80,23 +79,14 @@
         </activity>
 
         <!--
-          Lets the app hand ONE file to whichever app the owner picks from the share sheet: the
-          phone's own certificate, on its way to the Mac. Not exported, so nothing on the phone can
-          enumerate or read what is in here, and file_paths.xml narrows it to a single subdirectory
-          that the paired laptop's address is deliberately not inside.
+          There is no FileProvider in this manifest any more, and its absence is the point.
 
-          The authority is duplicated in CertificateHandover, which is asserted against this by
-          PhoneProvisionsItselfTest - getUriForFile throws for an authority this file does not declare.
+          It existed to hand the phone's own certificate out through the share sheet, because the Mac
+          had no other way to learn it: the owner AirDropped a .pem and ran a command. Enrolment
+          replaced that whole errand - the certificate now travels over the connection the pairing
+          code authenticates - so the provider, its file_paths.xml and the directory they exposed are
+          gone. This application now shares no file with anything.
         -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.pairing"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
     </application>
 
 </manifest>

@@ -329,16 +329,31 @@ class EnrollPayloadTest {
     }
 
     /**
-     * The file's kinds and this build's are the same set. A kind added on the Go side with nothing
-     * reading it here would otherwise sit unasserted, which is how the two decoders start disagreeing
-     * about which codes exist.
+     * The file's kinds and this build's are the same set, **but for the ones this side owns alone**.
+     *
+     * Both directions matter and they fail for different reasons. A kind named in the file that this
+     * build cannot produce is a refusal Go makes and the phone does not - the two decoders disagreeing
+     * about which codes exist. A kind in this build that no vector names is a refusal with nothing
+     * pinning it, which is how a check quietly becomes wrong.
+     *
+     * [PHONE_ONLY] is the declared exception, and being a written list is what keeps it a guard: a
+     * refusal added here without a vector has to be justified in this file, in a diff, rather than
+     * simply not caught.
      */
     @Test
     fun `the vectors name no refusal kind this decoder cannot produce`() {
         val named = rejected().map { it.getString("refusal") }.toSet()
         val known = EnrollRefusal.entries.map { it.wire }.toSet() + "unsupported-version"
 
-        assertEquals(known, named)
+        assertTrue(
+            "the vectors name refusals this decoder cannot produce: ${named - known}",
+            named.containsAll(named intersect known) && (named - known).isEmpty(),
+        )
+        assertEquals(
+            "these refusals are pinned by no vector and are not declared as this side's own",
+            PHONE_ONLY,
+            known - named,
+        )
     }
 
     // --- The same refusals through the byte entry point -----------------------------------------
@@ -422,6 +437,95 @@ class EnrollPayloadTest {
         assertFalse("the host must not reach a log or an exception message", ordinary.toString().contains(ordinary.host))
         assertFalse("nor the port", ordinary.toString().contains(ordinary.port.toString()))
     }
+
+
+    // --- The ceiling on the text itself ---------------------------------------------------------
+
+    /**
+     * **A camera can be shown anything, and a clipboard can hold anything.**
+     *
+     * `readText` is now the only decoder on the live path: every frame the viewfinder reads and every
+     * string the paste field is given arrives here. A QR symbol tops out around 4,296 characters, but
+     * a paste does not top out at all, and before this line the whole string was handed to the base64
+     * decoder - which allocates three bytes for every four characters before anything has looked at
+     * it. Nothing else in this file sizes an allocation without a ceiling over it; this was the one
+     * that did.
+     *
+     * The ceiling is above every code the format can express and far below anything worth allocating
+     * for: [EnrollCodec.MAX_TEXT].
+     */
+    @Test
+    fun `text past the ceiling is refused before it is decoded`() {
+        val enormous = "A".repeat(EnrollCodec.MAX_TEXT + 4)
+
+        val got = EnrollCodec.readText(enormous)
+
+        assertEquals(
+            EnrollDecode.NotAPairingCode(EnrollRefusal.TextOverCeiling),
+            got,
+        )
+    }
+
+    /**
+     * And the largest code the format can actually express still decodes, which is the half that
+     * stops the ceiling being set below something legitimate.
+     *
+     * A host of [EnrollCodec.MAX_FIELD] bytes is the biggest payload version 2 allows. It is far past
+     * any real DNS name and that is the point: the ceiling has to clear the format, not the deployment.
+     */
+    @Test
+    fun `the largest payload the format allows is under the ceiling`() {
+        val host = "a".repeat(EnrollCodec.MAX_FIELD)
+        val bytes = ByteArray(1 + 1 + 2 + host.length + 2 + 32 + 32 + 4)
+        bytes[0] = EnrollCodec.VERSION.toByte()
+        bytes[1] = StreamKind.DirectTcp.wire.toByte()
+        bytes[2] = ((host.length shr 8) and 0xFF).toByte()
+        bytes[3] = (host.length and 0xFF).toByte()
+        host.toByteArray(Charsets.UTF_8).copyInto(bytes, 4)
+        bytes[4 + host.length] = 0x20
+        bytes[5 + host.length] = 0x0B
+        val text = Base64.getEncoder().encodeToString(bytes)
+
+        assertTrue(
+            "the biggest legal code is ${text.length} characters, past the ${EnrollCodec.MAX_TEXT} ceiling",
+            text.length <= EnrollCodec.MAX_TEXT,
+        )
+        assertEquals(host, EnrollCodec.decodeText(text)!!.host)
+    }
+
+    /**
+     * The boundary itself: a string exactly the ceiling long is judged by its content.
+     *
+     * It is still refused - 8192 letters A base64-decode to a buffer whose first byte is zero, which
+     * is not a version this build knows - and **that** is the assertion. A ceiling written with `>=`
+     * would refuse it for its length instead, and the largest legal code is one character short of
+     * being caught by exactly that mistake.
+     */
+    @Test
+    fun `text exactly at the ceiling is measured rather than refused for its length`() {
+        val atTheCeiling = "A".repeat(EnrollCodec.MAX_TEXT)
+
+        val got = EnrollCodec.readText(atTheCeiling)
+
+        assertEquals(
+            "a string at the ceiling must be judged by its content, not its length",
+            EnrollDecode.UnsupportedVersion(0),
+            got,
+        )
+    }
+
+    /**
+     * Refusals this decoder makes and the shared vectors do not pin, with the reason each is here.
+     *
+     * `text-over-ceiling` is a bound on the LENGTH OF THE INPUT, and only one of the three
+     * implementations has an input somebody else chose: this one is handed every frame a camera sees
+     * and every string a clipboard holds. Go's decoder reads codes its own encoder minted, on the
+     * machine that minted them, and the Mac's reader decodes what it just asked the bridge for. A
+     * vector for it would pin behaviour on an input no implementation can legitimately meet - the
+     * largest code this format can express is 5,560 characters. Recorded in `wire/README.md` beside
+     * the other asymmetry the vectors cannot pin.
+     */
+    private val PHONE_ONLY = setOf(EnrollRefusal.TextOverCeiling.wire)
 
     private fun payload(host: String, port: Int) = EnrollPayload(
         host = host,

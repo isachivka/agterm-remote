@@ -31,14 +31,16 @@
 #
 # WHAT THIS CANNOT SEE, so that a green run is not read as more than it is:
 #
-#   - Whether the reference is REACHED. A filename in a comment satisfies this guard. What it buys is
-#     that removing the reference is a deliberate act with a red check attached, not an omission.
+#   - Whether the reference is REACHED. A test that names the file and never opens it satisfies this
+#     guard. What it buys is that removing the reference is a deliberate act with a red check on it.
+#     What it no longer accepts is a mention in a COMMENT - see `mentions` below, and the defect that
+#     made that necessary.
 #   - Whether the decoder is CORRECT, or whether it consumes every vector. That is the test suite's
 #     job, and it is the reason this guard is deliberately shallow.
 #   - A copy outside the app module, or one that is not tracked.
-#   - A copy that has been REFORMATTED - reindented, key-reordered, a trailing newline added. cmp is
-#     byte equality, and anything short of that is a parser, which is a different program. What it
-#     does catch is the shape that actually happens, which is a copy.
+#   - A copy whose CONTENT has been edited - a key reordered, a value changed, a case dropped. Two
+#     comparisons are made, byte equality and equality ignoring whitespace, so a `cp` and a
+#     reindented `cp` are both caught; anything past that is a parser, which is a different program.
 #
 # The listing, the mode dispatch, the decode check and the accounting all live in
 # scripts/lib/tracked-files.sh, shared by every guard here.
@@ -57,13 +59,36 @@ fi
 accept="enroll-payload-vectors.json"
 reject="enroll-payload-reject-vectors.json"
 
-# The single grep, used by the self-test below and by the walk after it, so the probe cannot succeed
-# through a path the real scan does not use.
+# The single matcher, used by the self-test below and by the walk after it, so the probe cannot
+# succeed through a path the real scan does not use.
 #
 # -F: these are filenames, and `.` in a pattern would match any byte. A guard that accepted
 # `enroll-payload-vectorsXjson` is not wrong in a way anybody would ever notice, which is worse.
+#
+# **COMMENTS ARE STRIPPED FIRST, and that is the fix for a hole this guard shipped with.** It required
+# a mac/Tests source to name the accept vectors; `BridgeIntegrationTests.swift` names them in a doc
+# comment explaining that ANOTHER file reads them. So deleting `WireVectorsTests.swift` outright - the
+# only Swift code that opens the file - left this guard green, which is precisely the state it exists
+# to make impossible. A prose reference to a contract is not a reader of it.
+#
+# What survives the strip is a line with code on it: `resolve("...")`, `appending(path: "...")`,
+# `os.ReadFile("...")`. What does not is `//`, `///`, a `*` continuation line of a block comment, and
+# a `#` shell comment. It is a heuristic about three languages' comment syntax rather than a parser,
+# and the direction of its error is the safe one: a mention inside a string that also contains `//`
+# would be missed, and a missed mention fails the build rather than passing it.
 mentions() { # $1 = the file to read, $2 = the name to look for
-  LC_ALL=C grep -qF -e "$2" "$1" 2>/dev/null
+  LC_ALL=C sed -e 's,//.*,,' -e 's,^[[:space:]]*\*.*,,' -e 's,^[[:space:]]*#.*,,' "$1" 2>/dev/null \
+    | LC_ALL=C grep -qF -e "$2"
+}
+
+# Content equality ignoring whitespace, for a copy that was reindented on the way in.
+#
+# cmp catches a `cp`. It does not catch `python -m json.tool < wire/... > src/...`, which is the same
+# bytes with different spacing and is just as much a second copy of the contract. Comparing the files
+# with every space, tab and newline removed catches both, and it is still equality rather than
+# parsing: a file whose CONTENT differs anywhere is not a copy by this test either.
+squashed() { # $1 = the file to read
+  LC_ALL=C tr -d '[:space:]' < "$1" 2>/dev/null | cksum
 }
 
 # --- The self-test ---------------------------------------------------------------------------
@@ -96,6 +121,33 @@ mentions "$probe" "$reject" && {
   exit 2
 }
 
+# **The comment case, in all three shapes a comment takes in this repository.**
+#
+# This is the half that was missing, and its absence is what let a doc comment stand in for a reader.
+# Each of these is a file that TALKS ABOUT the vectors and never opens them; none may satisfy the
+# requirement.
+for comment in \
+  "/// The other suite reads %s and this one does not." \
+  " * The other suite reads %s and this one does not." \
+  "# The other suite reads %s and this one does not."
+do
+  printf "$comment\n" "$accept" > "$probe"
+  mentions "$probe" "$accept" && {
+    echo "::error::check-wire-vectors-consumed.sh is too broad: a COMMENT naming wire/$accept"
+    echo "    satisfied the requirement that a test reads it. Deleting the only reader would then"
+    echo "    leave this guard green, which is the hole it exists to close."
+    exit 2
+  }
+done
+
+# And a code line with a trailing comment on it still counts, because it is still a reader.
+printf 'let file = root.appending(path: "wire/%s")  // read from the root, never a copy\n' "$accept" > "$probe"
+mentions "$probe" "$accept" || {
+  echo "::error::check-wire-vectors-consumed.sh is too narrow: a code line carrying a trailing"
+  echo "    comment stopped counting as a reference, so an ordinary reader would fail this guard."
+  exit 2
+}
+
 # **The renamed copy, which is the case this guard shipped unable to catch.**
 #
 # The content check is what stands between a `cp` and two implementations pinning different bytes,
@@ -116,8 +168,34 @@ cmp -s "$copy" "$root/wire/$accept" && {
   echo "    wire/$accept, so every JSON file in the app module would be called a copy."
   exit 2
 }
+
+# **The REINDENTED copy, which cmp cannot see at all.**
+#
+# `python3 -m json.tool` produces the same contract with different spacing, and until this check
+# existed that walked straight past: cmp is byte equality, and the reformatted file is not byte-equal
+# to anything. Both halves are probed, on the real vector file rather than on a fixture - a fixture
+# would only prove that two things this script made up compare equal.
+# Indented by two spaces and given a trailing blank line: a pure whitespace change, which is the
+# shape a reformat takes. (`python3 -m json.tool` was tried first and is the wrong probe - it also
+# escapes non-ASCII, so it changes the CONTENT of the vector whose host is `münchen.example.test`.)
+{ sed 's/^/  /' "$root/wire/$accept"; echo; } > "$copy"
+if [ "$(squashed "$copy")" != "$(squashed "$root/wire/$accept")" ]; then
+  echo "::error::check-wire-vectors-consumed.sh is broken: a reindented copy of wire/$accept did not"
+  echo "    compare equal ignoring whitespace, so the reformatted-copy check cannot detect anything."
+  exit 2
+fi
+printf '{"not":"the contract"}\n' > "$copy"
+if [ "$(squashed "$copy")" = "$(squashed "$root/wire/$accept")" ]; then
+  echo "::error::check-wire-vectors-consumed.sh is too broad: an unrelated file compared equal to"
+  echo "    wire/$accept ignoring whitespace, so every file in the module would be called a copy."
+  exit 2
+fi
 rm -f "$probe" "$copy"
 trap - EXIT
+
+# The two vector files, squashed once, so the walk does not re-read them for every tracked file.
+accept_squashed="$(squashed "$root/wire/$accept")"
+reject_squashed="$(squashed "$root/wire/$reject")"
 
 # --- The originals have to be there ------------------------------------------------------------
 #
@@ -189,6 +267,23 @@ examine() { # $1 = path, $2 = the file to read, $3 = what it is
       return 0
     fi
   done
+
+  # And the same content with different spacing, which cmp cannot see. A pretty-printed copy is
+  # still a second set of bytes that one suite pins while another pins the original.
+  case "$(squashed "$2")" in
+    "$accept_squashed")
+      echo "::error file=$1::$3 is wire/$accept reformatted"
+      echo "    Reindenting a copy does not make it not a copy. Read the original from the"
+      echo "    repository root - see wire/README.md."
+      return 0
+      ;;
+    "$reject_squashed")
+      echo "::error file=$1::$3 is wire/$reject reformatted"
+      echo "    Reindenting a copy does not make it not a copy. Read the original from the"
+      echo "    repository root - see wire/README.md."
+      return 0
+      ;;
+  esac
 
   # The reference. Only from a test source: a mention in main/ or Sources/ would be a shipped
   # application carrying a path into a repository that is not on the machine running it.
