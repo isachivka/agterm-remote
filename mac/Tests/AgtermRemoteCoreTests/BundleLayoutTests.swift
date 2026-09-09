@@ -76,6 +76,52 @@ struct BundleLayoutTests {
         #expect(BundledBridge.url(in: Bundle(for: Marker.self)) == nil)
     }
 
+    /// **A directory wearing the name passes `isExecutableFile`.** Measured, not supposed: mode 755
+    /// on a directory answers true, and the app would have carried that URL to `Process.run` and
+    /// reported the failure as its own. The type is asked as well as the mode.
+    @Test func aDirectoryWearingTheNameIsNotTheBridge() throws {
+        let app = try bundle(named: "AgtermRemote", containing: [:])
+        let resources = try #require(app.resourceURL)
+        let impostor = resources.appending(path: "agterm-remote-bridge")
+        try FileManager.default.createDirectory(at: impostor, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: impostor.path)
+
+        #expect(FileManager.default.isExecutableFile(atPath: impostor.path), "the trap this closes")
+        #expect(BundledBridge.isSpawnable(impostor.path) == false)
+        #expect(BundledBridge.url(in: app) == nil)
+    }
+
+    /// **A link out of the bundle is not the bridge this bundle carries.**
+    ///
+    /// `isExecutableFile` follows symbolic links, so without a containment check a link planted in
+    /// `Contents/Resources` would make the app spawn a binary from anywhere on the disk while every
+    /// other check said it came from inside. The bundle's signature seals the link and not its
+    /// target, so the seal does not cover this either.
+    @Test func aLinkPointingOutOfTheBundleIsNotTheBridge() throws {
+        let app = try bundle(named: "AgtermRemote", containing: [:])
+        let resources = try #require(app.resourceURL)
+        // Somewhere else entirely, and genuinely executable.
+        let elsewhere = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "elsewhere-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: elsewhere.path, contents: Data())
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: elsewhere.path)
+        let planted = resources.appending(path: "agterm-remote-bridge")
+        try FileManager.default.createSymbolicLink(at: planted, withDestinationURL: elsewhere)
+
+        #expect(FileManager.default.isExecutableFile(atPath: planted.path), "the trap this closes")
+        #expect(BundledBridge.url(in: app) == nil)
+    }
+
+    /// And the containment check does not reject an ordinary bundle. Every temporary directory on
+    /// macOS is reached through a symbolic link (`/var` to `/private/var`), so a check that compared
+    /// unresolved paths would answer nil for every bundle in this suite — and, worse, pass on the
+    /// developer's own machine and fail somewhere else.
+    @Test func anOrdinaryBundleIsNotMistakenForAPlantedLink() throws {
+        let app = try bundle(named: "AgtermRemote", containing: ["agterm-remote-bridge": 0o755])
+
+        #expect(BundledBridge.url(in: app) != nil)
+    }
+
     /// **One name, shared with the supervisor.** The app spawns what it finds, and a lookup that
     /// resolved a different file name from the one `BoundaryTests` allows would walk around that
     /// allow-list by spelling.
@@ -86,3 +132,77 @@ struct BundleLayoutTests {
 
 /// Only so `Bundle(for:)` has a class to be handed. A struct-based suite has no type for it.
 private final class Marker {}
+
+/// **The attribute that decides whether the bridge will run at all, read the way the app reads it.**
+///
+/// Against a real file with a real extended attribute, not a stub. The whole claim this rests on is
+/// that an *unentitled, ad-hoc-signed* process can read `com.apple.quarantine` even though it cannot
+/// remove it — and a stubbed `getxattr` would assert nothing about that.
+struct QuarantineTests {
+
+    private func file(quarantined: Bool) throws -> URL {
+        let at = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "agterm-remote-quarantine-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: at.path, contents: Data("x".utf8))
+        if quarantined {
+            let value = "0081;00000000;test;"
+            let written = setxattr(at.path, Quarantine.attribute, value, value.utf8.count, 0, 0)
+            try #require(written == 0, "could not set the attribute this suite is about")
+        }
+        return at
+    }
+
+    @Test func aQuarantinedFileIsSeenAsQuarantined() throws {
+        #expect(Quarantine.isSet(on: try file(quarantined: true)))
+    }
+
+    @Test func anOrdinaryFileIsNot() throws {
+        #expect(Quarantine.isSet(on: try file(quarantined: false)) == false)
+    }
+
+    /// A file that is not there is not quarantined either. It is a state the caller has already
+    /// excluded — the binary was located before this is asked — and it must not read as held.
+    @Test func aFileThatIsNotThereIsNotQuarantined() {
+        #expect(Quarantine.isSet(on: URL(fileURLWithPath: "/nowhere/agterm-remote-bridge")) == false)
+    }
+
+    /// **The app CAN clear this, and that is exactly why the rule needs a test rather than a note.**
+    ///
+    /// It is tempting to write that macOS forbids it. Measured here, on this machine: `removexattr`
+    /// from an ordinary unentitled process succeeds. So the reason the app does not is a decision —
+    /// quarantine is the record that this code came from outside, and an app that erases that record
+    /// about itself because somebody pressed Start has removed the only Gatekeeper signal a
+    /// non-notarised application is subject to.
+    ///
+    /// A decision is what drifts. This test states the capability so nobody re-derives the false
+    /// premise, and the one below holds the app to the choice.
+    @Test func theAppCouldClearItWhichIsWhyTheChoiceIsWrittenDown() throws {
+        let held = try file(quarantined: true)
+
+        #expect(removexattr(held.path, Quarantine.attribute, 0) == 0, "removal is permitted")
+        #expect(Quarantine.isSet(on: held) == false, "and it worked")
+    }
+
+    /// **So the app never writes an extended attribute, and never removes one.** It reads.
+    ///
+    /// Held at the source, the way `BoundaryTests` holds the list of processes this app may launch:
+    /// the capability is available and one line would use it, so the check names the two calls rather
+    /// than trusting a paragraph above them.
+    @Test func nothingInThisAppRemovesOrSetsAnExtendedAttribute() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var checked = 0
+        for target in ["Sources/AgtermRemoteCore", "Sources/AgtermRemote"] {
+            let directory = root.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                checked += 1
+                for call in ["removexattr(", "setxattr("] {
+                    #expect(!text.contains(call), "\(target)/\(name) calls \(call)")
+                }
+            }
+        }
+        #expect(checked > 0, "found no sources — the detector is looking in the wrong place")
+    }
+}

@@ -252,7 +252,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         do {
             try bridge.start(listen: "0.0.0.0:\(address.port)", socket: nil)
         } catch {
-            // A spawn that could not happen at all — the binary vanished between launch and now.
+            // A start that could not happen at all: the binary vanished between launch and now, or
+            // macOS is holding it because the app arrived by download. The error's own words, not a
+            // summary of them — a quarantine refusal is a paragraph carrying the command that fixes
+            // it, and there is nowhere else the owner would ever see it.
             notify("The bridge would not start.", "\(error)")
         }
     }

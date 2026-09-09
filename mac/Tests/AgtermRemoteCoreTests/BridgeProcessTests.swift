@@ -475,4 +475,129 @@ struct BridgeProcessTests {
         var states: [BridgeState] { lock.withLock { _states } }
         func append(_ state: BridgeState) { lock.withLock { _states.append(state) } }
     }
+
+    // MARK: - Spawned and frozen
+
+    /// A launcher whose children are alive and mute — the shape of a quarantined bridge, and of every
+    /// other way a process can be started and never run.
+    private final class MuteLauncher: ProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _terminated: [Int32] = []
+        var terminated: [Int32] { lock.withLock { _terminated } }
+
+        func launch(
+            _: URL, _: [String], onExit _: @escaping @Sendable (Int32) -> Void,
+        ) throws -> Int32 { 5150 }
+
+        func terminate(_ pid: Int32) { lock.withLock { _terminated.append(pid) } }
+        /// Nothing, ever. Not an empty string — a child that has written nothing at all.
+        func lastOutput(of _: Int32) -> String? { nil }
+    }
+
+    /// Alive and talking, which is what a working bridge does within milliseconds of exec.
+    private final class TalkativeLauncher: ProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _terminated: [Int32] = []
+        var terminated: [Int32] { lock.withLock { _terminated } }
+
+        func launch(
+            _: URL, _: [String], onExit _: @escaping @Sendable (Int32) -> Void,
+        ) throws -> Int32 { 5151 }
+
+        func terminate(_ pid: Int32) { lock.withLock { _terminated.append(pid) } }
+        func lastOutput(of _: Int32) -> String? { "listening on 0.0.0.0:8443" }
+    }
+
+    /// **Refused before the spawn, because after it there is nothing left to notice.**
+    ///
+    /// A quarantined binary spawns successfully and then freezes. Measured on macOS 26.6 against the
+    /// real bundle: `Process.run` returns a pid, the child never reaches `main`, writes nothing and
+    /// never exits. So the only honest moment to ask is before.
+    @Test func aQuarantinedBridgeIsRefusedBeforeAnythingIsSpawned() {
+        let launcher = RecordingLauncher()
+        let bridge = BridgeProcess(
+            launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
+            isQuarantined: { _ in true })
+
+        #expect(throws: BridgeProcess.Failure.self) {
+            try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+        }
+        #expect(launcher.launches == 0, "nothing may be spawned once quarantine is known")
+        guard case .failed(let sentence) = bridge.state else {
+            Issue.record("state must be .failed, was \(bridge.state)")
+            return
+        }
+        // The sentence has to carry the cause AND the command, because the owner cannot see either
+        // anywhere else: there is no dialogue, no log and no exit status.
+        #expect(sentence.contains("quarantine"))
+        #expect(sentence.contains("xattr -dr com.apple.quarantine"))
+    }
+
+    /// The instruction names the `.app`, not the binary inside it. Quarantine is set on every file of
+    /// a downloaded bundle, so clearing it from the bridge alone would leave the app still held.
+    @Test func theRemedyNamesTheApplicationRatherThanTheBinaryInsideIt() {
+        let inside = URL(fileURLWithPath: "/Applications/AgtermRemote.app/Contents/Resources/agterm-remote-bridge")
+
+        #expect(Quarantine.explanation(for: inside).contains("/Applications/AgtermRemote.app\""))
+        #expect(Quarantine.enclosingBundle(of: inside)?.lastPathComponent == "AgtermRemote.app")
+    }
+
+    /// Outside a bundle — a development build with the binary beside the executable — there is no
+    /// `.app` to name, and the instruction falls back to the file itself rather than inventing a path.
+    @Test func outsideABundleTheRemedyNamesTheFileItself() {
+        let loose = URL(fileURLWithPath: "/build/debug/agterm-remote-bridge")
+
+        #expect(Quarantine.enclosingBundle(of: loose) == nil)
+        #expect(Quarantine.explanation(for: loose).contains("/build/debug/agterm-remote-bridge\""))
+    }
+
+    /// **A live pid is not a working bridge.** Nothing else in this class can tell the two apart, so
+    /// silence is the signal — and the child is stopped rather than left frozen under a menu that
+    /// offers Start again.
+    @Test func aChildThatSaysNothingIsStoppedAndReported() throws {
+        let launcher = MuteLauncher()
+        let silence = ImmediateSchedule()
+        let bridge = BridgeProcess(
+            launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
+            watchForSilence: silence.run)
+
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        #expect(silence.delays == [BridgeProcess.silenceCeiling])
+        #expect(launcher.terminated == [5150], "a frozen child must not be left running")
+        guard case .failed(let sentence) = bridge.state else {
+            Issue.record("state must be .failed, was \(bridge.state)")
+            return
+        }
+        #expect(sentence.contains("never said anything"))
+    }
+
+    /// And it does not fire on a bridge that is working. This is the half that would break a healthy
+    /// app every two seconds if the condition were wrong.
+    @Test func aChildThatSpokeIsLeftAlone() throws {
+        let launcher = TalkativeLauncher()
+        let silence = ImmediateSchedule()
+        let bridge = BridgeProcess(
+            launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
+            watchForSilence: silence.run)
+
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        #expect(launcher.terminated.isEmpty)
+        #expect(bridge.state == .running(pid: 5151))
+    }
+
+    /// **The coupling that makes silence readable, held in place by a test.**
+    ///
+    /// The backstop above works only because the bridge's startup chatter reaches this app on stderr.
+    /// Passing `--log` would send it to a file, every healthy bridge would then be silent, and the
+    /// timer would kill it two seconds after every start. That is not a comment's job to prevent.
+    @Test func noLogFileIsPassedBecauseSilenceIsReadAsAHang() throws {
+        let launcher = RecordingLauncher()
+        let bridge = bridge(launcher)
+
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        #expect(!launcher.arguments.contains("--log"))
+    }
 }

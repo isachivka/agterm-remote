@@ -176,8 +176,9 @@ jobs:
       # enters the repository. If it is not asserted on the runner it is asserted nowhere.
       - name: Assemble the bundle
         run: ./scripts/bundle.sh
-      # Both architectures. `bundle.sh` refuses to sign a thin bridge itself; this repeats it here so
-      # a change that removed the check inside the script does not also remove the check on it.
+      # Both architectures. `bundle.sh` refuses a thin bridge itself; every assertion below repeats
+      # one of its checks on purpose, so a change that removed a check inside the script does not
+      # also remove the check on it.
       - name: The bridge is universal
         run: |
           set -euo pipefail
@@ -190,31 +191,68 @@ jobs:
               *) echo "::error::the bundled bridge is '$archs' and needs $want"; exit 1 ;;
             esac
           done
-      # **The build machine's home directory, searched for in the bytes that would ship.**
+      # **`-trimpath`, asked of Go's own record rather than of the bytes.**
       #
-      # `-trimpath` is the flag that keeps it out, and a flag is a thing somebody removes while
-      # debugging and forgets to put back. On this runner the leaked path would be the hosted work
-      # directory and nobody's private business, which is exactly what would let the omission survive
-      # review here and ship from somebody's laptop later. The assertion is here so it does not.
+      # This step used to grep the binary for `/Users/`. That check PASSED on a binary carrying 50
+      # source paths and 1400 toolchain paths, reproduced from a checkout under `/private/tmp`: it
+      # was a test about where the build happened wearing the name of a test about what shipped. Any
+      # build on an external volume, under `/opt`, or in a Linux container slipped through it.
       #
-      # Note the guard that guards the guard: `check-no-addresses.sh` refuses a committed
-      # `/Users/<name>` in tracked text, so this comment cannot spell the example out. That is the
-      # rule working, not an inconvenience.
-      - name: The bridge carries no build-machine paths
+      # Go writes every non-default build setting into the binary, so the flag is asked for directly,
+      # PER SLICE - `go version -m` reads one slice of a universal file, so asking the fat file would
+      # answer for whichever half it happened to pick.
+      - name: Both slices were built with -trimpath
+        run: |
+          set -euo pipefail
+          app="$(swift build -c release --show-bin-path)/AgtermRemote.app"
+          bridge="$app/Contents/Resources/agterm-remote-bridge"
+          work="$(mktemp -d)"
+          for pair in "x86_64 amd64" "arm64 arm64"; do
+            set -- $pair
+            lipo -thin "$1" -output "$work/slice" "$bridge"
+            settings="$(go version -m "$work/slice")"
+            for want in "-trimpath=true" "CGO_ENABLED=0" "GOARCH=$2"; do
+              if ! printf '%s\n' "$settings" | grep -q -- "build.*$want"; then
+                echo "::error::the $1 slice does not record $want"
+                printf '%s\n' "$settings"
+                exit 1
+              fi
+            done
+            echo "$1: -trimpath=true CGO_ENABLED=0 GOARCH=$2"
+          done
+      # The cheaper second net, kept for what Go's record would not mention. Never the guard: on this
+      # runner the checkout is under `/Users/`, so it is the one place this predicate has any teeth at
+      # all - and that is exactly the accident that made it look like a check for so long.
+      - name: The bridge names no build machine
         run: |
           set -euo pipefail
           app="$(swift build -c release --show-bin-path)/AgtermRemote.app"
           bridge="$app/Contents/Resources/agterm-remote-bridge"
           if LC_ALL=C grep -aq '/Users/' "$bridge"; then
-            echo "::error::the bundled bridge names the build machine — is -trimpath still there?"
-            LC_ALL=C grep -ao '/Users/[^\"]\{0,60\}' "$bridge" | sort -u | head -5
+            echo "::error::the bundled bridge names the build machine"
+            LC_ALL=C grep -ao '/Users/[^"]\{0,60\}' "$bridge" | sort -u | head -5
             exit 1
           fi
           echo "OK: no build-machine paths in the shipped bridge."
-      # It has to RUN, on the runner, out of the bundle. A universal binary with no build paths that
-      # cannot execute is three green checks over an app whose Start does nothing.
-      - name: The bundled bridge runs
+      # **Both slices are EXECUTED**, not merely inspected. The runner runs one architecture natively;
+      # the other is the half nobody here would ever run by accident, and it is also the half
+      # `go build` leaves unsigned before `bundle.sh` signs it. Rosetta makes it answerable rather
+      # than assumed - a universal binary with one slice that cannot start is an app that opens on
+      # somebody else's Mac and does nothing.
+      - name: Both slices run
         run: |
           set -euo pipefail
           app="$(swift build -c release --show-bin-path)/AgtermRemote.app"
-          "$app/Contents/Resources/agterm-remote-bridge" --help
+          bridge="$app/Contents/Resources/agterm-remote-bridge"
+          native="$(uname -m)"
+          other=$([ "$native" = arm64 ] && echo x86_64 || echo arm64)
+          echo "native ($native):"
+          "$bridge" --help > /dev/null
+          echo "  ran"
+          if ! arch -"$other" /usr/bin/true 2>/dev/null; then
+            echo "installing the translator so the $other slice can be exercised"
+            softwareupdate --install-rosetta --agree-to-license
+          fi
+          echo "translated ($other):"
+          arch -"$other" "$bridge" --help > /dev/null
+          echo "  ran"

@@ -35,24 +35,55 @@ public enum BundledBridge {
         resources.appending(path: executableName)
     }
 
+    /// **What every candidate has to be**, and the default test for both lookups here.
+    ///
+    /// `FileManager.isExecutableFile` alone is not that test, which was measured rather than argued:
+    /// it answers **true for a directory** with mode 755 named `agterm-remote-bridge`, and spawning
+    /// one fails at `Process.run` with an error the owner reads as the app being broken. So the type
+    /// is asked for as well as the mode.
+    ///
+    /// - Parameter path: a file system path, not a URL, so it can stand in as `locate`'s predicate.
+    public static func isSpawnable(_ path: String) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: path) else { return false }
+        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey])
+        return values?.isRegularFile == true
+    }
+
     /// The embedded bridge, or nil.
     ///
-    /// Two things have to be true, and the second is not decoration: the file must be there **and**
-    /// it must be spawnable. A `agterm-remote-bridge` that exists with the wrong mode — a bundle
-    /// assembled by hand, an archive unpacked by something that dropped the executable bit — is
-    /// indistinguishable from a working install until the moment somebody presses Start. Answering
-    /// nil for it turns that into a greyed item instead.
+    /// Three things have to be true, and none of them is decoration:
+    ///
+    ///  1. **It is there.** A fresh clone that has only run `swift build` has no bundle and no bridge.
+    ///  2. **It is spawnable** — an executable *regular file*. One that exists with the wrong mode, or
+    ///     a directory wearing the name, is indistinguishable from a working install until somebody
+    ///     presses Start.
+    ///  3. **It is the one this bundle carries.** `isExecutable` follows symbolic links, so without
+    ///     this a link planted in `Contents/Resources` would make the app spawn a binary from
+    ///     anywhere on the disk while every check above said the bridge came from inside the bundle.
+    ///     Measured: it resolved and would have run. The bundle's signature seals the link, not its
+    ///     target, so the seal does not cover this either.
+    ///
+    /// Nil for all three, because nil is what greys Start and Stop — and a menu item that looks dead
+    /// is the correct report for a bridge that is not really here.
     ///
     /// - Parameter isExecutable: injected so the decision can be asserted without a file system,
-    ///   the same seam `BridgeProcess.locate` uses.
+    ///   the same seam `BridgeProcess.locate` uses. The containment check in (3) is not injected: it
+    ///   is a question about the disk, and the tests that assert it build real bundles on one.
     public static func url(
         in bundle: Bundle,
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        isExecutable: (String) -> Bool = isSpawnable,
     ) -> URL? {
         // A bundle with no resource directory at all — which is what Foundation reports for one that
         // was never assembled — is the same answer as an empty one.
         guard let resources = bundle.resourceURL else { return nil }
         let bridge = candidate(inResources: resources)
-        return isExecutable(bridge.path) ? bridge : nil
+        guard isExecutable(bridge.path) else { return nil }
+        // Both sides resolved, so the comparison is about links inside the bundle rather than about
+        // the ones every temporary directory on macOS is reached through.
+        let landsOn = bridge.resolvingSymlinksInPath().standardizedFileURL.path
+        let belongsAt = candidate(
+            inResources: resources.resolvingSymlinksInPath().standardizedFileURL,
+        ).standardizedFileURL.path
+        return landsOn == belongsAt ? bridge : nil
     }
 }
