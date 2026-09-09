@@ -133,4 +133,34 @@ struct WireVectorsTests {
             "a trailing byte is the tail of a second message, not slack"
         ) { try EnrolmentPayload(base64: Data(raw).base64EncodedString()) }
     }
+
+    /// **A host that is not UTF-8 is refused, never repaired**, and until this test existed nothing
+    /// said so.
+    ///
+    /// The reader gained the check in the round before this one and it was unasserted: reverting it to
+    /// `String(decoding:as:)` left every test in this suite green. That substitutes U+FFFD for each
+    /// bad byte and returns happily, so the reader would report a host that is **not the one in the
+    /// bytes** - a different destination, reached without an error anywhere, which is the failure the
+    /// other two readers name in their own comments.
+    ///
+    /// The bytes are a real vector with its host replaced in place, so everything else about the
+    /// payload - the version, the scheme, the lengths, the trailing-byte rule - still holds, and the
+    /// only thing under test is the encoding of the host.
+    @Test func aHostThatIsNotUTF8IsRefusedRatherThanRepaired() throws {
+        let valid = try #require(try Self.vectors().first { $0.version == 2 && $0.host.count > 2 })
+        var raw = [UInt8](try #require(Data(base64Encoded: valid.text)))
+
+        let hostLength = Int(raw[2]) << 8 | Int(raw[3])
+        #expect(hostLength == valid.host.utf8.count, "the host is not where this test thinks it is")
+        // 0xC3 begins a two-byte sequence; 0x28 cannot continue one. A lone 0xFF is refused by some
+        // decoders on sight, so the pair is the sharper case: it is well-formed right up until it
+        // is not.
+        raw[4] = 0xC3
+        raw[5] = 0x28
+
+        #expect(
+            throws: (any Error).self,
+            "a host that is not UTF-8 must be refused, not turned into a different host"
+        ) { try EnrolmentPayload(base64: Data(raw).base64EncodedString()) }
+    }
 }

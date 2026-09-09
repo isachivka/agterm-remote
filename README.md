@@ -17,6 +17,11 @@ Two programs that put a Mac's agterm sessions on an Android phone:
 Pairing is one QR code shown by the Mac app and scanned by the phone. After that the two hold each
 other's keys and talk over a mutually authenticated TLS connection.
 
+The scanner has been run end to end against a real bridge on an emulator's virtual scene. It has
+**not** been run against a real camera on real hardware, which is an acceptance criterion rather than
+a nicety — [docs/pairing.md](docs/pairing.md) records what was proved, what was not, and exactly how
+to close it.
+
 ## agterm is a prerequisite
 
 [agterm](https://github.com/umputun/agterm) is a separate macOS terminal, by a different author.

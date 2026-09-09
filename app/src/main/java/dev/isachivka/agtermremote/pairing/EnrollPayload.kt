@@ -175,6 +175,17 @@ enum class EnrollRefusal(val wire: String) {
 
     /** A scheme byte this build does not know: a Mac that can arrange something this phone cannot. */
     UnsupportedScheme("unsupported-scheme"),
+
+    /**
+     * More characters than [EnrollCodec.MAX_TEXT]. Refused before anything is allocated from it.
+     *
+     * **The one value here with no vector behind it, and the asymmetry is deliberate.** Go's
+     * `DecodeText` has no such ceiling, because nothing ever hands it a string a stranger chose: it
+     * decodes codes its own encoder minted, on the machine that minted them. This decoder is the one
+     * facing a lens and a clipboard, and it is the only one that needs a bound on the length of what
+     * it was handed. Recorded in `wire/README.md` beside the other asymmetry the vectors cannot pin.
+     */
+    TextOverCeiling("text-over-ceiling"),
 }
 
 /**
@@ -269,6 +280,23 @@ object EnrollCodec {
      */
     const val MAX_FIELD = 4096
 
+    /**
+     * The ceiling on the TEXT handed to [readText], in characters.
+     *
+     * **[MAX_FIELD] bounds an allocation made from a number somebody else chose; this bounds one made
+     * from a string somebody else chose, and until the camera was wired to this decoder there was
+     * nothing here that did.** `Base64.getDecoder().decode` allocates three bytes for every four
+     * characters before a single field has been looked at, so the length of the input is the first
+     * thing about it that costs anything.
+     *
+     * 8192 clears the format with room to spare: the largest payload version 2 can express is a
+     * 4096-byte host plus 74 fixed bytes, which is 5,560 characters of base64. And it clears anything a
+     * lens can physically deliver - a QR symbol tops out at 2,953 bytes in its densest mode - so the
+     * ceiling refuses nothing that could arrive through the camera. What it bounds is the paste field,
+     * whose input is a clipboard and has no limit of its own.
+     */
+    const val MAX_TEXT = 8192
+
     private const val FINGERPRINT_LENGTH = 32
     private const val TOKEN_LENGTH = 32
     private const val EXPIRY_LENGTH = 4
@@ -311,11 +339,22 @@ object EnrollCodec {
      * `wire/README.md`: Go's decoder skips carriage returns and newlines where this one refuses them,
      * so Go is still the more permissive side. Nothing in this project ever emits either.
      *
+     * ### The length is checked before the content
+     *
+     * This is the only decoder on the live path: it is handed every frame the viewfinder reads and
+     * every string the paste field is given. [MAX_TEXT] bounds that input before the base64 decoder
+     * allocates from it - which is the same rule as [MAX_FIELD], applied one layer further out, where
+     * nothing was applying it.
+     *
      * Nothing is trimmed on the way in. Whitespace around a pasted code is not tolerated here on
      * purpose - the two sides have to agree on what a valid code is, and a decoder that quietly
      * accepts more than the other does is how they stop agreeing.
      */
     fun readText(text: String): EnrollDecode {
+        // FIRST, before the length is used for anything else. Every frame the viewfinder reads and
+        // every string the paste field is given arrives here, and the decoder below sizes an
+        // allocation from the length. See MAX_TEXT.
+        if (text.length > MAX_TEXT) return EnrollDecode.NotAPairingCode(EnrollRefusal.TextOverCeiling)
         if (text.length % 4 != 0) return EnrollDecode.NotAPairingCode(EnrollRefusal.NotStandardBase64)
         val bytes = try {
             Base64.getDecoder().decode(text)

@@ -192,6 +192,16 @@ which is what the reject vectors are for.
 - **Go's decoder skips `\r` and `\n` where Java's refuses them**, which no vector can pin, because a
   vector is one string and this is a disagreement about what surrounds it. Nothing in this project
   emits either, so Go is simply the more permissive side and it is recorded rather than fixed.
+- **The Kotlin decoder refuses text longer than 8,192 characters and no other reader does.** It is a
+  bound on the LENGTH OF THE INPUT rather than a rule about the format, and only one of the three
+  readers has an input somebody else chose: the Kotlin one is handed every frame a camera sees and
+  every string a clipboard holds, and `Base64.getDecoder().decode` allocates from that length before
+  any field has been looked at. Go decodes codes its own encoder minted, on the machine that minted
+  them; the Swift reader decodes what it has just asked the bridge for. There is no vector for it
+  because there is no input any implementation can legitimately meet at that size - the largest code
+  this format can express is 5,560 characters, and a QR symbol tops out at 2,953 bytes. The Kotlin
+  refusal kind is `text-over-ceiling`, and `EnrollPayloadTest` declares it as this side's own so that
+  every OTHER kind is still required to have a vector behind it.
 
 ## Reading these files from the Android side
 

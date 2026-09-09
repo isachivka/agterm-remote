@@ -16,12 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import dev.isachivka.agtermremote.agterm.AgtermHost
-import dev.isachivka.agtermremote.pairing.FileHandover
-import dev.isachivka.agtermremote.pairing.KeystorePhoneHalf
-import dev.isachivka.agtermremote.pairing.LeftoverScans
 import dev.isachivka.agtermremote.pairing.PairedLaptop
 import dev.isachivka.agtermremote.pairing.PairingHost
-import dev.isachivka.agtermremote.pairing.PairingSequence
 import dev.isachivka.agtermremote.settings.StyledScreenStore
 import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.nav.BackStack
@@ -32,10 +28,6 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // A phone that ran an older build may be holding a photograph of the laptop's pairing code in
-        // app storage. Deleting the code that wrote it does not delete the picture, so this does -
-        // once a start, quietly, and never as a reason the app fails to open.
-        LeftoverScans.remove(filesDir)
         setContent {
             AppTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -81,8 +73,9 @@ class MainActivity : ComponentActivity() {
 fun App(modifier: Modifier = Modifier) {
     val context = LocalContext.current
 
-    // One store, read by the start rule below and handed to the pairing sequence, so "is a laptop
-    // paired" cannot be answered two different ways in the same composition.
+    // One store, read by the start rule below and handed to the pairing screen, so "is a laptop
+    // paired" cannot be answered two different ways in the same composition. The pairing screen does
+    // not write it either - the enrolment does, on success, and nothing else does at all.
     val pairedLaptop = remember(context) { PairedLaptop(context) }
 
     // rememberSaveable so a rotation does not bounce the owner out of settings mid-pair - and note
@@ -101,20 +94,6 @@ fun App(modifier: Modifier = Modifier) {
     // Enabled only when there is somewhere to go back to, so that back on the terminal exits the
     // app the way it always has rather than being quietly swallowed.
     BackHandler(enabled = stack.canPop) { stack = stack.pop() }
-
-    // Plain `remember`, not a ViewModel: the sequence holds no coroutines and no state of its own -
-    // every transition is a pure function of what it was handed, and what persists is the file
-    // underneath it. A ViewModel here would add a lifecycle to something that has none.
-    val pairingSequence = remember(pairedLaptop) {
-        PairingSequence(
-            store = pairedLaptop,
-            // The identity is generated when pairing BEGINS rather than lazily at first connect: at
-            // first connect the owner is away from the laptop, and a certificate produced then has
-            // nowhere to go and nobody to explain a failure to.
-            phone = KeystorePhoneHalf(),
-            handover = FileHandover(java.io.File(context.filesDir, PairedLaptop.DIRECTORY)),
-        )
-    }
 
     when (stack.current) {
         Screen.Agterm -> AgtermHost(
@@ -135,7 +114,7 @@ fun App(modifier: Modifier = Modifier) {
             SettingsScreen(
                 onBack = { stack = stack.pop() },
                 modifier = modifier,
-                pairingSection = { PairingHost(sequence = pairingSequence) },
+                pairingSection = { PairingHost(store = pairedLaptop) },
                 styledScreen = styledScreen,
                 onStyledScreen = { on ->
                     styledStore.write(on)

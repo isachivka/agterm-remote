@@ -46,15 +46,15 @@ import dev.isachivka.agtermremote.ui.theme.AppTheme
 import java.util.concurrent.Executors
 
 /**
- * A live viewfinder that reads the laptop's screen, which is what the owner asked for.
+ * A live viewfinder that reads the code off the Mac's screen.
  *
- * Asked for on 2026-08-09: the code should be read through the camera, the way any ordinary QR code
- * is.
+ * ### It reads a symbol and hands over TEXT
  *
- * ### The camera is bought; the decoder is not
- *
- * Frames go to [PairingCodeFrames], which hands the Y plane to the same `PairingCode` the file route
- * has always used. There is no second reader, and the only artefacts this feature adds are CameraX's.
+ * [onText] is given the string a QR symbol carried, and nothing here decides whether that string is a
+ * pairing code. That decision belongs to [EnrollCodec], which is the decoder the shared vectors pin,
+ * and it is reached through the same callback the paste field uses. **The scanner has no path of its
+ * own into the pairing.** It had one until this screen was rewritten, and the path it had ran a base64
+ * decoder that trimmed its input and never checked padding.
  *
  * ### The lifecycle is the library's, deliberately
  *
@@ -75,16 +75,16 @@ import java.util.concurrent.Executors
  * Guidance is therefore driven by **the decoder not succeeding for a while**, which is a fact, rather
  * than by apparent size, which is the assumption the measurement contradicted.
  *
- * ### None of this is executed by any test in this repository
+ * ### What is proven about this file, and what is not
  *
- * As of 2026-08-09 there is no device to run it on. [PairingCodeFramesTest] covers the frame seam and
- * nothing covers the rest. That is recorded as a verification hole, and it is not
- * softened here.
+ * The frame seam is covered off-device by `QrCodeTest`. Everything else here — the permission, the
+ * binding, the surface, the analyzer's delivery — was run end to end on the emulator's virtual scene
+ * against a real bridge, which is recorded in `docs/pairing.md` along with **the one criterion still
+ * outstanding: this has never met a real lens.**
  */
 @Composable
 fun PairingViewfinder(
-    onDecoded: (ConnectionProfile) -> Unit,
-    onCancel: () -> Unit,
+    onText: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -96,7 +96,7 @@ fun PairingViewfinder(
 
     // The callback can change between recompositions; the analyzer below is created once and would
     // otherwise capture the first one forever.
-    val decoded by rememberUpdatedState(onDecoded)
+    val decoded by rememberUpdatedState(onText)
 
     // One thread, ours, shut down on the way out. Analysis must not run on the main thread: a decode
     // is tens of milliseconds and the viewfinder is the thing that would stutter.
@@ -121,7 +121,7 @@ fun PairingViewfinder(
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             // ASKED FOR EXPLICITLY, because the default is 640x480 and this code cannot fit in it.
-            // A pairing payload is ~552 characters, which is an 89-module symbol; the probe on
+            // A pairing payload is ~550 characters, which is an 89-module symbol; the probe on
             // 2026-08-09 put the decode cliff between 7 and 9 pixels per module, so the code needs
             // 623-801 px across. In a 640-wide frame that is impossible EDGE TO EDGE WITH NO QUIET
             // ZONE - it would have failed on the owner's phone at every distance. Measured on an
@@ -159,11 +159,15 @@ fun PairingViewfinder(
                 if (!found) {
                     val now = System.nanoTime()
                     if (firstFrameAt == 0L) firstFrameAt = now
-                    val profile = readCode(image)
-                    if (profile != null) {
+                    val text = readText(image)
+                    if (text != null) {
+                        // Once. The analyzer runs on its own thread and the caller's reaction is a
+                        // state change on another, so without this a second frame carrying the same
+                        // symbol would start a second enrolment - with a one-time token that the
+                        // first one has already spent.
                         found = true
                         struggling = false
-                        decoded(profile)
+                        decoded(text)
                     } else {
                         // Driven by the decoder failing for a while, never by how large the code
                         // looks. See the note above: apparent size is the assumption the measurement
@@ -197,11 +201,6 @@ fun PairingViewfinder(
     }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = stringResource(R.string.pairing_viewfinder_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -222,7 +221,7 @@ fun PairingViewfinder(
         // Manual only, and absent rather than broken where there is no flash unit. Nothing switches
         // this on by itself: a torch that lights automatically while a phone is pointed at a person
         // is a worse surprise than a dark viewfinder, and the dark room already has an answer that
-        // needs no camera at all - the file route, still one tap away behind Stop scanning.
+        // needs no camera at all - the paste field, on the same screen, below this.
         if (camera?.cameraInfo?.hasFlashUnit() == true) {
             TextButton(
                 onClick = {
@@ -238,9 +237,6 @@ fun PairingViewfinder(
                 )
             }
         }
-        TextButton(onClick = onCancel, modifier = Modifier.testTag(TAG_VIEWFINDER_CANCEL)) {
-            Text(stringResource(R.string.pairing_viewfinder_cancel))
-        }
     }
 }
 
@@ -248,21 +244,21 @@ fun PairingViewfinder(
 private const val STRUGGLING_AFTER_NANOS = 6_000_000_000L
 
 /**
- * One frame's luminance plane, copied out and handed to the decoder.
+ * One frame's luminance plane, copied out and handed to the symbol reader.
  *
  * The buffer belongs to the camera and is recycled the moment the frame is closed, so it is copied
  * rather than retained. `PlanarYUVLuminanceSource` reads it synchronously, but the copy is what makes
  * that guarantee ours rather than an assumption about somebody else's code.
  */
-private fun readCode(image: ImageProxy): ConnectionProfile? {
+private fun readText(image: ImageProxy): String? {
     val plane = image.planes.firstOrNull() ?: return null
     val buffer = plane.buffer
     val luma = ByteArray(buffer.remaining())
     buffer.get(luma)
-    return PairingCodeFrames.decode(
+    return QrCode.textIn(
         luma = luma,
         // NOT image.width. The hardware pads each row out to a stride, and reading it as though it
-        // did not shears the image silently - see PairingCodeFrames.
+        // did not shears the image silently - see QrCode.
         rowStride = plane.rowStride,
         width = image.width,
         height = image.height,
