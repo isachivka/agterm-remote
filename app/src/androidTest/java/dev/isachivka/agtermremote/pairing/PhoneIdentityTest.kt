@@ -85,10 +85,15 @@ class PhoneIdentityTest {
     /**
      * **The accessor that decides an old key's fate must agree with the platform.**
      *
-     * `provision()` routes on [PhoneIdentity.isBoundToRecentUnlock], so if that ever answers wrongly,
-     * either every owner is told to replace a perfectly good key, or the one owner who needs to hear
-     * it never does. Asserted through the accessor rather than through `KeyInfo` directly, because the
-     * accessor is what ships.
+     * [PhoneIdentity.isBoundToRecentUnlock] is the only way to tell a key minted before 2026-07-29
+     * from one minted after: the flag is not recorded in this app and survives an app update
+     * untouched, so only the platform can be asked. If it ever answers wrongly, a key made the old way
+     * cannot be told apart from a current one at all. Asserted through the accessor rather than
+     * through `KeyInfo` directly, because the accessor is what ships.
+     *
+     * The function that used to route on it — the pairing screen's provisioning — is gone with the
+     * eight-state screen it belonged to. What is asserted here is the accessor, which is what was
+     * worth asserting either way.
      */
     @Test
     fun aFreshKeyIsNotReportedAsMadeTheOldWay() {

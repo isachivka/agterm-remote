@@ -164,9 +164,20 @@ likely to be wrong are the analysis resolution (the code needs 7–9 pixels per 
 - **A camera that will not open lands on the paste field rather than crashing**, which was run: on an
   emulator booted `-camera-back none -camera-front emulated`, `bindToLifecycle` raises
   `IllegalArgumentException: No available camera can be found`, the screen shows *No camera to read the
-  code* with the paste field under it, and the process stays alive. The other shape — a camera another
-  application is holding, which raises the **checked** `CameraUnavailableException` — goes through the
-  same catch and is covered by `CameraGuardTest` rather than by a run.
+  code* with the paste field under it, and the process stays alive.
+- **A camera that opens and then reports an error is watched, and no run has ever produced one.** This
+  is the second shape and it is not an exception at all: a camera another application is holding lets
+  `bindToLifecycle` **succeed**, and the refusal arrives later as a `CameraState` carrying an error. So
+  the state is observed and any error routes to the same paste field; `CameraGuardTest` pins the policy
+  across every error code and state type this library defines.
+
+  What could not be done is stage one. A second client opened from inside the instrumentation was
+  evicted — Android hands the camera to the foreground application, and CameraX logged `Camera open
+  completed ... errorCode=null` while the test held the device. The stock camera app releases the
+  camera when it goes to the background, which is the same rule from the other side. **So this route
+  has never carried a real error**, and the errors it is most likely to carry in the field are ones
+  that cannot be staged either: a camera disabled by device policy, do-not-disturb, or hardware
+  failure. It is code that is right and unproven, which is the honest description of it.
 - **A rotation during the enrolment cancels it.** The exchange runs in the composition's scope, so
   turning the phone mid-pairing ends it; if the bridge had already spent the token, the Mac is paired
   and the phone is not. It self-heals on the next pairing — the Mac replaces the phone it pinned — and

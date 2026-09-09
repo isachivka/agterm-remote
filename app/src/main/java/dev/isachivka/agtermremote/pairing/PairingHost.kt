@@ -15,9 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * The pairing sequence, as the five states the screen renders.
@@ -156,23 +154,14 @@ fun PairingHost(
 }
 
 /**
- * One enrolment, off the main thread, with this phone's identity.
+ * One enrolment, with this phone's identity.
  *
- * The keystore is reached through [EnrolGate], which mints or reads the identity, refuses **before any
- * socket is opened** when that identity will not sign, and only then enrols. The reasoning for the
- * gate — and for why it refuses rather than replacing the key — is written there.
- *
- * `Enrollment.enroll` writes [PairedLaptop] on success and nothing here writes it at all, so a
- * pairing refused by the gate leaves exactly what was there before, on both machines.
+ * The keystore, the gate and the enrolment are wired together in [enrolThisPhone], which is where the
+ * order is and where it is tested. This line exists to supply the two things a composable knows and a
+ * plain function does not: which store, and what this phone is called.
  */
 private suspend fun defaultEnrol(payload: EnrollPayload, store: PairedLaptop): EnrollResult =
-    withContext(Dispatchers.IO) {
-        EnrolGate.run(
-            identity = { PhoneIdentity.certificate() },
-            signing = { PhoneIdentity.signingState() },
-            enrol = { identity -> Enrollment.enroll(payload, identity, deviceName(), store) },
-        )
-    }
+    enrolThisPhone(payload, store, deviceName())
 
 /**
  * What the Mac's menu will show beside this phone's fingerprint.
