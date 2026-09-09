@@ -53,8 +53,6 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: go
-          # One narrow exclusion, argued in the file itself.
-          config-file: ./.github/codeql/config.yml
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
 
@@ -72,6 +70,5 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: java-kotlin
-          config-file: ./.github/codeql/config.yml
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
