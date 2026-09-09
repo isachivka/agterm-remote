@@ -236,6 +236,12 @@ trap - EXIT
 # this guard moves with it.
 guard_pathspec=("bridge/internal/enroll/*.go")
 
+# What it means when the pathspec reaches nothing this guard can read. The package IS the subject
+# here: if it moved or was renamed, this script is being asked a question about nothing, and OK is
+# the wrong answer to that. This sentence existed before the walk was extracted and has to keep
+# existing, because zero files scanned and no findings look identical from outside.
+guard_nothing_scanned="The package this guard is about is gone from the listing. If it moved, move this guard with it."
+
 guard_excluded() { # $1 = path
   case "$1" in
     # The package's own tests compare tokens freely - that is what a test does. The rule is about the

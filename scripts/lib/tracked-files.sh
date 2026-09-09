@@ -33,10 +33,22 @@
 #     telling somebody there is something "in" a symlink sends them looking inside a file that has no
 #     inside. It returns 0 when it found something.
 #
+# # What is actually read
+#
+# The LISTING is the index: `git ls-files` names every tracked path, with its mode and its object id.
+# What is READ for each of those paths is the working-tree copy whenever one exists, and the
+# committed blob only when there is no readable file to open - a deleted or sparse-checkout entry, a
+# symlink (whose blob is its target's name), or a worktree symlink over a regular entry.
+#
+# That is deliberate, and it is the right way round for a check that runs before a commit: what
+# somebody is about to add is on disk, and refusing it there is the whole point. It has a consequence
+# worth naming rather than discovering - a string that is STAGED and then cleaned in the working tree
+# passes, because the file that is read no longer holds it. These guards are a gate in front of a
+# commit, not an audit of one.
+#
 # # What these guards cannot see, at all
 #
-# Stated here so a green run is not read as more than it is. The listing reaches tracked paths in the
-# current index and nothing else:
+# Stated here so a green run is not read as more than it is:
 #
 #   - HISTORY. A string removed in the working tree is still in every earlier commit, and every guard
 #     here would report clean on a repository whose history is full of it.
@@ -89,8 +101,13 @@ guard_is_binary_asset() { # $1 = path
   return 1
 }
 
-# Overridden by a guard that has paths of its own to leave alone. The default excludes nothing.
-guard_excluded() { return 1; }
+# Overridden by a guard that has paths of its own to leave alone. The default excludes nothing, and
+# it is defined ONLY if the guard has not already defined one - a plain definition here would
+# silently replace a guard's own exclusions if it happened to define them above its source line, and
+# the symptom would be a guard quietly scanning its own fixtures.
+if ! declare -F guard_excluded > /dev/null 2>&1; then
+  guard_excluded() { return 1; }
+fi
 
 # Walks the tracked files, calling $3 for each one that can be read.
 #
@@ -99,6 +116,19 @@ guard_excluded() { return 1; }
 guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine function
   local root="$1" name="$2" examine="$3"
   local listing blob entry meta path mode rest object file target subject previous extension origin
+
+  # The callback is checked BEFORE anything is walked, because the shell will not check it for you.
+  # `if "$examine" ...; then` treats "command not found" as a non-zero status like any other, so one
+  # misspelled function name made this guard - and every guard sourcing this file - report
+  # `OK ... scanned 2` and exit 0 over a live token, with nothing but a line on stderr to say so.
+  # That is the exact family this library was extracted to kill, available once and inherited six
+  # times.
+  if ! declare -F "$examine" > /dev/null 2>&1; then
+    echo "::error::$name asked for an examine function called '$examine', which is not defined."
+    echo "    Refusing to walk anything: a guard whose verdict is never asked for reports a clean"
+    echo "    tree over whatever is in front of it."
+    exit 2
+  fi
 
   guard_tmp="$(mktemp -d)"
   trap 'rm -rf "$guard_tmp"' EXIT
@@ -267,10 +297,36 @@ guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine funct
       link) guard_read_link=$((guard_read_link + 1)) ;;
     esac
 
+    # 0 means it found something, 1 means it did not, and ANYTHING ELSE is this guard failing rather
+    # than passing. `if cmd; then` reads 127 as "no finding", which is how a misspelled function name
+    # produced OK over a live token.
     if "$examine" "$path" "$target" "$subject"; then
       guard_found=1
+    else
+      local status=$?
+      if [ "$status" -gt 1 ]; then
+        echo "::error::$name: its examine function exited $status on '$path'."
+        echo "    A verdict is 0 (found something) or 1 (did not). Anything else is the guard"
+        echo "    failing, and a guard that cannot run must never look like one that found nothing."
+        exit 2
+      fi
     fi
   done < "$listing"
+
+  # Zero files scanned is not the same as nothing found. A guard whose whole subject has been
+  # renamed, moved or excluded away is being asked a question about nothing, and the honest answer is
+  # not OK. `guard_nothing_scanned` lets a guard say what that means for it.
+  if [ $((guard_read_worktree + guard_read_index + guard_read_link)) -eq 0 ]; then
+    echo "::error::$name scanned no files at all."
+    if [ -n "${guard_nothing_scanned:-}" ]; then
+      echo "    $guard_nothing_scanned"
+    else
+      echo "    Everything tracked was declined or refused, so this run looked at nothing."
+    fi
+    echo "    A guard over an empty set is not a pass."
+    guard_accounting
+    exit 2
+  fi
 
   # The reconciliation, checked rather than left for a reader to do. Every tracked path is scanned,
   # declined or refused; if the three do not add up, the walk dropped something on a path nobody
