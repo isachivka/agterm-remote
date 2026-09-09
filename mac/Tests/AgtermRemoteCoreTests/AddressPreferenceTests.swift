@@ -257,14 +257,37 @@ struct AddressProvenanceTests {
         #expect(AddressPreference.provenAt(from: store.defaults) == proof)
     }
 
-    /// An address written before this app recorded when it was written has no moment to compare an
-    /// enrolment against. It stays unproven, which costs one scan and claims nothing.
-    @Test func anAddressFromBeforeThisRuleStaysUnproven() {
+    /// **The upgrade path, which the first version of this rule got wrong.**
+    ///
+    /// An address written by a build from before provenance existed carries no timestamp. Answering
+    /// *unproven* forever would send somebody who has had a phone paired for weeks back into setup at
+    /// every launch — and this file refuses to rename the address key precisely because shipped
+    /// builds hold addresses. Both cannot be true, so an address with no timestamp is backfilled as
+    /// older than any enrolment, once.
+    @Test func anAddressFromBeforeThisRuleIsProvenByTheEnrolmentItAlreadyHas() {
         let store = scratch()
         defer { store.discard() }
         store.defaults.set(address.displayed, forKey: AddressPreference.key)
+        let enrolment = Date(timeIntervalSince1970: 1_000)
+
+        #expect(AddressPreference.recordEnrolment(at: enrolment, in: store.defaults) == enrolment)
+        #expect(AddressPreference.provenAt(from: store.defaults) == enrolment)
+        // Backfilled once. From here the ordinary rule applies, so the NEXT address change unproves
+        // it like any other.
+        #expect(store.defaults.object(forKey: AddressPreference.storedAtKey) as? Date == .distantPast)
+        try? AddressPreference.write(other, to: store.defaults, at: Date(timeIntervalSince1970: 2_000))
+        #expect(AddressPreference.provenAt(from: store.defaults) == nil)
+        #expect(AddressPreference.recordEnrolment(at: enrolment, in: store.defaults) == nil)
+    }
+
+    /// An empty store is not an upgrade. Nothing is backfilled for an address that does not exist,
+    /// so an enrolment cannot be credited to one.
+    @Test func nothingIsBackfilledWhenThereIsNoAddress() {
+        let store = scratch()
+        defer { store.discard() }
 
         #expect(AddressPreference.recordEnrolment(at: Date(), in: store.defaults) == nil)
+        #expect(store.defaults.object(forKey: AddressPreference.storedAtKey) == nil)
     }
 
     /// The trust store is read as a date and nothing else — **its contents belong to the Go side.**

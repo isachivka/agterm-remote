@@ -63,8 +63,31 @@ public struct Onboarding: Equatable, Sendable {
     /// **A paired phone never carries somebody past a missing address**: that combination is ordinary
     /// — pair, then clear or mistype the address — and what they need is the address screen, not a
     /// code for a destination that no longer exists.
+    ///
+    /// agterm comes first because it is the prerequisite for the product doing anything at all. It is
+    /// **not** the prerequisite for finishing setup — see [setup].
     public var step: OnboardingStep {
         guard agtermIsThere else { return .agtermMissing }
+        guard address != nil else { return .address }
+        guard isPaired else { return .pairing }
+        return .done
+    }
+
+    /// **What is left to SET UP, which is not the same question as what is unresolved right now.**
+    ///
+    /// agterm's absence is a runtime state: the terminal can be quit and started again all day, and
+    /// none of it changes what has been configured. Storing an address needs nothing from agterm, and
+    /// neither does pairing a phone — the bridge dials agterm when a session is asked for, not when a
+    /// code is scanned.
+    ///
+    /// Treating it as a setup step cost two things, both of them met the hard way. A finished owner
+    /// whose Mac started this app at login before agterm was up got the setup window over their work,
+    /// every time. And whoever it was addressed to was trapped: the pane offered one button, *look
+    /// again*, which is an answer for a terminal that is about to start and no answer at all for one
+    /// that this app cannot recognise — a build run from source, say. So the ladder that decides
+    /// whether the setup window opens skips agterm, and agterm's absence is reported where a runtime
+    /// fact belongs: the menu.
+    public var setup: OnboardingStep {
         guard address != nil else { return .address }
         guard isPaired else { return .pairing }
         return .done
@@ -109,6 +132,32 @@ public enum OnboardingCopy {
     /// in a placeholder is an address somebody will keep by accident, and it would also be somebody's
     /// home.
     public static let addressPlaceholder = "agterm.example-homelab.invalid:8443"
+
+    /// **The two ports, in one line.** Somebody with a straight port forward should read this and
+    /// stop reading.
+    public static let arrivalPortHeading = "The port traffic arrives on at this Mac"
+
+    public static let arrivalPortExplanation =
+        "The address above is what your phone dials — your router's. This is where that traffic comes "
+            + "out on this Mac. If your router forwards the port straight through, leave this empty and "
+            + "it follows the address above. Fill it in when the two differ: a router that publishes "
+            + "one port and delivers to another, a tunnel, or a reverse proxy."
+
+    /// **What binding every interface actually costs, said to the person it costs it to.**
+    ///
+    /// The bridge binds the wildcard, which is what makes every route above work — a tunnel gives
+    /// this Mac an interface of its own, and something bound to loopback is invisible on it. The
+    /// consequence is that the port is open on every network this Mac joins and not only on the one
+    /// the address goes through, and **only one of the four routes involves deliberately opening a
+    /// port at all.** Somebody on Tailscale arranged the opposite and is owed the sentence anyway.
+    ///
+    /// It is disclosure, not an alarm: what gets past the port is a phone presenting the certificate
+    /// that was paired, and nothing else.
+    public static let addressExposure =
+        "While the bridge is running it accepts connections on that port on every network this Mac "
+            + "joins — home, work, a café — not only through the address above. Only a phone you have "
+            + "paired gets past it: anything else is refused before it can ask for anything. Stop the "
+            + "bridge from the menu when you would rather it were not listening."
 
     /// **Why nothing here says whether the address works.**
     ///

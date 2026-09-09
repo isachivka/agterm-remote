@@ -26,7 +26,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// Handed what was typed, as one string. Saving is `SaveAddress`, reached through the same path
     /// the pairing window uses: **one address, one writer, one set of refusals.** A second save here
     /// would be a second place that decides what an address is.
-    var onSave: ((String) -> Void)?
+    var onSave: ((String, String) -> Void)?
 
     /// Opens the pairing window. The code is rendered in one place, by the type that owns the
     /// invocation of `bridgecert`; drawing a second one here would be a second picture of the same
@@ -40,6 +40,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     private var field = AddressField()
     private var addressBox: NSTextField?
+    private var portBox: NSTextField?
+
+    /// What the arrival-port box starts with. Empty means it follows the dial port.
+    var arrivalPortText = ""
 
     /// What the address editor is saying right now — a refusal, or what was saved. Held here rather
     /// than in the view, because `show` rebuilds the contents around it and a sentence somebody is
@@ -50,16 +54,35 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// for somebody who closed it.
     var isOpen: Bool { window != nil }
 
+    /// What the window is showing, so the pane can be rebuilt after a press without the app being
+    /// asked for the three facts again.
+    private var current = Onboarding(agtermSocketExists: false, address: nil, isPaired: false)
+
+    /// Set by *Set the address anyway*. **Step 1 is not a locked door**: agterm's absence is a runtime
+    /// state, and nothing about storing an address or pairing a phone needs the terminal to be
+    /// running. Somebody whose agterm this app cannot recognise — a build run from source — would
+    /// otherwise be held at a pane whose only button is *look again*, forever, with the whole of
+    /// setup on the far side of it.
+    private var pastAgterm = false
+
     func show(_ onboarding: Onboarding, field: AddressField) {
         self.field = field
+        current = onboarding
+        let pane = self.pane(for: onboarding)
         let window = self.window ?? make()
-        window.contentView = view(for: onboarding)
+        window.contentView = view(for: onboarding, pane: pane)
         window.delegate = self
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.center()
-        if onboarding.step == .address, let addressBox { window.makeFirstResponder(addressBox) }
+        if pane == .address, let addressBox { window.makeFirstResponder(addressBox) }
         self.window = window
+    }
+
+    /// The ladder, unless the owner has walked past agterm — after which the pane is whatever is left
+    /// to set up, which is a question agterm does not enter into.
+    private func pane(for onboarding: Onboarding) -> OnboardingStep {
+        pastAgterm ? onboarding.setup : onboarding.step
     }
 
     func close() {
@@ -93,15 +116,15 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     // MARK: - The panes
 
-    private func view(for onboarding: Onboarding) -> NSView {
+    private func view(for onboarding: Onboarding, pane: OnboardingStep) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        stack.addArrangedSubview(caption(Self.position(of: onboarding.step)))
+        stack.addArrangedSubview(caption(Self.position(of: pane)))
 
-        switch onboarding.step {
+        switch pane {
         case .agtermMissing: agtermPane(into: stack)
         case .address: addressPane(into: stack)
         case .pairing: pairingPane(into: stack, address: onboarding.address)
@@ -136,9 +159,16 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
                 + "one on this Mac. Without agterm running there is nothing on the other side of the "
                 + "door, so there is nothing to set up yet."))
         stack.addArrangedSubview(
-            body("Install agterm if you have not, start it, then look again. Everything else on this "
-                + "screen waits for that."))
-        stack.addArrangedSubview(recheckButton("Look again"))
+            body("Install agterm if you have not, and start it. You can set the rest up now either "
+                + "way: storing an address and pairing a phone need nothing from agterm — the phone "
+                + "simply has nothing to drive until it is running."))
+        let onwards = NSButton(
+            title: "Set the address anyway", target: self, action: #selector(pastAgtermTapped))
+        onwards.bezelStyle = .rounded
+        let row = NSStackView(views: [recheckButton("Look again"), onwards])
+        row.orientation = .horizontal
+        row.spacing = 8
+        stack.addArrangedSubview(row)
     }
 
     /// **Step 2. The address, and the sentence that says whose job it is.**
@@ -179,6 +209,11 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         }
         stack.addArrangedSubview(addressEditor())
         stack.addArrangedSubview(body(OnboardingCopy.addressIsUnprovenUntilAPhoneArrives))
+        // **What the wildcard bind costs, to the person it costs it to.** Three of the four routes
+        // above involve no port forward at all, so nobody can be assumed to have opened this port
+        // deliberately - and the bridge opens it on every network this Mac joins regardless. It is
+        // disclosure rather than an alarm: the pinned certificate is what stands in front of it.
+        stack.addArrangedSubview(body(OnboardingCopy.addressExposure))
     }
 
     /// **Step 3. The code, and the warning that rides on it.**
@@ -244,7 +279,20 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         row.orientation = .horizontal
         row.spacing = 8
 
-        let column = NSStackView(views: [row])
+        // **The second port.** See `OnboardingCopy.arrivalPortExplanation`: the address above is the
+        // router's and this is where that traffic comes out on this Mac. Empty is the straight-through
+        // answer and follows the address, so anybody with a plain port forward can ignore this field.
+        let port = NSTextField(string: arrivalPortText)
+        port.placeholderString = "same as above"
+        port.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        port.translatesAutoresizingMaskIntoConstraints = false
+        port.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        portBox = port
+
+        let column = NSStackView(views: [
+            row, caption(OnboardingCopy.arrivalPortHeading), port,
+            body(OnboardingCopy.arrivalPortExplanation),
+        ])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 4
@@ -262,9 +310,17 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         return button
     }
 
-    @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "") }
+    @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }
     @objc private func showCodeTapped() { onShowPairingCode?() }
     @objc private func recheckTapped() { onRecheck?() }
+
+    /// Walks past step 1. Nothing is stored and nothing is claimed about agterm — the pane simply
+    /// stops being in the way, and the menu keeps saying agterm is not running for as long as it is
+    /// not.
+    @objc private func pastAgtermTapped() {
+        pastAgterm = true
+        show(current, field: field)
+    }
     @objc private func closeTapped() { close() }
 
     private func heading(_ text: String) -> NSTextField {

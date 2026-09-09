@@ -117,8 +117,22 @@ public enum PairingCodeFailure: Error, Equatable, Sendable {
     /// act on at 2am.
     case refused(status: Int32, message: String)
 
+    /// **Nothing in this build can make one**, which is a different sentence from a tool that is
+    /// missing or a tool that refused.
+    ///
+    /// This app used to run a helper belonging to a separate project on the owner's machine. That
+    /// reached outside its own state directory into a live installation the owner is still using, so
+    /// it is gone. The panel that asks this app's own bridge for a code over its control socket is
+    /// the next change; until it lands, the window says so rather than naming a path that this app
+    /// has no business knowing.
+    case notBuiltYet
+
     public var explanation: String {
         switch self {
+        case .notBuiltYet:
+            "This build cannot make a pairing code yet — the panel that asks the bridge for one is "
+                + "not finished. The address above is saved either way, and nothing else on this "
+                + "screen is affected."
         case .noBinary(let path):
             "The pairing-code tool is not installed at \(path). Nothing else on this screen is affected."
         case .refused(_, let message):

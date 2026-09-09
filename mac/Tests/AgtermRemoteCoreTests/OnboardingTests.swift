@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import AgtermRemoteCore
@@ -77,19 +78,106 @@ struct OnboardingTests {
     }
 }
 
+/// **Setting up and running are two different questions**, and one of them was answered with the
+/// other for a day.
+///
+/// `step` puts agterm first, because without it nothing this product does works. `setup` leaves it
+/// out, because nothing about storing an address or pairing a phone needs the terminal to be
+/// running — and gating the setup window on `step` put that window in front of a finished owner
+/// every time their Mac started this app before agterm was up.
+struct OnboardingSetupTests {
+
+    @Test func setupIgnoresAgtermEntirely() {
+        for agterm in [true, false] {
+            #expect(Onboarding(agtermSocketExists: agterm, address: nil, isPaired: false).setup == .address)
+            #expect(
+                Onboarding(agtermSocketExists: agterm, address: "example.test:8443", isPaired: false).setup
+                    == .pairing)
+            #expect(
+                Onboarding(agtermSocketExists: agterm, address: "example.test:8443", isPaired: true).setup
+                    == .done)
+        }
+    }
+
+    /// **The trap, named.** A finished owner with agterm not yet running is `agtermMissing` and has
+    /// nothing left to set up — the window must not open for them.
+    @Test func aFinishedOwnerWithoutAgtermHasNothingLeftToSetUp() {
+        let finished = Onboarding(agtermSocketExists: false, address: "example.test:8443", isPaired: true)
+
+        #expect(finished.step == .agtermMissing)
+        #expect(finished.setup == .done)
+    }
+
+    /// `setup` never reports `agtermMissing`, whatever it is given. It is the answer to a question
+    /// that does not have that word in it.
+    @Test func setupNeverReportsAgterm() {
+        for agterm in [true, false] {
+            for address in [nil, "", "example.test:8443"] as [String?] {
+                for paired in [true, false] {
+                    #expect(
+                        Onboarding(agtermSocketExists: agterm, address: address, isPaired: paired).setup
+                            != .agtermMissing)
+                }
+            }
+        }
+    }
+}
+
+/// Every Swift source in the app, read the way the detectors below read it.
+///
+/// **The walk is the point.** The first version of the no-test-button detector named two files, so
+/// the same button in `PairingWindow.swift`, or in a new file called anything at all, tripped
+/// nothing — a rule with a published way around it. `BoundaryTests` in this suite already walks both
+/// directories; this is the same walk, shared by the two detectors that need it.
+enum AppSources {
+
+    static func all() throws -> [(name: String, code: String)] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var found: [(String, String)] = []
+        for target in ["Sources/AgtermRemoteCore", "Sources/AgtermRemote"] {
+            let directory = root.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                where name.hasSuffix(".swift") {
+                found.append((
+                    "\(target)/\(name)",
+                    NoAggregateVerdictTests.stripped(
+                        try String(contentsOf: directory.appending(path: name), encoding: .utf8))))
+            }
+        }
+        return found
+    }
+
+    /// Every string handed to a `title:` label — which is how every button in this app is made.
+    /// Checking titles rather than identifiers is what catches the button whose function is called
+    /// something innocent.
+    static func buttonTitles(in code: String) -> [String] {
+        var titles: [String] = []
+        var rest = Substring(code)
+        while let marker = rest.range(of: "title: \"") {
+            let after = rest[marker.upperBound...]
+            guard let close = after.firstIndex(of: "\"") else { break }
+            titles.append(String(after[..<close]))
+            rest = after[close...]
+        }
+        return titles
+    }
+}
+
 /// The address screen's copy, and **the button that must never appear on it.**
 ///
-/// Both halves are checked by reading the sources rather than by trusting them, in the same shape as
+/// Checked by reading every source rather than by trusting them, in the same shape as
 /// `BoundaryTests`: a rule that lives only in a comment is a rule the next contributor deletes in
 /// good faith, and this is the one they are most likely to delete — a screen that asks for an address
 /// and then says nothing about whether it works reads as an unfinished feature.
 struct AddressPaneTests {
 
     private func source(_ path: String) throws -> String {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return NoAggregateVerdictTests.stripped(
-            try String(contentsOf: root.appending(path: path), encoding: .utf8))
+        guard let file = try AppSources.all().first(where: { $0.name == path }) else {
+            Issue.record("\(path) is not in the walk")
+            return ""
+        }
+        return file.code
     }
 
     /// The routes from the design document, all of them, and **no order of preference**. Listing what
@@ -104,7 +192,6 @@ struct AddressPaneTests {
         for endorsement in ["recommend", "we suggest", "best", "easiest", "simplest", "should use"] {
             #expect(!text.lowercased().contains(endorsement), "the address copy endorses a route (\(endorsement))")
         }
-        // Whose job it is, said rather than implied.
         #expect(OnboardingCopy.addressExplanation.contains("your job"))
     }
 
@@ -117,39 +204,97 @@ struct AddressPaneTests {
         #expect(said.contains("scan"))
     }
 
-    /// **The rule, enforced.** No control on the address pane offers to try the address.
+    /// **What the wildcard bind costs, disclosed on the screen.**
     ///
-    /// The forbidden words are the ones a contributor would actually write. It is not a proof — a
-    /// button called `runIt` would walk past this — but it is the difference between a rule that is
-    /// argued in a comment and a rule that fails a build.
-    private static let forbidden = [
-        "test this address", "test the address", "testaddress", "checkaddress", "probeaddress",
-        "verifyaddress", "tryaddress", "testconnection", "checkconnection", "title: \"test",
-    ]
+    /// Three of the four routes the copy lists involve no port forward at all, so nobody can be
+    /// assumed to have opened this port on purpose — and the bridge opens it on every network this
+    /// Mac joins regardless. The sentence says that, and says what stands in front of it.
+    @Test func theScreenSaysWhatThePortIsOpenOn() {
+        let said = OnboardingCopy.addressExposure
 
-    @Test func nothingOnTheAddressPaneOffersToTestTheAddress() throws {
-        for path in ["Sources/AgtermRemote/OnboardingWindow.swift", "Sources/AgtermRemoteCore/Onboarding.swift"] {
-            let code = try source(path).lowercased()
-            for phrase in Self.forbidden {
-                #expect(!code.contains(phrase), "\(path) offers to test the address (\(phrase))")
-            }
+        #expect(said.contains("every network this Mac joins"))
+        #expect(said.lowercased().contains("paired"), "it must say what gets past the port")
+        // Not an alarm. A sentence that told somebody they were exposed and stopped there would send
+        // them to turn off the thing they just set up.
+        for panic in ["danger", "warning", "insecure", "at risk"] {
+            #expect(!said.lowercased().contains(panic), "the disclosure reads as an alarm (\(panic))")
         }
     }
 
-    /// The control. The detector is shown the button in code and must see it, and shown the argument
-    /// against the button in prose and must not — **the real file argues the case at length**, so a
-    /// detector that fired on prose would be deleted by whoever it first blocked, taking the rule
-    /// with it.
-    @Test func theDetectorSeesAButtonAndIgnoresTheArgumentAgainstOne() {
-        let planted = NoAggregateVerdictTests.stripped(
-            #"let button = NSButton(title: "Test this address", target: self, action: #selector(check))"#
-        ).lowercased()
-        let argued = NoAggregateVerdictTests.stripped(
-            "// There is no button that offers to test the address, and there must never be one: a\n"
-                + "// Mac cannot honestly test its own public address.").lowercased()
+    /// **The two addresses, said as two things.** Somebody with a straight port forward has to be
+    /// able to read this and stop; somebody behind a proxying router has to learn that the field
+    /// exists.
+    @Test func theScreenSaysWhatTheSecondPortIs() {
+        let said = OnboardingCopy.arrivalPortExplanation
 
-        #expect(Self.forbidden.contains { planted.contains($0) })
-        #expect(!Self.forbidden.contains { argued.contains($0) }, "the detector fires on its own reasoning")
+        #expect(said.contains("your phone dials"))
+        #expect(said.lowercased().contains("straight through"), "the simple case must be named")
+        #expect(said.lowercased().contains("empty"), "it must say what doing nothing means")
+    }
+
+    /// **The rule, enforced.** No control anywhere in the app offers to try the address.
+    ///
+    /// Two detectors, because a contributor writes either one. Identifiers catch the plumbing; button
+    /// titles catch the button whose function has an innocent name — `NSButton(title: "Check
+    /// reachability", …)` wired to `refresh()` passes an identifier check and is exactly the thing
+    /// this forbids.
+    static let forbiddenIdentifiers = [
+        "test this address", "test the address", "testaddress", "checkaddress", "probeaddress",
+        "verifyaddress", "tryaddress", "testconnection", "checkconnection", "probetheaddress",
+    ]
+    /// Applied to button titles only, so `BridgeStatus.Reachable` and every other honest use of the
+    /// word in code is untouched.
+    static let forbiddenInTitles = ["test", "check reach", "reachab", "probe", "verify", "try it"]
+
+    /// Nil when the file is clean, otherwise what it does wrong. Pure, so a file that does not exist
+    /// can be handed to it — which is how the control below proves the rule is not a list of two
+    /// filenames.
+    static func offersToTestTheAddress(_ file: (name: String, code: String)) -> String? {
+        let code = file.code.lowercased()
+        if let hit = forbiddenIdentifiers.first(where: code.contains) { return hit }
+        for title in AppSources.buttonTitles(in: file.code) {
+            if let hit = forbiddenInTitles.first(where: title.lowercased().contains) {
+                return "a button titled \"\(title)\" (\(hit))"
+            }
+        }
+        return nil
+    }
+
+    @Test func nothingInTheAppOffersToTestTheAddress() throws {
+        let sources = try AppSources.all()
+        // The walk, asserted before its verdict is trusted: a detector reading an empty list reports
+        // every file clean.
+        #expect(sources.count > 8, "the walk found \(sources.count) sources")
+        #expect(sources.contains { $0.name.hasSuffix("PairingWindow.swift") }, "the walk misses a window")
+
+        for file in sources {
+            #expect(Self.offersToTestTheAddress(file) == nil, "\(file.name) offers to test the address")
+        }
+    }
+
+    /// The control, in three parts. The detector must see the button **in a file nobody thought to
+    /// watch**, must see the innocently-named one, and must not fire on the argument against the
+    /// button — the real file argues that case at length, and a detector that fired on its own
+    /// reasoning would be deleted by the first person it blocked.
+    @Test func theDetectorSeesAButtonAnywhereAndIgnoresTheArgumentAgainstOne() {
+        let unwatched = (
+            name: "Sources/AgtermRemote/AddressProbe.swift",
+            code: NoAggregateVerdictTests.stripped(
+                #"let button = NSButton(title: "Test this address", target: self, action: #selector(go))"#))
+        let innocentlyNamed = (
+            name: "Sources/AgtermRemote/PairingWindow.swift",
+            code: NoAggregateVerdictTests.stripped(
+                #"let b = NSButton(title: "Check reachability", target: self, action: #selector(refresh))"#))
+        let argued = (
+            name: "Sources/AgtermRemote/OnboardingWindow.swift",
+            code: NoAggregateVerdictTests.stripped(
+                "// There is no button that offers to test the address, and there must never be one:\n"
+                    + "// a Mac cannot honestly test its own public address, and a probe that binds\n"
+                    + "// proves nothing. Nobody may verify the address from here."))
+
+        #expect(Self.offersToTestTheAddress(unwatched) != nil)
+        #expect(Self.offersToTestTheAddress(innocentlyNamed) != nil)
+        #expect(Self.offersToTestTheAddress(argued) == nil, "the detector fires on its own reasoning")
     }
 
     /// The pane renders the library's copy rather than a second version of it. Two copies of a
@@ -160,8 +305,123 @@ struct AddressPaneTests {
         for reference in [
             "OnboardingCopy.addressHeading", "OnboardingCopy.addressExplanation",
             "OnboardingCopy.addressRoutes", "OnboardingCopy.addressIsUnprovenUntilAPhoneArrives",
+            "OnboardingCopy.addressExposure", "OnboardingCopy.arrivalPortHeading",
+            "OnboardingCopy.arrivalPortExplanation",
         ] {
             #expect(window.contains(reference), "the address pane does not render \(reference)")
         }
+    }
+}
+
+/// **This app touches nothing belonging to another installation on the owner's machine.**
+///
+/// It reached into a *different project's* directory in the home of somebody who is still running
+/// that project in parallel with this one, for a certificate helper this repository does not build.
+/// Nothing here owns that binary or its output; the app was borrowing a tool from somebody else's
+/// setup and presenting the result as its own.
+///
+/// Everything this app writes now lives under the state directory it passes the bridge, and the rule
+/// is checked rather than remembered — with the same walk the button detector uses, so a legacy path
+/// in a file nobody thought to watch fails too.
+struct NoLegacyPathTests {
+
+    /// Directory names belonging to installations that are not this one. `agterm-remote` is this
+    /// app's own state directory and is not on the list.
+    static let foreign = ["agterm-bridge", "bridgecert", ".config/agterm/"]
+
+    static func namesAForeignInstallation(_ file: (name: String, code: String)) -> String? {
+        let code = file.code.lowercased()
+        return foreign.first { code.contains($0.lowercased()) }
+    }
+
+    @Test func noSourceNamesAnotherInstallation() throws {
+        let sources = try AppSources.all()
+        #expect(sources.count > 8, "the walk found \(sources.count) sources")
+
+        for file in sources {
+            #expect(
+                Self.namesAForeignInstallation(file) == nil,
+                "\(file.name) reaches into another installation")
+        }
+    }
+
+    /// The control: a path planted in a file this test names nowhere is still seen, and the prose
+    /// that explains why the path is gone is not.
+    @Test func theDetectorSeesAPlantedPathAndIgnoresTheExplanation() {
+        let unwatched = (
+            name: "Sources/AgtermRemote/CodeMaker.swift",
+            code: NoAggregateVerdictTests.stripped(
+                #"let tool = home.appending(path: ".config/agterm-bridge/bin/bridgecert").path"#))
+        let explained = (
+            name: "Sources/AgtermRemote/main.swift",
+            code: NoAggregateVerdictTests.stripped(
+                "// It used to run a helper out of another project's directory in the owner's home.\n"
+                    + "// That is gone: this app owns only its own state directory."))
+
+        #expect(Self.namesAForeignInstallation(unwatched) != nil)
+        #expect(Self.namesAForeignInstallation(explained) == nil, "the detector fires on its own prose")
+    }
+}
+
+/// **Cmd-V, pinned by structure.**
+///
+/// This app shipped with no main menu, which means macOS had nowhere to deliver Paste, Copy, Cut,
+/// Select All or Undo — in every text field it will ever show, including the one the phone flow
+/// falls back to when a camera will not read a code. Nothing in a diff shows a line that was never
+/// written, so the shape is asserted here instead.
+@MainActor
+struct EditingMenuTests {
+
+    @Test func theEditMenuCarriesAllSixCommands() {
+        let edit = EditingMenu.make().items.compactMap(\.submenu).first { $0.title == "Edit" }
+
+        guard let edit else { return #expect(Bool(false), "there is no Edit menu") }
+        #expect(edit.items.map(\.title) == ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"])
+    }
+
+    /// **The selectors are the ones macOS actually sends**, and the key equivalents are the ones
+    /// people press. An item titled Paste that sends something else is a menu that looks right and
+    /// does nothing — the defect this replaces, wearing a disguise.
+    @Test func everyCommandSendsWhatMacOSSendsToTheFirstResponder() {
+        let edit = EditingMenu.make().items.compactMap(\.submenu).first { $0.title == "Edit" }!
+
+        for command in EditingMenu.commands {
+            guard let item = edit.items.first(where: { $0.title == command.title }) else {
+                #expect(Bool(false), "\(command.title) is missing")
+                continue
+            }
+            #expect(item.action == command.selector, "\(command.title) sends the wrong message")
+            #expect(item.keyEquivalent == command.key)
+            #expect(item.keyEquivalentModifierMask.contains(.command))
+            #expect(item.keyEquivalentModifierMask.contains(.shift) == command.holdsShift)
+            // **nil, so it goes to whatever is focused.** A target here would send every command to
+            // one object that implements none of them, and the menu would grey out in every window.
+            #expect(item.target == nil, "\(command.title) is aimed at something other than the focus")
+        }
+    }
+
+    @Test func theSixAreTheOnesPeopleReachFor() {
+        #expect(
+            EditingMenu.commands.map(\.key).sorted() == ["a", "c", "v", "x", "z", "z"],
+            "the standard editing keys are not all here")
+    }
+
+    /// Quit is a menu item too, for the same reason: Cmd-Q is delivered by one.
+    @Test func theApplicationMenuHoldsQuit() {
+        let application = EditingMenu.make().items.compactMap(\.submenu).first
+
+        #expect(application?.items.first?.action == #selector(NSApplication.terminate(_:)))
+        #expect(application?.items.first?.keyEquivalent == "q")
+    }
+
+    /// **It is installed, not merely constructible.** A menu nothing assigns is the same defect it
+    /// was written to fix, so the assignment is read out of the app's source.
+    @Test func theAppInstallsIt() throws {
+        let main = try AppSources.all().first { $0.name.hasSuffix("Sources/AgtermRemote/main.swift") }
+
+        guard let main else { return #expect(Bool(false), "main.swift is not in the walk") }
+        #expect(
+            main.code.contains("NSApp.mainMenu = EditingMenu.make()"),
+            "the app never assigns a main menu, so nothing delivers the editing commands")
     }
 }

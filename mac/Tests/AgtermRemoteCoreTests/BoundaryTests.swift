@@ -83,14 +83,29 @@ struct BoundaryTests {
     ///
     /// A boundary that only ever widens is a boundary nobody is reading. This one is narrower today
     /// than it was, and it names the bridge by the same constant the launch uses.
-    private static let allowedExecutables = [BridgeProcess.executableName, "bridgecert"]
+    /// It has shrunk again. `bridgecert` is gone with the code that ran it: the app was reaching into
+    /// a *different project's* directory in the owner's home for a helper this repository does not
+    /// build, and `NoLegacyPathTests` now fails on any path back to it. The pairing code will come
+    /// from this app's own bridge, over the control socket it already owns.
+    private static let allowedExecutables = [BridgeProcess.executableName]
 
-    @Test func theOnlyProcessesLaunchedAreTheBridgeAndTheCertificateTool() throws {
+    @Test func theOnlyProcessLaunchedIsTheBridge() throws {
         for source in try sources() {
             for forbidden in ["/bin/sh", "/bin/bash", "/bin/zsh", "-c \"", "system(", "posix_spawn", "NSTask"] {
                 #expect(!source.text.contains(forbidden), "\(source.name) can run a shell (\(forbidden))")
             }
-            if source.text.contains("Process(") {
+            // **`Process()`, constructed** — not any identifier ending in the word.
+            //
+            // This read `contains("Process(")`, which is also true of `BridgeProcess(`: the line that
+            // hands the supervisor its dependencies, in a file that starts nothing itself. It went
+            // unnoticed only because that same file happened to name an allowed executable for
+            // another reason, and the day the certificate helper was removed from it this fired on a
+            // file with no `Process` in it at all. A detector that answers a question nobody asked is
+            // one somebody eventually turns off.
+            //
+            // The teeth are unchanged: a file that constructs a Process must name an allowed
+            // executable, and `ChildProcessLauncher` — the one place that really does — still does.
+            if source.text.contains("= Process(") || source.text.contains(" Process()") {
                 #expect(
                     Self.allowedExecutables.contains(where: source.text.contains),
                     "\(source.name) launches a process that is on no allow-list")
@@ -170,5 +185,15 @@ struct BoundaryTests {
         #expect(plantedShell.contains("/bin/sh"))
         #expect(!Self.sockets.contains { discussed.contains($0) }, "the detector fires on its own prose")
         #expect(!Self.verbs.contains { discussed.contains($0) }, "the detector fires on its own prose")
+
+        // The process trigger, narrowed after it fired on `BridgeProcess(`. Both halves are held: a
+        // real construction is still seen, and the identifier that merely ends in the word is not.
+        let plantedProcess = NoAggregateVerdictTests.stripped("        let task = Process()")
+        let supervisor = NoAggregateVerdictTests.stripped(
+            "        bridge = BridgeProcess(launcher: ChildProcessLauncher(), executable: found)")
+        #expect(plantedProcess.contains("= Process(") || plantedProcess.contains(" Process()"))
+        #expect(
+            !(supervisor.contains("= Process(") || supervisor.contains(" Process()")),
+            "the process detector fires on a type whose name ends in the word")
     }
 }
