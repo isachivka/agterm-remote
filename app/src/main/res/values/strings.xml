@@ -53,7 +53,15 @@
       would otherwise leave the owner with nowhere to go.
     -->
     <string name="pairing_paste_title">Paste the code instead</string>
-    <string name="pairing_paste_body">The code is text as well as a picture. Copy it from your Mac, send it to this phone however you like, and paste it here.</string>
+    <!--
+      The last clause is not padding, and it is the disclosed cost of a decision made in the decoder:
+      nothing is trimmed on the way in. The two implementations of this format have to agree on what a
+      valid code IS, and a decoder that quietly accepts more than the other does is how they stop
+      agreeing - but Go skips carriage returns and newlines where this side refuses them, so a code
+      that travels through a channel which wraps it arrives valid on one machine and not on the other.
+      Without this sentence the owner gets "that is not a pairing code" and no idea why.
+    -->
+    <string name="pairing_paste_body">The code is text as well as a picture. Copy it from your Mac, send it to this phone however you like, and paste it here. Paste the whole code and nothing else — a stray space or line break makes it unreadable.</string>
     <string name="pairing_pair">Pair</string>
     <string name="pairing_working_title">Pairing…</string>
     <string name="pairing_working_body">Talking to your Mac. Nothing is stored on this phone until it answers.</string>

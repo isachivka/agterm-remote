@@ -75,6 +75,21 @@ import java.util.concurrent.Executors
  * Guidance is therefore driven by **the decoder not succeeding for a while**, which is a fact, rather
  * than by apparent size, which is the assumption the measurement contradicted.
  *
+ * ### Nothing in here may crash this screen
+ *
+ * Opening a camera is the part of this file that fails on somebody else's device rather than in our
+ * code, and **the screen already owns the state to fall into**: [PairingUi.NeedsCamera], with the
+ * paste field under it, which needs no camera and no permission. Two shapes are real and neither is
+ * exotic:
+ *
+ *  - a device with **no back camera**. `FEATURE_CAMERA_ANY` is satisfied by a front camera, so such a
+ *    phone passes the check the host makes and then throws on `DEFAULT_BACK_CAMERA`.
+ *  - a camera **held by another application**, which throws on the way in.
+ *
+ * Both used to reach the top of the stack as a crash on the pairing screen. They now call
+ * [onUnavailable] - see [cameraOrUnavailable], which is where the policy is, and `CameraGuardTest`,
+ * which asserts it.
+ *
  * ### What is proven about this file, and what is not
  *
  * The frame seam is covered off-device by `QrCodeTest`. Everything else here — the permission, the
@@ -85,6 +100,7 @@ import java.util.concurrent.Executors
 @Composable
 fun PairingViewfinder(
     onText: (String) -> Unit,
+    onUnavailable: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -103,8 +119,12 @@ fun PairingViewfinder(
     val executor = remember { Executors.newSingleThreadExecutor() }
     DisposableEffect(Unit) { onDispose { executor.shutdown() } }
 
+    // Held so the effect below can be told apart from "not ready yet": a provider that never
+    // arrives leaves this null forever, and nothing must go on waiting for it in silence.
+    val unavailable by rememberUpdatedState(onUnavailable)
+
     val provider by produceState<ProcessCameraProvider?>(null, context) {
-        value = ProcessCameraProvider.awaitInstance(context)
+        value = cameraOrUnavailable({ unavailable() }) { ProcessCameraProvider.awaitInstance(context) }
     }
 
     val preview = remember {
@@ -181,13 +201,18 @@ fun PairingViewfinder(
         }
 
         if (bound != null) {
-            bound.unbindAll()
-            camera = bound.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis,
-            )
+            // The unbind is inside the guard too. It is the call that would throw on a provider left
+            // in a bad state by whatever failed last time, and a throw here is as fatal as one from
+            // the bind - it happens in a DisposableEffect, on the main thread, with no catch above it.
+            camera = cameraOrUnavailable({ unavailable() }) {
+                bound.unbindAll()
+                bound.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis,
+                )
+            }
         }
 
         onDispose {
@@ -263,4 +288,33 @@ private fun readText(image: ImageProxy): String? {
         width = image.width,
         height = image.height,
     )
+}
+
+/**
+ * A CameraX call that can fail on somebody else's device, made to report rather than to crash.
+ *
+ * ### Why the catch is this wide
+ *
+ * Because the set of things that can go wrong opening a camera is not ours and is not enumerable. A
+ * device with no back camera raises `IllegalArgumentException`; one whose camera is held raises
+ * `CameraUnavailableException`, which is a checked exception; a provider in a bad state raises
+ * `IllegalStateException`; and vendors add their own. **Enumerating the ones we have seen would
+ * rebuild the exact defect this project keeps meeting** - a check that describes the failures somebody
+ * happened to meet rather than the property needed. The property is simple: if the camera will not
+ * open, this phone pairs by pasting the code, which is a route that always exists.
+ *
+ * The breadth is only safe because the consequence is a screen, not a deletion. Nothing here is
+ * destroyed, nothing is stored, and the owner is left in front of the field they can use.
+ *
+ * **`CancellationException` is re-thrown**, and that is not a detail. This runs inside `produceState`,
+ * so swallowing a cancellation would mean a composable that has left the screen going on believing it
+ * is alive - a coroutine leaked once per visit to a screen somebody may bounce in and out of.
+ */
+internal inline fun <T> cameraOrUnavailable(onUnavailable: () -> Unit, block: () -> T): T? = try {
+    block()
+} catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+} catch (e: Exception) {
+    onUnavailable()
+    null
 }

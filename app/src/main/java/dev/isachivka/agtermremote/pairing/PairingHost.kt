@@ -18,8 +18,6 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.security.GeneralSecurityException
-import java.security.cert.X509Certificate
 
 /**
  * The pairing sequence, as the five states the screen renders.
@@ -142,32 +140,38 @@ fun PairingHost(
         onRetry = flow::retry,
         modifier = modifier,
         // The same callback the Pair button is given. The scanner has no path of its own.
-        viewfinder = { onText -> if (permitted) PairingViewfinder(onText = onText) },
+        viewfinder = { onText ->
+            if (permitted) {
+                PairingViewfinder(
+                    onText = onText,
+                    // A camera that will not open lands where a refused one lands. `hasCamera` above
+                    // is satisfied by a FRONT camera, so a phone with no back camera reaches this
+                    // composable and fails inside it; so does a camera another application is
+                    // holding. Neither may crash a screen that owns a state for exactly this.
+                    onUnavailable = flow::cameraUnavailable,
+                )
+            }
+        },
     )
 }
 
 /**
  * One enrolment, off the main thread, with this phone's identity.
  *
- * The identity is generated on first use and **never replaced here**. Replacing a key is what took the
- * owner's pairing down on 2026-07-29, and the verdict that would trigger it — `SigningState.Unusable`
- * — is deliberately broad, which is right for a sentence on a screen and was catastrophic as a
- * deletion. A key that cannot sign therefore pairs and then cannot reach the API; that is a real gap,
- * it is recorded in `docs/pairing.md`, and closing it belongs with the Settings screen that owns
- * unpairing.
+ * The keystore is reached through [EnrolGate], which mints or reads the identity, refuses **before any
+ * socket is opened** when that identity will not sign, and only then enrols. The reasoning for the
+ * gate — and for why it refuses rather than replacing the key — is written there.
  *
- * `GeneralSecurityException` is caught because the alternative is a crash on a button press. It is
- * reported through the same arm as an unreachable Mac would not be — a key that will not mint is this
- * phone's problem, and the sentence says so.
+ * `Enrollment.enroll` writes [PairedLaptop] on success and nothing here writes it at all, so a
+ * pairing refused by the gate leaves exactly what was there before, on both machines.
  */
 private suspend fun defaultEnrol(payload: EnrollPayload, store: PairedLaptop): EnrollResult =
     withContext(Dispatchers.IO) {
-        val identity: X509Certificate = try {
-            PhoneIdentity.certificate()
-        } catch (e: GeneralSecurityException) {
-            return@withContext EnrollResult.Refused(NO_IDENTITY)
-        }
-        Enrollment.enroll(payload, identity, deviceName(), store)
+        EnrolGate.run(
+            identity = { PhoneIdentity.certificate() },
+            signing = { PhoneIdentity.signingState() },
+            enrol = { identity -> Enrollment.enroll(payload, identity, deviceName(), store) },
+        )
     }
 
 /**
@@ -178,8 +182,3 @@ private suspend fun defaultEnrol(payload: EnrollPayload, store: PairedLaptop): E
  * leaves the device and is stored on the Mac.
  */
 private fun deviceName(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
-
-/** The key would not mint. Nothing about the Mac is wrong, so the sentence must not blame it. */
-private const val NO_IDENTITY =
-    "This phone could not make the key that proves who it is. Try again, and if it keeps failing, " +
-        "restart the phone."

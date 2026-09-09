@@ -23,7 +23,7 @@
 #   4. hands the symbol to the emulator as the virtual scene's WALL poster and walks the virtual
 #      camera to it, using the emulator's own console commands;
 #   5. forwards the bridge's port into the emulator with `adb reverse`;
-#   6. clears the app, grants the camera permission, and opens it;
+#   6. builds and installs the app, grants the camera permission, and opens it;
 #   7. waits for the bridge to say a phone enrolled, and prints what it pinned.
 #
 # Nothing here touches the owner's own bridge, their agterm state, or a phone.
@@ -103,12 +103,14 @@ echo "== putting it in the virtual scene and walking the camera to it"
 # hand. Give it time to finish: it is an animation, and a screenshot taken mid-walk shows the camera
 # somewhere it is not going to stay.
 #
-# **The WALL poster, not the table one, and that is a measurement rather than a preference.** The
-# table poster is 1m square and lies flat, so from where this macro stands the symbol arrives
-# strongly foreshortened; a 53-module code on it was NOT read, repeatedly. The wall poster is 2m
-# square and roughly square-on to the camera, and the same code on it is read within a second or two.
-# That is the 7-9 pixels per module cliff the 2026-08-09 probe measured, showing up in a place where
-# it can be seen.
+# **The WALL poster, not the table one, and that is an observation rather than a preference.** The
+# same code on the scene's table poster - 1m square, lying flat, so seen small and at a glancing angle
+# - was NOT read, repeatedly, while the viewfinder showed it plainly. On the wall poster, 2m square
+# and roughly square-on, it reads in a second or two.
+#
+# **Which variable did it is not known**: size, distance and angle all changed together, and
+# perspective defeats a grid decoder independently of module size. It is not evidence for a
+# pixels-per-module threshold and must not be quoted as one - see docs/pairing.md.
 "$adb" emu virtualscene-image wall "$work/code.png" >/dev/null
 "$adb" emu automation play "$ANDROID_HOME/emulator/resources/macros/Walk_to_image_room" >/dev/null
 sleep 12
@@ -117,6 +119,13 @@ echo "== forwarding the port the phone dials into the emulator"
 # 127.0.0.1 and not the host alias: dialling the emulator's host alias hangs in SYN-SENT, an
 # IPv4-mapped IPv6 socket against the emulator's NAT.
 "$adb" reverse "tcp:$port" "tcp:$port"
+
+echo "== building and installing the app"
+# Built and installed rather than assumed present. `connectedDebugAndroidTest` UNINSTALLS the app when
+# it finishes, so a run of this script after a test run met "package not found" from `pm clear` and
+# stopped one line into the part that matters.
+(cd "$root" && ./gradlew assembleDebug -q)
+"$adb" install -r "$root/app/build/outputs/apk/debug/app-debug.apk" >/dev/null
 
 echo "== opening the app on a phone that has never been paired"
 "$adb" shell pm clear "$package" >/dev/null

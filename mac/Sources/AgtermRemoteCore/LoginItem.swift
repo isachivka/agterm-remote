@@ -25,7 +25,8 @@ public struct LoginItem: Sendable {
     ///
     /// **Never cached.** The owner can turn this off in System Settings while the app is running, and
     /// a remembered `true` is how an app tells somebody something that stopped being true — the same
-    /// rule `CameraAccess` follows on the phone, for the same reason.
+    /// rule the phone's pairing screen follows for the camera, for the same reason: the affordance
+    /// exists whenever the thing behind it does, and the permission is asked when it is used.
     public enum Registration: Equatable, Sendable {
         case registered
         case notRegistered
