@@ -71,10 +71,19 @@ public enum Quarantine {
     ) -> Bool {
         guard let raw = read(url.path, attribute) else { return false }
         guard let flags = flags(in: raw) else {
-            // Present and unreadable. **Let it through**, deliberately: the cost of being wrong here
-            // is one silent hang, which the launch backstop catches and reports; the cost of being
-            // wrong the other way is refusing an application that works, with a false explanation.
-            // That was the defect this rule replaced.
+            // Present and unreadable. **Let it through**, deliberately — but the cost of that is
+            // worse than it first looked and is written down at full price here.
+            //
+            // Being wrong this way costs a hang AND disarms the remedy that hang then prints: the
+            // spawn is a blocked exec, and once macOS has blocked an exec on an item it refuses
+            // `removexattr` on that item and its enclosing bundle permanently. So the owner reaches
+            // the launch backstop's message, which for exactly that reason no longer offers a
+            // command — only the Finder door, which still works.
+            //
+            // Still the right default. Nothing here enforces anything: the kernel does, and this
+            // check only decides whether to show a paragraph. Being wrong the other way refuses an
+            // application that works, with a false explanation, on the path every real owner takes —
+            // which is the defect this rule replaced.
             return false
         }
         return flags & userApproved == 0

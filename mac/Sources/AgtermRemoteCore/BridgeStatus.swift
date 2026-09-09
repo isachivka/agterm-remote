@@ -24,8 +24,16 @@ import Foundation
 public struct BridgeStatus: Equatable, Sendable {
 
     /// Fact 1: our half is up.
+    ///
+    /// **Three cases, because a spawned process is not a running bridge.** `.starting` is the window
+    /// between the child being spawned and it announcing a bound listener — up to
+    /// `BridgeProcess.readyCeiling`, and forever for a binary macOS has frozen. Reporting that window
+    /// as `.running` told the owner a held bridge was Running for ten seconds before it flipped to
+    /// failed, which is the one thing this status exists not to do.
     public enum Running: Equatable, Sendable {
         case running
+        /// Spawned, not yet answering. Stop applies; Start does not.
+        case starting
         case notRunning
     }
 

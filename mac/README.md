@@ -146,12 +146,25 @@ person who downloads one**, so the app does not leave it as a button that does n
   hang that the backstop below catches and reports.
 - **The app will not clear it.** Quarantine is macOS's record that this code came from outside; an app
   that erased that record about itself as a side effect of somebody pressing Start would be deleting
-  the only Gatekeeper signal a non-notarised app is subject to. That argument is deliberately the
-  only one here — two review rounds carried confident and *opposite* claims about whether
-  `removexattr` would succeed, and measurement here (unentitled, and from inside the quarantined
-  bundle, across approved and unapproved flags, with and without a UUID) succeeded every time while
-  review measured `EPERM`. The design does not rest on the answer; a test asserts the app calls
-  neither `removexattr` nor `setxattr`.
+  the only Gatekeeper signal a non-notarised app is subject to. A test asserts the app calls neither
+  `removexattr` nor `setxattr`.
+- **Removal is possible until a blocked exec happens, and refused forever after.** Two review rounds
+  produced opposite measurements here and both were right; the missing variable was neither
+  entitlement nor flags. Reproduced 4/4:
+
+  ```
+  A. fresh unapproved bundle, no exec attempted   removexattr:  0  → removed
+  B. spawn the bridge once; macOS freezes it
+  C. the same binary, after that blocked exec     removexattr: -1  EPERM, attribute survives
+     and the enclosing .app                       removexattr: -1  EPERM
+  ```
+
+  It is permanent and survives the child's death. **This is why the two messages differ**:
+  `Quarantine.explanation` is printed *before* any spawn, so it hands over `xattr -dr` and that works;
+  `BridgeProcess.notReadySentence` is printed *only after* a spawn produced nothing — which in the
+  Gatekeeper case is exactly that blocked exec — so offering `xattr -dr` there would be a command
+  guaranteed to fail with *Operation not permitted*. That message offers the Finder door instead, and
+  keeps `xattr -l`, which is never refused.
 - **The remedy is copyable.** `NSAlert.informativeText` is not selectable, so the `xattr -dr` command
   — a quoted absolute path, typed from memory into a shell — gets its own accessory view: a
   selectable monospaced field with a Copy button beside it.
@@ -160,6 +173,11 @@ person who downloads one**, so the app does not leave it as a button that does n
   that reads the bridge's source, and the bridge's own suite starts it on a real port, waits for that
   line and then dials the port. Without that, the invariant lived in Go with nothing on that side
   holding it, and a reworded log line would have disarmed the check silently.
+- **The state is `.starting` until the ready line arrives**, not `.running` on spawn. Announcing
+  `.running` for a spawned pid meant a bridge macOS had frozen was described to the owner as *Running*
+  for the whole ceiling before flipping to failed. `BridgeStatus.Running` has three cases now; Stop
+  stays pressable across `.starting` and `.running`, which is a different question from whether the
+  bridge is up and used to be the same bool.
 - **The ceiling is ten seconds**, and two was wrong. Two was measured against how long the bridge
   takes to announce itself *after* `main`; the cost that matters is spawn-to-`main` — macOS validating
   the signature of a fresh 18 MB universal binary on first exec. Five fresh copies on an idle machine:

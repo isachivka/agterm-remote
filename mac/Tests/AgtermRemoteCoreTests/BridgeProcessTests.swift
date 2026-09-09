@@ -73,6 +73,11 @@ struct BridgeProcessTests {
         var lastPid: Int32 { lock.withLock { _lastPid } }
         var launches: Int { lock.withLock { _launched.count } }
 
+        /// What the child has written. Nil by default, which is now the honest default: a spawned
+        /// process that has said nothing is `.starting`, not `.running`.
+        nonisolated(unsafe) var says: String?
+        func lastOutput(of _: Int32) -> String? { says }
+
         /// Everything that was started and never terminated. The orphans, by name.
         var leaked: [Int32] {
             lock.withLock { _launched.filter { !_terminated.contains($0) } }
@@ -175,10 +180,17 @@ struct BridgeProcessTests {
         _ launcher: ProcessLauncher,
         clock: Clock = Clock(),
         schedule: ImmediateSchedule = ImmediateSchedule(),
+        watchForSilence: ImmediateSchedule? = nil,
     ) -> BridgeProcess {
-        BridgeProcess(
+        // Never scheduled unless a test asks for it. A synchronous readiness poll runs its whole ten
+        // seconds of turns inside `start`, which is the point in the tests that are about readiness
+        // and noise in every other one — those assert `.starting`, which is what a child that has not
+        // announced itself is.
+        let idle: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void = { _, _ in }
+        return BridgeProcess(
             launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
-            now: { clock.now }, schedule: schedule.run)
+            now: { clock.now }, schedule: schedule.run,
+            watchForSilence: watchForSilence.map(\.run) ?? idle)
     }
 
     // MARK: - 1. The launch
@@ -194,7 +206,10 @@ struct BridgeProcessTests {
         #expect(launcher.arguments.contains("0.0.0.0:8443"))
         #expect(launcher.arguments.contains("--parent-pid"))
         #expect(launcher.arguments.contains(String(ProcessInfo.processInfo.processIdentifier)))
-        #expect(bridge.state == .running(pid: launcher.lastPid))
+        // `.starting`, and this is the assertion that changed: a spawned pid is not a running bridge.
+        // It becomes `.running` when the child announces a bound listener, which this launcher's
+        // child has not done.
+        #expect(bridge.state == .starting)
     }
 
     /// The state directory is required by the binary and has no default there on purpose, so the app
@@ -390,7 +405,10 @@ struct BridgeProcessTests {
         let second = launcher.lastPid
         launcher.drain()
 
-        #expect(bridge.state == .running(pid: second))
+        // Still the second child, and still `.starting` because it has not announced itself — the
+        // property under test is that the FIRST child's exit did not knock it out of that state.
+        #expect(bridge.state == .starting)
+        #expect(launcher.leaked == [second])
     }
 
     /// Stop, Start, Stop, Start — the ordering that produced two live bridges in the field.
@@ -459,8 +477,11 @@ struct BridgeProcessTests {
     /// changes without announcing itself is a menu that offers Start for a running bridge.
     @Test func everyTransitionIsAnnounced() throws {
         let launcher = RecordingLauncher()
+        // Its child announces itself, so the run reaches `.running` — through the readiness poll,
+        // which is what promotes it now.
+        launcher.says = "\(BridgeProcess.readyMarker) 0.0.0.0:8443"
         let seen = Announcements()
-        let bridge = bridge(launcher)
+        let bridge = bridge(launcher, watchForSilence: ImmediateSchedule())
         bridge.onStateChange = { seen.append($0) }
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
@@ -560,7 +581,11 @@ struct BridgeProcessTests {
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 
-        #expect(watch.delays == [BridgeProcess.readyCeiling], "\(what)")
+        // The poll, spelled out: one turn every `readyStep` until the ceiling is spent. Asserted as
+        // the shape rather than as a single delay, because the state is `.starting` throughout and
+        // the turns are what make that a bounded claim rather than a permanent one.
+        #expect(watch.delays.count == BridgeProcess.readyAttempts, "\(what)")
+        #expect(watch.delays.allSatisfy { $0 == BridgeProcess.readyStep }, "\(what)")
         #expect(launcher.terminated == [5150], "\(what): a frozen child must not be left running")
         guard case .failed(let sentence) = bridge.state else {
             Issue.record("\(what): state must be .failed, was \(bridge.state)")
@@ -586,6 +611,52 @@ struct BridgeProcessTests {
 
         #expect(launcher.terminated.isEmpty)
         #expect(bridge.state == .running(pid: 5150))
+        // One turn, not forty. A bridge that is up stops being described as starting immediately.
+        #expect(watch.delays == [BridgeProcess.readyStep])
+    }
+
+    /// **A spawned pid is announced as `.starting`, and the menu is told so.**
+    ///
+    /// This is the whole of the previous defect: `.running` was announced on spawn, so a bridge macOS
+    /// had frozen was described to the owner as Running for the entire ceiling — ten seconds of a
+    /// menu asserting something that was never true — before flipping to failed.
+    @Test func aSpawnedChildIsStartingUntilItAnnouncesItself() throws {
+        let launcher = SayingLauncher(nil)
+        let watch = ImmediateSchedule()
+        let seen = Announcements()
+        let bridge = BridgeProcess(
+            launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
+            watchForSilence: { _, _ in })
+        bridge.onStateChange = { seen.append($0) }
+
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        #expect(bridge.state == .starting)
+        #expect(seen.states == [.starting], "nothing may claim it is running")
+        _ = watch
+    }
+
+    /// **The freeze message must not hand out a command that cannot work.**
+    ///
+    /// Measured, four times out of four: `com.apple.quarantine` can be removed right up until a
+    /// blocked exec has been attempted on that item, and is refused with EPERM from then on — on the
+    /// binary and on the enclosing `.app`, permanently. This sentence is printed only after a spawn
+    /// that produced nothing, which in the Gatekeeper case IS that blocked exec. So `xattr -dr` here
+    /// would fail every time, and the owner would conclude the instructions are broken.
+    ///
+    /// The pre-spawn refusal is the opposite case and keeps the command: nothing has been spawned
+    /// there, so removal still works.
+    @Test func theFreezeMessageOffersTheFinderRatherThanACommandThatWouldBeRefused() {
+        let sentence = BridgeProcess.notReadySentence(executable: Self.executable, said: nil)
+
+        #expect(!sentence.contains("xattr -dr"), "a command that is guaranteed to fail here")
+        #expect(sentence.contains("Finder"), "the door that does still work")
+        // `xattr -l` stays: reading the attribute is never refused, and it is how somebody confirms
+        // this is what happened.
+        #expect(sentence.contains("xattr -l"))
+
+        // And the pre-spawn message, which is printed before anything has been blocked, still does.
+        #expect(Quarantine.explanation(for: Self.executable).contains("xattr -dr com.apple.quarantine"))
     }
 
     /// **The contract, read out of the other language.**

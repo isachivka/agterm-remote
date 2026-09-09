@@ -66,7 +66,11 @@ public struct MenuModel: Sendable {
         guard let status else { return .notChecked }
         if case .notOurs = status.identified { return .answeredBySomethingElse }
         if case .noAnswer = status.reachable { return .nothingAnswered }
-        if status.running == .notRunning { return .bridgeNotRunning }
+        // `.starting` is not running. It is honestly the same glyph as not-running: the bridge is
+        // not answering, which is what the mark is about, and inventing a sixth shape for a window
+        // that is normally a few hundred milliseconds would add a state to a five-state vocabulary
+        // for something nobody would see.
+        if status.running != .running { return .bridgeNotRunning }
         if status.identified == .notEstablished { return .nothingAnswered }
         return .allThreeHold
     }
@@ -95,15 +99,20 @@ public struct MenuModel: Sendable {
     /// What the *state* alone says. Never used directly by the menu — [items] narrows it by what is
     /// actually wired.
     private static func stateItems(status: BridgeStatus?, hasAddress: Bool, launchesAtLogin: Bool) -> [MenuItem] {
-        let running = status?.running == .running
+        // **Two different questions, and they were one bool.** Whether the bridge is UP decides the
+        // glyph above; whether something is up OR on its way decides which of Start and Stop can be
+        // pressed. They only came apart when `.starting` stopped meaning "about to be running" and
+        // started meaning "spawned and not answering yet" — during which Stop must work, because
+        // stopping a bridge that is hanging is precisely what the owner wants to do.
+        let inFlight = status?.running != nil && status?.running != .notRunning
         return [
             // Needs an address to encode. Offering it without one would mint a code for nothing.
             MenuItem(action: .showPairingCode, title: "Show the pairing code…", enabled: hasAddress),
             // ALWAYS available: it is the only way out of first run, and the only way to correct a
             // wrong address - which is the failure this whole app exists to make visible.
             MenuItem(action: .setAddress, title: "Set the address…", enabled: true),
-            MenuItem(action: .startBridge, title: "Start the bridge", enabled: !running),
-            MenuItem(action: .stopBridge, title: "Stop the bridge", enabled: running),
+            MenuItem(action: .startBridge, title: "Start the bridge", enabled: !inFlight),
+            MenuItem(action: .stopBridge, title: "Stop the bridge", enabled: inFlight),
             // Enabled even when it is down, because "restart" on a stopped bridge is "start it", and a
             // pin without a restart pins nothing - main.go reads phone-cert.pem once at startup.
             MenuItem(action: .restartBridge, title: "Restart the bridge", enabled: true),

@@ -150,6 +150,13 @@ public final class BridgeProcess: @unchecked Sendable {
     /// binary macOS is holding takes forever.
     public static let readyCeiling: TimeInterval = 10
 
+    /// How often the bridge is asked whether it has announced itself yet.
+    ///
+    /// The state is `.starting` until it has, so this is also how long a healthy bridge spends being
+    /// described as starting when it is already up — a quarter second, against a cold first exec of
+    /// roughly six hundred milliseconds.
+    public static let readyStep: TimeInterval = 0.25
+
     public enum Failure: Error, Equatable, CustomStringConvertible {
         /// Nothing was spawned at all. Carries the sentence that is also in `.failed`.
         case couldNotStart(String)
@@ -385,15 +392,45 @@ public final class BridgeProcess: @unchecked Sendable {
             exitDuringLaunch = nil
             handle(exit: status, run: mine)
         } else {
-            set(.running(pid: started))
+            // **`.starting`, not `.running`.** A spawned pid is not a working bridge — that is the
+            // whole premise of the readiness watch below, and announcing `.running` here contradicted
+            // it: a bridge macOS had frozen was described as Running for the entire ceiling before
+            // flipping to failed. `.starting` is exactly what those seconds are, and the menu already
+            // treats `.starting` as something Stop can be pressed on.
+            //
             // Armed per launch, and it belongs to this launch: `mine` is checked when it fires, so a
             // Stop, a retry or a fresh Start in the meantime makes it a no-op rather than a verdict
             // about somebody else's child.
-            watchForSilence(Self.readyCeiling) { [weak self] in
-                self?.giveUpIfItNeverBecameReady(run: mine)
-            }
+            askAgainWhetherItIsReady(run: mine, attempt: 0)
         }
         return nil
+    }
+
+    /// One turn of the readiness poll. Written as a self-rescheduling step with a counted bound
+    /// rather than a loop, because the wait belongs to the injected scheduler — a loop here would
+    /// hold this object's lock for ten seconds on whatever thread the launch happened on.
+    private func askAgainWhetherItIsReady(run: Int, attempt: Int) {
+        watchForSilence(Self.readyStep) { [weak self] in
+            self?.checkWhetherItIsReady(run: run, attempt: attempt + 1)
+        }
+    }
+
+    /// How many turns the poll gets before the child is treated as frozen.
+    static var readyAttempts: Int { Int((readyCeiling / readyStep).rounded()) }
+
+    private func checkWhetherItIsReady(run: Int, attempt: Int) {
+        lock.withLock {
+            guard run == runID, !stopping else { return }
+            guard case .starting = _state, let alive = pid else { return }
+            // Bound and answering, in the bridge's own words. See `readyMarker`.
+            if launcher.lastOutput(of: alive)?.contains(Self.readyMarker) == true {
+                return set(.running(pid: alive))
+            }
+            guard attempt >= Self.readyAttempts else {
+                return askAgainWhetherItIsReady(run: run, attempt: attempt)
+            }
+            giveUpOnUnready(alive)
+        }
     }
 
     /// **The generic backstop: launched, alive, and never became ready.**
@@ -412,38 +449,50 @@ public final class BridgeProcess: @unchecked Sendable {
     ///
     /// No retry. Five attempts at something that hangs are five hangs and a minute of a menu that
     /// says it is starting.
-    private func giveUpIfItNeverBecameReady(run: Int) {
-        lock.withLock {
-            guard run == runID, !stopping else { return }
-            guard case .running(let alive) = _state else { return }
-            // Bound and answering, in the bridge's own words. See `readyMarker`.
-            if launcher.lastOutput(of: alive)?.contains(Self.readyMarker) == true { return }
-
-            // Same shape as `stop()`: mark first so the exit this causes is not read as a crash and
-            // retried, and bump the generation so a retry already waiting is no longer ours to make.
-            stopping = true
-            generation += 1
-            launcher.terminate(alive)
-            pid = nil
-            set(.failed(Self.notReadySentence(executable: executable, said: launcher.lastOutput(of: alive))))
-        }
+    /// Called with the lock held, from the last turn of the poll.
+    private func giveUpOnUnready(_ alive: Int32) {
+        // Same shape as `stop()`: mark first so the exit this causes is not read as a crash and
+        // retried, and bump the generation so a retry already waiting is no longer ours to make.
+        stopping = true
+        generation += 1
+        launcher.terminate(alive)
+        pid = nil
+        set(.failed(Self.notReadySentence(executable: executable, said: launcher.lastOutput(of: alive))))
     }
 
     /// What a bridge that never bound is reported as. The observation first and the inference second,
     /// because the observation is a fact and the cause is a guess — and whatever the child did manage
     /// to say last, since that is evidence and this app did not write it.
+    ///
+    /// ### Why this message does NOT offer `xattr -dr`, and [Quarantine.explanation] does
+    ///
+    /// **Because here it would be a command that cannot work.** Measured, four times out of four:
+    /// removing `com.apple.quarantine` is permitted right up until a blocked exec has been attempted
+    /// on that item, and refused with `EPERM` from then on — on the binary *and* on the enclosing
+    /// `.app`, permanently, surviving the child's death. This sentence is printed **only** after a
+    /// spawn that produced nothing, which in the Gatekeeper case is exactly that blocked exec. So by
+    /// the time anybody reads this, `xattr -dr` is guaranteed to fail with "Operation not permitted",
+    /// and an owner following it would conclude the instructions are broken rather than that they
+    /// need a different door.
+    ///
+    /// Opening the app from the Finder still works, so that is the whole of the advice here.
+    /// [Quarantine.explanation] is printed *before* any spawn, where removal genuinely still works,
+    /// and there the command is correct.
     static func notReadySentence(executable: URL, said: String?) -> String {
         var sentence = """
             The bridge started but never reported a listening address, so it has been stopped.
 
             A working bridge announces the port it is listening on within a second or so of starting. \
-            One that never does was launched and never ran, or could not bind. If the app arrived by \
-            download, macOS may be holding it — check with:
+            One that never does was launched and never ran, or could not bind.
+
+            If this app arrived by download, macOS is probably holding it. Open it once from the \
+            Finder — right-click the application and choose Open, then allow it — and start the bridge \
+            again. You can see whether that is what happened with:
 
                 xattr -l "\(Quarantine.enclosingBundle(of: executable)?.path ?? executable.path)"
 
-            If `com.apple.quarantine` is listed with flags that do not end in an approved bit, open \
-            the app from the Finder once and allow it, or clear the attribute with `xattr -dr`.
+            Removing the attribute will not work at this point: macOS refuses that once it has blocked \
+            a program from starting, which is what just happened.
             """
         if let said = said?.trimmingCharacters(in: .whitespacesAndNewlines), !said.isEmpty {
             sentence += "\n\nIt said:\n\(lastBytes(said, sentenceOutputLimit))"
