@@ -92,9 +92,10 @@ struct AddressTests {
         let address = Address(host: "agterm.example-homelab.invalid", port: 8443)
 
         #expect(address.listen(on: 8444) == "0.0.0.0:8444")
-        // And the dial address is untouched by it: the QR carries what the phone dials.
-        #expect(PairingCodeCommand.invocation(binary: "/opt/bin/x", address: address.dial).arguments
-            == ["qr", "--host", "agterm.example-homelab.invalid", "--port", "8443"])
+        // And the dial address is untouched by it. The two travel to the bridge as two flags — the
+        // bind and the address a phone dials — because a code minted from the bind names every
+        // interface and therefore none.
+        #expect(address.dial.displayed == "agterm.example-homelab.invalid:8443")
     }
 
     /// No arrival port means follow the dial port — **stored as an absence, never as a copy**. A copy

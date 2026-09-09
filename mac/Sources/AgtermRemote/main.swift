@@ -5,8 +5,8 @@ import AppKit
 ///
 /// Every item but Quit was once lit and inert, and on 2026-08-10 the owner pressed two of them and
 /// nothing happened. **Both halves of that are fixed here**: `implemented` decides what is pressable
-/// AND what is wired, and *Show the pairing code* opens a real window. The items still missing are
-/// absent from that set, so they are greyed rather than pressable.
+/// AND what is wired, and *Pair a phone…* opens a real panel over the bridge's own control socket.
+/// The items still missing are absent from that set, so they are greyed rather than pressable.
 ///
 /// ### No window at launch, and no Dock icon
 ///
@@ -35,14 +35,31 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// lit, pressable, and incapable. A missing binary is not a reason to offer the control and
     /// apologise afterwards; it is a reason for the control to look as dead as it is.
     private var implemented: Set<MenuAction> {
-        // `.showPairingCode` is NOT in this set. Nothing in this build can make a code, and an item
-        // that opens a window to apologise is the defect of 2026-08-10 wearing a politer face: it
-        // looks pressable and does nothing. It comes back lit when the panel that asks the bridge
-        // for a code lands, and not one change earlier.
-        var actions: Set<MenuAction> = [.quit, .setAddress, .startAtLogin]
+        // `.pairPhone` is in this set now, and the sentence it replaces said it would come back "when
+        // the panel that asks the bridge for a code lands, and not one change earlier". This is that
+        // change: the panel opens an enrolment window over the bridge's own control socket and draws
+        // what comes back. It is offered even when the bridge is down, because the panel's answer to
+        // that is a sentence naming it — which is more use than a greyed item that says nothing.
+        //
+        // `.unpair` likewise: the menu only carries the item when the bridge reports a phone, so an
+        // action that cannot apply is absent rather than lit.
+        var actions: Set<MenuAction> = [.quit, .setUp, .startAtLogin, .pairPhone, .unpair]
         if bridge != nil { actions.formUnion([.startBridge, .stopBridge]) }
         return actions
     }
+
+    /// The bridge's local door. Constructed once and pointed at the state directory this app hands the
+    /// bridge, so the two cannot disagree about where the socket is.
+    private let control = UnixControlClient(stateDirectory: MenuBarApp.stateDirectory)
+
+    /// The panel, as a value. The window above renders it and the clock below advances it; neither
+    /// decides anything.
+    private lazy var panel = PairingPanelModel(control: control, now: Date.init)
+
+    /// What the bridge last said it holds. **Read from the socket, not remembered from a file**: the
+    /// trust store's modification date says a phone once enrolled and keeps saying it after the phone
+    /// is dropped.
+    private var pairedPhones: [PairedPhone] = []
 
     private let loginItem = LoginItem(service: SystemLoginItem())
 
@@ -120,9 +137,24 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// The trust store is the bridge's own record that a phone completed enrolment. Credited to the
     /// address only if it happened after that address was stored — the rule is in
     /// `AddressPreference.recordEnrolment`, and it is why a new address starts unproven.
+    ///
+    /// ### The bridge's own list outranks the file's date, and that inversion arrived with Unpair
+    ///
+    /// `EnrolmentRecord` reads the modification date of the trust store, and it was honest while
+    /// nothing on this side could unpair: only a phone completing enrolment ever wrote that file. Its
+    /// own note said so and named this as the thing that would break it — an emptied trust store is
+    /// still a file with a recent date, so after an unpair the address would go on claiming a phone
+    /// paired through it minutes ago. So when the bridge can be asked, it is: an empty list is
+    /// unproven, whatever the file's date says. When it cannot — the bridge is not running, which is
+    /// most of the time — the file is still the best answer available and nothing here pretends
+    /// otherwise.
     @discardableResult
     private func refreshProvenance() -> Date? {
-        AddressPreference.recordEnrolment(
+        if let paired = try? control.status().paired {
+            pairedPhones = paired
+            if paired.isEmpty { return AddressPreference.recordEnrolment(at: nil) }
+        }
+        return AddressPreference.recordEnrolment(
             at: EnrolmentRecord.recordedAt(inStateDirectory: Self.stateDirectory))
     }
 
@@ -155,7 +187,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // about what an address is.
         onboarding.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
         onboarding.arrivalPortText = Self.arrivalPortText()
-        onboarding.onShowPairingCode = { [weak self] in self?.openPairing(focusAddress: false) }
+        onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }
         onboarding.onRecheck = { [weak self] in
             guard let self else { return }
             let again = onboardingNow()
@@ -216,7 +248,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { [weak self] in
-            self?.bridge?.stop()
+            // **`stopAndWait`, not `stop`.** The kill is off the caller's thread now, and this line is
+            // immediately followed by this process ceasing to exist — a stop that returned early here
+            // would take the app with it before the signal was ever delivered.
+            self?.bridge?.stopAndWait()
             // Not NSApp.terminate: a modal alert on screen would swallow it, and something that was
             // sent SIGTERM has already been told to go rather than asked.
             exit(0)
@@ -231,50 +266,143 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_: Notification) {
         pairingWatch?.invalidate()
-        bridge?.stop()
+        panelClock?.invalidate()
+        // The enrolment window is closed on the way out. It would expire on its own within five
+        // minutes; leaving the one anonymous branch of the front door open for five minutes because
+        // somebody quit the app is not a thing to leave to a timer.
+        panel.close()
+        // See the SIGTERM handler: this is the other path that must not return before the child is
+        // actually gone.
+        bridge?.stopAndWait()
     }
 
-    /// **There is no pairing code in this build, and this app reaches for no binary to get one.**
+    /// **The code comes from this app's own bridge, over its own control socket.**
     ///
-    /// It used to run a certificate helper out of a *different project's* directory in the owner's
+    /// It used to come from a certificate helper in a *different project's* directory in the owner's
     /// home — the installation they are still running, in parallel with this one. Nothing in this
     /// repository builds that binary and nothing here owns its output, so the app was borrowing a
-    /// tool from somebody else's setup and calling the result its own. That is gone.
+    /// tool from somebody else's setup and calling the result its own. That is gone, and so is the
+    /// PNG on the Desktop it wrote: the code now lives exactly as long as the panel showing it.
+    @objc private func pairPhone() { openPairing() }
+
+    /// Setting the address is **setup**, and setup is one screen with the explanation on it.
     ///
-    /// The bridge in this repository answers `pair-open` on its own control socket, inside the state
-    /// directory this app already passes it, and the panel that asks it is the next change. Until
-    /// then the window says the code is not available rather than naming a path.
-    private let noCodeYet: (DialAddress) -> Result<String, PairingCodeFailure> = { _ in
-        .failure(.notBuiltYet)
+    /// This was *Set the address…*, and it opened the pairing window with the cursor in a box. That
+    /// made sense while the pairing window held the address; it does not now. A person changing where
+    /// their phone dials needs the paragraph about port forwards, the second port and what stays
+    /// unproven — all of which is on the setup screen and none of which fits beside a live enrolment
+    /// code.
+    @objc private func setUp() { showOnboarding(onboardingNow()) }
+
+    private func openPairing() {
+        guard case .success(let address) = AddressPreference.read() else {
+            // Nothing to encode. The way out is the setup screen, and the owner is sent there rather
+            // than shown a panel apologising — the menu item is greyed without an address anyway, so
+            // this is the belt to that braces.
+            notify(
+                "There is no address yet.",
+                "The pairing code carries the address your phone will dial, so it has to exist first. "
+                    + "Set it up, then come back.")
+            return setUp()
+        }
+        pairing.address = address.displayed
+        pairing.onClose = { [weak self] in self?.closePairing() }
+        pairing.onAskForAnotherCode = { [weak self] in self?.mintACode() }
+        mintACode()
+        startThePanelClock()
     }
 
-    /// *Set the address…* and *Show the pairing code…* are **two doors into one window**.
-    ///
-    /// The owner asked for a single pairing screen holding the code and the certificate; the address
-    /// belongs on it for the same reason, because a code and the address it encodes are one fact. The
-    /// menu item stays because that is where somebody looks for it, and it lands on the same screen
-    /// with the cursor in the host box — somewhere identical, not somewhere similar.
-    @objc private func setAddress() { openPairing(focusAddress: true) }
-
-    private func openPairing(focusAddress: Bool) {
-        pairing.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
-        pairing.arrivalPortText = Self.arrivalPortText()
-        // The status is nil until the three facts are checked, which is its own commit. The window
-        // says "not checked yet" rather than implying the address is good.
-        let address = AddressPreference.read()
-        current = PairingWindowModel.state(address: address, status: nil, makeCode: noCodeYet)
-        pairing.show(current, field: AddressField(address), focusAddress: focusAddress)
+    /// Ask the bridge for a code and draw whatever came back — including a refusal, which is a
+    /// sentence on the panel rather than an empty square.
+    private func mintACode() {
+        panel.open()
+        pairing.show(panel.state)
     }
 
-    /// What the window is showing, so a save can be told what to leave alone when it refuses.
-    private var current: PairingWindowState = .noAddress(explanation: PairingWindowModel.noAddressExplanation)
-
-    /// **Saving is one step: write, then re-make the code from what was written.**
+    /// **The panel's clock**, and it stops the moment there is nothing left to watch.
     ///
-    /// A code on screen built from an address that has changed underneath it is scannable, pairs, and
-    /// points the phone at the previous destination — worse than no code at all. `afterSaving` does
-    /// both halves or neither, and passes `status: nil` so the new address is unproven until something
-    /// answers on it and presents our certificate.
+    /// A code has to leave the screen when it stops working: a stale code on screen is a code somebody
+    /// will scan, and the phone's failure at that point is indistinguishable from a broken bridge. The
+    /// tick also asks the bridge what happened, which is how the panel can say *five wrong tokens*
+    /// rather than *that code no longer works*.
+    private func startThePanelClock() {
+        panelClock?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // The window may have gone since the last tick. Stopping the clock from the held
+                // reference rather than from the callback's own argument keeps this on the main actor,
+                // which is where every other line of this closure already is.
+                guard let self, self.pairing.isOpen else { return self?.stopThePanelClock() ?? () }
+                let before = self.panel.state
+                self.panel.tick()
+                guard self.panel.state != before else { return }
+                self.pairing.refreshIfOpen(self.panel.state)
+                // A phone that walked through the window has proven the address it dialled. This is
+                // the moment that fact becomes true, and the menu says it.
+                if case .paired = self.panel.state {
+                    self.refreshProvenance()
+                    self.rebuildMenu()
+                }
+            }
+        }
+        // Menus and modal alerts run their own run-loop mode; without this the code on screen would
+        // outlive its expiry for as long as somebody had the menu open.
+        RunLoop.main.add(timer, forMode: .common)
+        panelClock = timer
+    }
+
+    private var panelClock: Timer?
+
+    private func stopThePanelClock() {
+        panelClock?.invalidate()
+        panelClock = nil
+    }
+
+    /// The panel is gone, so the enrolment window goes with it.
+    private func closePairing() {
+        stopThePanelClock()
+        panel.close()
+        refreshProvenance()
+        rebuildMenu()
+    }
+
+    /// **Unpairing, with the cost said before the press takes effect.**
+    ///
+    /// It is total in v1 — the trust store keeps exactly one peer — so this is not "remove one of
+    /// several", and the phone loses its way in immediately. Confirmed first, because afterwards it is
+    /// an apology.
+    @objc private func unpairPhone() {
+        guard let phone = pairedPhones.last else { return }
+        let confirm = NSAlert()
+        // The same rendering the menu item uses. Two ways of naming a phone is two phones as far as
+        // anybody reading a confirmation is concerned.
+        confirm.messageText = "Unpair \(MenuModel.describe(phone))?"
+        confirm.informativeText =
+            "It loses access immediately and cannot get it back without scanning a new code. "
+                + "This bridge holds one phone, so this unpairs every phone it has."
+        confirm.addButton(withTitle: "Unpair it")
+        confirm.addButton(withTitle: "Cancel")
+        confirm.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        do {
+            try control.unpair(fingerprint: phone.fingerprint)
+            pairedPhones = []
+            // The address stops being proven in the same act. See `refreshProvenance`.
+            refreshProvenance()
+            notify(
+                "That phone is unpaired.",
+                "It can no longer connect. Pair it again from this menu when you want it back.")
+        } catch {
+            // Never silent. The bridge refuses a fingerprint it does not hold rather than shrugging,
+            // precisely so this can say something true instead of reporting a removal that did not
+            // happen.
+            notify("That phone was not unpaired.", "\(error)")
+        }
+        rebuildMenu()
+    }
+
     /// The arrival port as text for the box: empty when it follows the dial port, because empty is
     /// what an owner types to mean *they are the same*.
     private static func arrivalPortText() -> String {
@@ -286,9 +414,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // port is written first: an address that is refused must not leave a port change on the
         // floor, and the port has its own refusals which say their own sentence.
         let port = SaveListenPort().save(arrivalPort, dialPort: try? AddressPreference.read().get().port)
-        let (outcome, state) = PairingWindowModel.afterSaving(
-            address: typed, using: SaveAddress(), makeCode: noCodeYet, unchanged: current,
-            confirmed: confirmed)
+        let outcome = SaveAddress().save(typed, confirmed: confirmed)
 
         switch outcome {
         case .saved(let address):
@@ -309,7 +435,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             }
         }
 
-        current = state
         // After a save the field comes from the store, read back rather than assumed. After a refusal
         // it keeps what was typed: wiping somebody's text because it was wrong makes them retype it
         // from memory, which is how the wrong address gets entered twice.
@@ -321,19 +446,22 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // about to add the missing label to the front of it.
         case .refused, .notWritten, .needsConfirmation: AddressField(text: typed)
         }
-        // **Only the windows that are already open are redrawn.** Both of them can save, and a save
-        // from one must not conjure the other: somebody on the second onboarding step who presses
-        // Save has not asked to see a pairing code, and a window arriving unasked over their work is
-        // the same rudeness as a modal alert.
-        pairing.arrivalPortText = Self.arrivalPortText()
         onboarding.arrivalPortText = Self.arrivalPortText()
-        if pairing.isOpen { pairing.show(state, field: field) }
         // The address they just typed may have been the second onboarding step, and a pane that
         // stayed on "type an address" after one was saved would be showing a state that has stopped
         // being true.
         if onboarding.isOpen { onboarding.show(onboardingNow(), field: field) }
-        // The menu's "Show the pairing code…" is enabled by whether an address exists, and one may have
-        // just started existing.
+        // **A code on screen for an address that has just changed underneath it is worse than no
+        // code**: it is scannable, it pairs, and it points the phone at the previous destination. The
+        // window it was minted against is closed and the panel goes back to offering a fresh one,
+        // rather than being left showing a picture of somewhere the owner no longer lives.
+        if case .saved(let address) = outcome, pairing.isOpen {
+            pairing.address = address.displayed
+            panel.close()
+            pairing.show(panel.state)
+        }
+        // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
+        // started existing.
         rebuildMenu()
     }
 
@@ -360,10 +488,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// One sentence, put in front of whoever is looking. The two windows edit the same address
-    /// through the same saver, so they say the same thing about it.
+    /// One sentence, put in front of whoever is looking. There is one address editor now — the setup
+    /// screen — so this is the one place its outcome is said.
     private func report(_ sentence: String) {
-        pairing.reportOnAddress(sentence)
         onboarding.reportOnAddress(sentence)
     }
 
@@ -406,7 +533,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 "There is no address yet.",
                 "The bridge listens on the port your phone will dial, and that port comes from the "
                     + "address you set. Set it first, from this menu.")
-            return openPairing(focusAddress: true)
+            return setUp()
         }
         // The port the owner says traffic arrives on, or the dial port when they have not said. Held
         // for the failure message: `address already in use` is unreadable without the number, and the
@@ -418,7 +545,14 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // **`Address.listen(on:)`, not a string built here.** The dial address and the listen
             // address are different addresses - the host never travels, and the port travels only
             // when the owner has not said otherwise. The reasoning lives on the value.
-            try bridge.start(listen: Address(address).listen(on: arrival), socket: nil)
+            // **Two addresses, passed as two arguments.** The bind is the wildcard, because this Mac
+            // cannot know which of its interfaces the router forwards to; the code has to name the
+            // one the owner published, and `0.0.0.0` names every interface and therefore none. Before
+            // this the bridge minted codes from what it was bound to, which is exactly the shape of
+            // the 2026-08-09 failure: a code that pairs and then never connects.
+            try bridge.start(
+                listen: Address(address).listen(on: arrival), socket: nil,
+                advertise: address.displayed)
         } catch {
             // A start that could not happen at all: the binary vanished between launch and now, or
             // macOS is holding it because the app arrived by download. The error's own words, not a
@@ -447,18 +581,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func bridgeChanged(to state: BridgeState) {
         if case .failed(let sentence) = state {
             failure = sentence
-            // **A failure the owner asked for is said out loud, once.**
-            //
-            // The rule that failures go in the menu rather than in a modal is about the ones nobody
-            // pressed anything for - a bridge that dies at 3am and gives up after its ladder. A start
-            // the owner pressed thirty seconds ago is different: they are sitting there, and the most
-            // likely failure by far is a port somebody else already holds, which is unactionable
-            // unless the number is in front of them.
-            if startWasAsked {
+            // **A failure the owner asked for is said out loud, once.** Which failures those are, and
+            // what they say, is `BridgeReport.announcement` — a value, because the two ways this was
+            // wrong before were both invisible to every test in the suite.
+            if let said = BridgeReport.announcement(
+                for: state, startWasAsked: startWasAsked, listeningOn: listeningOn) {
                 startWasAsked = false
-                notify(
-                    "The bridge would not start.",
-                    PortInUse.explanation(for: sentence, port: listeningOn) ?? sentence)
+                notify("The bridge would not start.", said)
             }
         } else if case .running = state {
             failure = nil
@@ -479,35 +608,21 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// Rebuilt after anything that changes what the menu should say. The titles come from the model,
     /// and the model is given the system's answer rather than our memory of it.
     private func rebuildMenu() {
-        // Asked, not assumed — and now there is somewhere to ask. The bridge is this app's own child,
-        // so this is whether we hold a live pid rather than an opinion we are keeping.
-        //
-        // **Passed through as three states rather than flattened to a bool**, because `.starting` is
-        // no longer only the retry ladder: it is also the window between spawning a child and that
-        // child announcing a bound listener, which for a binary macOS has frozen never ends.
-        // Flattening it to `running` told the owner a held bridge was Running for the whole ceiling.
-        //
-        // Stop stays available across both, and that is the point rather than a shortcut: the owner
-        // can watch a start fail and call it off. Start is greyed in the same window, which is right
-        // — one is already in flight. `MenuModel` derives both from this.
-        let running: BridgeStatus.Running = switch bridge?.state {
-        case .running: .running
-        case .starting: .starting
-        default: .notRunning
-        }
+        // **The supervisor's own state, not a translation of it.** This used to be mapped onto a
+        // three-way `BridgeStatus.Running` built out of a placeholder address and the words `not
+        // checked` — a shape with no measurement behind it — and every translation lost a case. Two
+        // of the five now change what is pressable: `.starting` is the window between spawning a
+        // child and that child announcing a bound listener, and `.stopping` is the kill on its way.
         item?.menu = menu(
-            status: BridgeStatus(
-                address: DialAddress(host: "-", port: 0),
-                running: running,
-                reachable: .noAnswer("not checked"),
-                identified: .notEstablished,
-            ),
+            paired: pairedPhones,
             hasAddress: AddressPreference.read().isSuccess,
             launchesAtLogin: loginItem.status() == .registered,
+            bridge: bridge?.state ?? .stopped,
         )
-        // The whole sentence, where a tooltip can hold what a menu item cannot. Still nothing that
-        // takes focus.
-        if let failure { item?.button?.toolTip = failure }
+        // **Assigned every time, never only when there is something to say.** The rule and the reason
+        // are in `BridgeReport.tooltip`, where a test can ask them a question — this used to be an
+        // `if let` here, which can set a tooltip and has no way to take one back.
+        item?.button?.toolTip = BridgeReport.tooltip(for: bridge?.state ?? .stopped, failure: failure)
     }
 
     /// Says something, always. An alert rather than a notification: this app has no notification
@@ -627,7 +742,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         item.button?.toolTip = state.describedAsWords
     }
 
-    private func menu(status: BridgeStatus?, hasAddress: Bool, launchesAtLogin: Bool) -> NSMenu {
+    private func menu(
+        paired: [PairedPhone], hasAddress: Bool, launchesAtLogin: Bool, bridge state: BridgeState,
+    ) -> NSMenu {
         let menu = NSMenu()
         // The failure, at the top, disabled, and in the owner's own words rather than a code. Outside
         // the loop below because it is not an action: nothing happens when it is pressed, and the
@@ -665,8 +782,8 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             menu.addItem(.separator())
         }
         for model in MenuModel.items(
-            status: status, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin,
-            implemented: implemented,
+            paired: paired, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin,
+            bridge: state, implemented: implemented,
         ) {
             // Belt and braces on the rule, at the one place the two halves meet: if a selector exists
             // the item must be offered, and if none exists it must not be. A mismatch here is the
@@ -714,7 +831,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func selector(for action: MenuAction) -> Selector? {
         switch action {
         case .quit: #selector(quit)
-        case .setAddress: #selector(setAddress)
+        case .setUp: #selector(setUp)
+        case .pairPhone: #selector(pairPhone)
+        case .unpair: #selector(unpairPhone)
         case .startAtLogin: #selector(toggleStartAtLogin)
         // Wired only when there is a bridge binary to run. This is the same condition `implemented`
         // uses and it has to be, because the assertion below holds them to each other: an item with a

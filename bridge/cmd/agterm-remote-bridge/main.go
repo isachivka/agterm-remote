@@ -102,6 +102,7 @@ const readyLine = "ready: listening on"
 
 func main() {
 	listen := flag.String("listen", "", "host:port to listen on (required)")
+	advertise := flag.String("advertise", "", "host:port a phone should dial; empty means the bound address")
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
 	stateDir := flag.String("state-dir", "", "directory holding identity and paired peers (required)")
 	logPath := flag.String("log", "", "log file; empty means stderr")
@@ -119,12 +120,37 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--parent-pid must be a pid, or 0 to disable")
 		os.Exit(2)
 	}
-	if err := run(*listen, *socket, *stateDir, *logPath, *parentPID); err != nil {
+	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, *parentPID); err != nil {
 		log.Fatalf("agterm-remote-bridge: %v", err)
 	}
 }
 
-func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error {
+// advertised is the address the QR code names: what the owner said a phone should dial, or the
+// address this process is bound to when they said nothing.
+//
+// # Why the two are not the same question, which cost this project two failed pairings once already
+//
+// **A bridge binds an address; a phone dials a different one.** The Mac app binds the wildcard on
+// purpose - the owner's Mac has no idea which of its interfaces the router forwards to - so the bound
+// address is `0.0.0.0:8444`, which is every interface and therefore not one a phone can connect to. A
+// code carrying it looks perfect on screen and fails on the phone, which is the worst shape a failure
+// can take here: there is nothing on either screen to look at.
+//
+// The router's other trick is the same fact in a second place: one that publishes 8443 and delivers
+// to 8444 on this Mac means the port in the code and the port in the bind are different numbers.
+//
+// So the two are separate inputs. Nothing here validates what it is given - see control.dialTarget,
+// where the reasoning for refusing to apply a host policy is written out, and where the refusal that
+// used to live there broke the emulator's own pairing path. An empty value means "they are the same",
+// which is the straight-through case and the one a person running this by hand from a terminal gets.
+func advertised(advertise, bound string) string {
+	if advertise == "" {
+		return bound
+	}
+	return advertise
+}
+
+func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, parentPID int) error {
 	// The log first, so that everything below reports where the owner will look for it rather than
 	// on a stderr the parent may not be keeping.
 	if logPath != "" {
@@ -315,11 +341,14 @@ func run(listenAddr, socketPath, stateDir, logPath string, parentPID int) error 
 	// a person at the Mac", and this socket's 0600 is what makes the second clause true. The Mac app
 	// dials it; nothing else can.
 	pairing := &control.Pairing{
-		// The address the listener is BOUND to, not the --listen argument that produced it. The two
-		// are the same string here - net.Listen has already returned above, so a failed bind never
-		// reaches this line - and the bound one is the truthful value of the two. `status` hands it
-		// back to the app and the QR payload carries it.
-		Listening: tcp.Addr().String(),
+		// **What a phone dials, which is not always what this process is bound to.** See
+		// [advertised]: the Mac app binds the wildcard and knows the owner's real address, so it
+		// passes the second one explicitly; a person running this by hand passes nothing and gets the
+		// bound address, which is the truthful value of the two when there is only one.
+		//
+		// The bound address rather than the --listen argument that produced it, in that case:
+		// net.Listen has already returned above, so a failed bind never reaches this line.
+		Listening: advertised(advertiseAddr, tcp.Addr().String()),
 		Window:    window,
 		Peers:     peers,
 		// The parsed leaf, which is also what the enrolment handler returns to a phone. The QR code

@@ -75,9 +75,9 @@ struct ListenPortTests {
 
         #expect(stored.displayed == "agterm.example-homelab.invalid:8443")
         #expect(Address(stored).listen(on: arrival) == "0.0.0.0:8444")
-        #expect(
-            PairingCodeCommand.invocation(binary: "/opt/bin/x", address: stored).arguments
-                == ["qr", "--host", "agterm.example-homelab.invalid", "--port", "8443"])
+        // The two go to the bridge as two flags. `--listen` is where traffic arrives at this Mac;
+        // `--advertise` is what the QR code names, and it is the dial address unchanged.
+        #expect(stored.displayed == "agterm.example-homelab.invalid:8443")
     }
 
     /// Saving reports which port the bridge will use, in both directions, because the person who has

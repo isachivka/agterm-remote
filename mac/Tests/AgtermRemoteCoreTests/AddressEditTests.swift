@@ -305,98 +305,71 @@ struct SaveAddressTests {
     }
 }
 
-/// Saving from the pairing window: the code that is on screen afterwards.
-struct SaveFromThePairingWindowTests {
+/// Saving an address, and **what happens to a code that was minted from the previous one.**
+///
+/// This used to be a set of tests over `PairingWindowModel.afterSaving`, which saved the address and
+/// re-made the code in one call. The pairing window no longer edits addresses — that moved to the
+/// setup screen, beside the explanation of what an address is for — so the two acts are no longer one
+/// function. **The trap they were closing is still open, and it is worse now, not better:** a code on
+/// screen built from an address that has since changed is scannable, it pairs, and it points the
+/// phone at the previous destination.
+///
+/// So what is asserted is the same property in its new home. The refusals belong to `SaveAddress` and
+/// are asserted directly; the screen's half — a saved address closes the enrolment window the old code
+/// belonged to — is read out of the app, which is the only place it now lives.
+struct SavingAnAddressUnderALiveCodeTests {
 
-    private let old = DialAddress(host: "old.example-homelab.invalid", port: 8443)
-
-    private func afterSaving(
-        _ typed: String,
-        write: @escaping @Sendable (DialAddress) throws -> Void = { _ in },
-        made: @escaping (DialAddress) -> Void = { _ in },
-    ) -> (outcome: SaveAddress.Outcome, state: PairingWindowState) {
-        PairingWindowModel.afterSaving(
-            address: typed,
-            using: SaveAddress(write: write),
-            makeCode: { address in
-                made(address)
-                return .success("/tmp/code-for-\(address.host).png")
-            },
-            unchanged: .ready(address: old.displayed, imagePath: "/tmp/old.png", unproven: []),
-        )
+    /// The same shape `SaveAddressTests` uses: a reference the writer can append to, because the
+    /// writer is `@Sendable` and a captured `var` is not.
+    private final class Log: @unchecked Sendable {
+        var written: [DialAddress] = []
     }
 
-    /// **The stale-picture trap, closed.**
-    @Test func theCodeIsRemadeFromTheAddressThatWasJustSaved() {
-        var madeFor: [String] = []
+    /// A refused edit writes nothing, so there is nothing for a code to be stale against.
+    @Test func aRefusedEditWritesNothing() {
+        let log = Log()
+        let save = SaveAddress(write: { log.written.append($0) })
 
-        let (_, state) = afterSaving("new.example-homelab.invalid:9443", made: { madeFor.append($0.displayed) })
+        let outcome = save.save("https://old.example-homelab.invalid/")
 
-        #expect(madeFor == ["new.example-homelab.invalid:9443"])
-        guard case .ready(let address, let path, _) = state else { return #expect(Bool(false), "\(state)") }
-        #expect(address == "new.example-homelab.invalid:9443")
-        #expect(path.contains("new.example-homelab.invalid"))
-    }
-
-    /// **The three facts are re-asked, not inherited.**
-    @Test func aSavedAddressIsUnprovenUntilSomethingAnswersOnIt() {
-        let (_, state) = afterSaving("new.example-homelab.invalid:9443")
-
-        guard case .ready(_, _, let unproven) = state else { return #expect(Bool(false), "\(state)") }
-        #expect(unproven == ["This address has not been checked yet."])
-    }
-
-    @Test func aRefusedEditLeavesTheCodeOnScreenExactlyAsItWas() {
-        var madeFor: [String] = []
-
-        let (outcome, state) = afterSaving("https://old.example-homelab.invalid/", made: { madeFor.append($0.displayed) })
-
-        #expect(madeFor.isEmpty, "it re-made a code for an address it refused to save")
-        #expect(state == .ready(address: old.displayed, imagePath: "/tmp/old.png", unproven: []))
+        #expect(log.written.isEmpty, "it wrote an address it refused")
         guard case .refused = outcome else { return #expect(Bool(false), "\(outcome)") }
     }
 
-    /// **A question is not a change.**
-    @Test func anUnansweredConfirmationDisturbsNothingOnScreen() {
-        var madeFor: [String] = []
+    /// **A question is not a change.** An unconfirmed bare suffix writes nothing either.
+    @Test func anUnansweredConfirmationWritesNothing() {
+        let log = Log()
+        let save = SaveAddress(write: { log.written.append($0) })
 
-        let (outcome, state) = afterSaving("example-homelab.invalid:8443", made: { madeFor.append($0.displayed) })
+        let outcome = save.save("example-homelab.invalid:8443")
 
-        #expect(madeFor.isEmpty)
-        #expect(state == .ready(address: old.displayed, imagePath: "/tmp/old.png", unproven: []))
+        #expect(log.written.isEmpty)
         guard case .needsConfirmation = outcome else { return #expect(Bool(false), "\(outcome)") }
     }
 
-    @Test func aConfirmedSuffixSavesAndRemakesTheCodeLikeAnyOtherAddress() {
-        var madeFor: [String] = []
+    @Test func aConfirmedSuffixSavesLikeAnyOtherAddress() {
+        let log = Log()
+        let save = SaveAddress(write: { log.written.append($0) })
 
-        let (outcome, state) = PairingWindowModel.afterSaving(
-            address: "example-homelab.invalid:8443",
-            using: SaveAddress(write: { _ in }),
-            makeCode: { address in
-                madeFor.append(address.displayed)
-                return .success("/tmp/code.png")
-            },
-            unchanged: .ready(address: old.displayed, imagePath: "/tmp/old.png", unproven: []),
-            confirmed: true)
+        let outcome = save.save("example-homelab.invalid:8443", confirmed: true)
 
         #expect(outcome == .saved(DialAddress(host: "example-homelab.invalid", port: 8443)))
-        #expect(madeFor == ["example-homelab.invalid:8443"])
-        guard case .ready(let address, _, let unproven) = state else { return #expect(Bool(false), "\(state)") }
-        #expect(address == "example-homelab.invalid:8443")
-        #expect(unproven == ["This address has not been checked yet."])
+        #expect(log.written == [DialAddress(host: "example-homelab.invalid", port: 8443)])
     }
 
-    @Test func aSavedAddressWhoseCodeFailsSaysSoWithTheNewAddressOnIt() {
-        let (outcome, state) = PairingWindowModel.afterSaving(
-            address: "new.example-homelab.invalid:9443",
-            using: SaveAddress(write: { _ in }),
-            makeCode: { _ in .failure(.noBinary(path: "/nowhere/certificate-tool")) },
-            unchanged: .ready(address: old.displayed, imagePath: "/tmp/old.png", unproven: []))
+    /// **The stale-picture trap, closed in the one place it can now be closed.**
+    ///
+    /// Read out of the app's source because there is no value left to hand a fake: the panel holds a
+    /// live enrolment window at the bridge, and what has to happen on a save is that the window is
+    /// closed and the address on the panel is replaced. A comment promising it is not a mechanism.
+    @Test func savingAnAddressClosesTheWindowTheOldCodeBelongedTo() throws {
+        let main = try #require(
+            AppSources.all().first { $0.name.hasSuffix("Sources/AgtermRemote/main.swift") })
 
-        #expect(outcome == .saved(DialAddress(host: "new.example-homelab.invalid", port: 9443)))
-        guard case .codeUnavailable(let address, _) = state else { return #expect(Bool(false), "\(state)") }
-        #expect(address == "new.example-homelab.invalid:9443")
+        // The save path reaches for the panel's own close, which is what sends `pair-close` to the
+        // bridge, and it replaces the address the panel shows in the same act.
+        #expect(main.code.contains("panel.close()"), "a saved address leaves the old code minted")
+        #expect(main.code.contains("pairing.address = address.displayed"))
     }
 }
 

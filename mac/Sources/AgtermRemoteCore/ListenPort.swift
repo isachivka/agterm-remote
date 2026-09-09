@@ -97,6 +97,6 @@ public enum PortInUse {
         return "Something on this Mac is already listening on port \(port), so the bridge could not "
             + "start. That is usually another copy of it — including one from a separate installation "
             + "you are still running. Stop whatever holds the port, or set a different arrival port "
-            + "on the pairing screen."
+            + "on the setup screen."
     }
 }

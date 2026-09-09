@@ -14,8 +14,6 @@ import Testing
 /// nothing to catch.
 struct MenuActionsTests {
 
-    private let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
-
     /// Pressing an action produces **exactly one** recorded invocation. Not "at least one" — a menu
     /// that fires twice is its own defect, and on `restartBridge` it would be two restarts.
     @Test func performingAnActionRecordsExactlyOneInvocation() {
@@ -29,17 +27,17 @@ struct MenuActionsTests {
     }
 
     /// **THE CONTROL, and the whole point of the file.** An action deliberately left unwired must
-    /// fail to be offered. If this ever passes with `showPairingCode` absent from `implemented`, the
+    /// fail to be offered. If this ever passes with `pairPhone` absent from `implemented`, the
     /// suite has gone back to measuring the wrong property.
     @Test func anActionThatIsNotImplementedIsNeverEnabledInAnyState() {
-        let halfBuilt = Set(MenuAction.allCases).subtracting([.showPairingCode])
+        let halfBuilt = Set(MenuAction.allCases).subtracting([.pairPhone])
 
         for state in Self.everyState() {
             let items = MenuModel.items(
-                status: state.status, hasAddress: state.hasAddress,
-                launchesAtLogin: state.atLogin, implemented: halfBuilt)
+                paired: state.paired, hasAddress: state.hasAddress, launchesAtLogin: state.atLogin,
+                bridge: state.bridge, implemented: halfBuilt)
 
-            let dead = items.first { $0.action == .showPairingCode }
+            let dead = items.first { $0.action == .pairPhone }
             #expect(dead?.enabled == false, "an unwired action was offered as pressable")
         }
     }
@@ -51,8 +49,8 @@ struct MenuActionsTests {
         for implemented in Self.interestingSets() {
             for state in Self.everyState() {
                 let items = MenuModel.items(
-                    status: state.status, hasAddress: state.hasAddress,
-                    launchesAtLogin: state.atLogin, implemented: implemented)
+                    paired: state.paired, hasAddress: state.hasAddress,
+                    launchesAtLogin: state.atLogin, bridge: state.bridge, implemented: implemented)
 
                 for item in items where item.enabled {
                     #expect(implemented.contains(item.action), "\(item.action) is enabled and not wired")
@@ -65,7 +63,8 @@ struct MenuActionsTests {
     /// it should have looked like it.
     @Test func aMenuWithNothingWiredHasNothingEnabled() {
         let items = MenuModel.items(
-            status: nil, hasAddress: true, launchesAtLogin: false, implemented: [])
+            paired: [PairedPhone(fingerprint: "ab", name: "a phone")], hasAddress: true,
+            launchesAtLogin: false, implemented: [])
 
         #expect(items.count == MenuAction.allCases.count, "the items still exist; they are just dead")
         #expect(items.allSatisfy { !$0.enabled })
@@ -74,9 +73,8 @@ struct MenuActionsTests {
     /// Wiring an action does not resurrect one the STATE disables: `stopBridge` stays dead while the
     /// bridge is down, even though it is implemented. Both conditions have to hold.
     @Test func wiringDoesNotOverrideTheState() {
-        let down = BridgeStatus(address: address, running: .notRunning, reachable: .answered, identified: .ours)
-
-        let items = MenuModel.items(status: down, hasAddress: true, launchesAtLogin: false)
+        let items = MenuModel.items(
+            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopped)
 
         #expect(items.first { $0.action == .stopBridge }?.enabled == false)
         #expect(items.first { $0.action == .startBridge }?.enabled == true)
@@ -84,20 +82,16 @@ struct MenuActionsTests {
 
     // --- shared with the reachability tests -------------------------------------------------------
 
-    static func everyState() -> [(status: BridgeStatus?, hasAddress: Bool, atLogin: Bool)] {
-        let address = DialAddress(host: "agterm.example-homelab.invalid", port: 8443)
-        let statuses: [BridgeStatus?] = [
-            nil,
-            BridgeStatus(address: address, running: .running, reachable: .answered, identified: .ours),
-            BridgeStatus(address: address, running: .notRunning, reachable: .noAnswer("refused"),
-                         identified: .notEstablished),
-            BridgeStatus(address: address, running: .running, reachable: .answered,
-                         identified: .notOurs(presented: "1111 2222")),
-        ]
-        var states: [(BridgeStatus?, Bool, Bool)] = []
-        for status in statuses {
-            for hasAddress in [true, false] {
-                for atLogin in [true, false] { states.append((status, hasAddress, atLogin)) }
+    static func everyState() -> [(paired: [PairedPhone], hasAddress: Bool, atLogin: Bool, bridge: BridgeState)] {
+        let phones: [[PairedPhone]] = [[], [PairedPhone(fingerprint: "ab", name: "a phone")]]
+        var states: [(paired: [PairedPhone], hasAddress: Bool, atLogin: Bool, bridge: BridgeState)] = []
+        for paired in phones {
+            for bridge in MenuModelTests.everyBridgeState() {
+                for hasAddress in [true, false] {
+                    for atLogin in [true, false] {
+                        states.append((paired, hasAddress, atLogin, bridge))
+                    }
+                }
             }
         }
         return states
@@ -107,8 +101,8 @@ struct MenuActionsTests {
         [
             [],
             [.quit],
-            [.quit, .showPairingCode],
-            Set(MenuAction.allCases).subtracting([.setAddress]),
+            [.quit, .pairPhone],
+            Set(MenuAction.allCases).subtracting([.setUp]),
             Set(MenuAction.allCases),
         ]
     }

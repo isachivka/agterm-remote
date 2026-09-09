@@ -199,9 +199,13 @@ public enum AddressPreference {
 ///
 /// ### Two limits, written down rather than discovered later
 ///
-///  - **Unpairing is not modelled**, because nothing on this side can unpair yet. When it can, an
-///    emptied trust store will still be a file with a recent date, and this must start asking the
-///    bridge how many peers it holds rather than asking the file system whether the file is there.
+///  - **Unpairing is not modelled here, and it no longer needs to be.** This note used to say that
+///    when something on this side could unpair, an emptied trust store would still be a file with a
+///    recent date and this would have to start asking the bridge how many peers it holds. That
+///    happened: the menu unpairs over the control socket, and the app asks `status` for the paired
+///    list and treats an empty one as unproven **before** it consults this file at all. So the date
+///    below is still only ever evidence that a phone once arrived; the question of whether one is
+///    still there is answered somewhere that can see the answer.
 ///  - **A phone connecting is not an enrolment.** A phone that keeps its pinned peer through an
 ///    address change proves the new address in practice and writes nothing here, so the address stays
 ///    marked unproven until somebody re-scans. That is the safe direction and re-scanning is offered

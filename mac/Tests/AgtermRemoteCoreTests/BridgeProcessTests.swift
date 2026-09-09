@@ -176,11 +176,22 @@ struct BridgeProcessTests {
     private static let executable = URL(fileURLWithPath: "/opt/agterm-remote/agterm-remote-bridge")
     private static let stateDir = URL(fileURLWithPath: "/opt/agterm-remote/state")
 
+    /// The kill runs inline in these tests, which keeps every assertion about Stop reading exactly as
+    /// it did before the kill moved off the caller's thread: terminate, then `.stopped`, in one act.
+    ///
+    /// **That is not the property being hidden.** The kill was made asynchronous because it blocks for
+    /// up to twice the grace period, and what these tests are about is what happens to the child and
+    /// to the state — the same questions, whichever thread answers them. The property that the caller
+    /// is not made to wait is its own test, with its own launcher, and it holds the real seam:
+    /// `stopDoesNotBlockTheCallerForTheGracePeriod`.
+    private static let killInline: @Sendable (@escaping @Sendable () -> Void) -> Void = { $0() }
+
     private func bridge(
         _ launcher: ProcessLauncher,
         clock: Clock = Clock(),
         schedule: ImmediateSchedule = ImmediateSchedule(),
         watchForSilence: ImmediateSchedule? = nil,
+        terminateOn: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void = BridgeProcessTests.killInline,
     ) -> BridgeProcess {
         // Never scheduled unless a test asks for it. A synchronous readiness poll runs its whole ten
         // seconds of turns inside `start`, which is the point in the tests that are about readiness
@@ -190,7 +201,7 @@ struct BridgeProcessTests {
         return BridgeProcess(
             launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
             now: { clock.now }, schedule: schedule.run,
-            watchForSilence: watchForSilence.map(\.run) ?? idle)
+            watchForSilence: watchForSilence.map(\.run) ?? idle, terminateOn: terminateOn)
     }
 
     // MARK: - 1. The launch
@@ -487,7 +498,80 @@ struct BridgeProcessTests {
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
         bridge.stop()
 
-        #expect(seen.states == [.starting, .running(pid: launcher.lastPid), .stopped])
+        // **`.stopping` is in this list, and that is the point of it.** A stop is not instantaneous —
+        // the kill signals, waits, escalates and waits again — and the menu has to be able to say so
+        // for the duration rather than freezing on `.running` or lying about `.stopped`.
+        #expect(seen.states == [.starting, .running(pid: launcher.lastPid), .stopping, .stopped])
+    }
+
+    /// **The measurement that made `.stopping` exist.**
+    ///
+    /// `ChildProcessLauncher.terminate` returns only when the child is gone: `SIGTERM`, wait the grace
+    /// period, `SIGKILL`, wait again — four seconds at the shipped grace period, on the caller's
+    /// thread, which is the main thread every time the owner presses Stop. Four seconds of a menu-bar
+    /// app not answering is an app that has crashed as far as anybody looking at it can tell.
+    ///
+    /// So the kill is timed here against a launcher that takes a measurable age to return, and the
+    /// call is required to come back long before it does. The two halves after it are the ones that
+    /// made the old blocking version worth keeping: the state says `.stopping` rather than a lie, and
+    /// `.stopped` still arrives only once the child has actually gone.
+    @Test func stopDoesNotBlockTheCallerForTheGracePeriod() throws {
+        let launcher = SlowToDieLauncher(takes: 1)
+        let seen = Announcements()
+        // **Built without a `terminateOn`, deliberately.** Every other test in this file runs the kill
+        // inline so its assertions stay about the child rather than about threads; this one is about
+        // the thread, so it takes the production default and nothing else.
+        let bridge = BridgeProcess(
+            launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
+            watchForSilence: { _, _ in })
+        bridge.onStateChange = { seen.append($0) }
+        try bridge.start(listen: "0.0.0.0:8443", socket: nil)
+
+        let began = Date()
+        bridge.stop()
+        let waited = Date().timeIntervalSince(began)
+
+        #expect(waited < 0.2, "stop() held its caller for \(waited)s")
+        #expect(bridge.state == .stopping, "the menu has nothing honest to say during the kill")
+        launcher.finish()
+        #expect(bridge.state == .stopped, "`.stopped` must still mean the child is gone")
+        #expect(launcher.terminated == [launcher.lastPid])
+    }
+
+    /// A launcher whose `terminate` does not return until it is told to, which is what a child that
+    /// ignores `SIGTERM` looks like from the supervisor's side.
+    private final class SlowToDieLauncher: ProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private let gate = DispatchSemaphore(value: 0)
+        private let done = DispatchSemaphore(value: 0)
+        private let takes: TimeInterval
+        private var _terminated: [Int32] = []
+        private(set) var lastPid: Int32 = 0
+
+        var terminated: [Int32] { lock.withLock { _terminated } }
+
+        init(takes: TimeInterval) { self.takes = takes }
+
+        func launch(
+            _: URL, _: [String], onExit _: @escaping @Sendable (Int32) -> Void,
+        ) throws -> Int32 {
+            lastPid = 4242
+            return lastPid
+        }
+
+        func terminate(_ pid: Int32) {
+            // Waits, exactly as the real one does across two grace periods. Released by `finish`, or
+            // by the ceiling, so a mistake here cannot hang the suite.
+            _ = gate.wait(timeout: .now() + takes)
+            lock.withLock { _terminated.append(pid) }
+            done.signal()
+        }
+
+        /// Lets the kill complete, and waits for the supervisor to have seen it.
+        func finish() {
+            gate.signal()
+            _ = done.wait(timeout: .now() + takes + 1)
+        }
     }
 
     private final class Announcements: @unchecked Sendable {
@@ -575,9 +659,11 @@ struct BridgeProcessTests {
     ) throws {
         let launcher = SayingLauncher(said)
         let watch = ImmediateSchedule()
+        // The kill runs inline, as it does everywhere else in this file: the question here is whether
+        // the frozen child is ended and what the owner is told, not which thread ends it.
         let bridge = BridgeProcess(
             launcher: launcher, executable: Self.executable, stateDir: Self.stateDir,
-            watchForSilence: watch.run)
+            watchForSilence: watch.run, terminateOn: Self.killInline)
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 

@@ -1,52 +1,51 @@
 import AgtermRemoteCore
 import AppKit
 
-/// The one pairing window: the address, then the code built from it.
+/// The pairing panel: a code the bridge minted, and what happened to it.
 ///
 /// **Every state renders something.** A window that opens blank is a mystery, not an affordance — the
-/// same rule that cost the owner a pairing on 2026-08-10 when a menu item looked pressable and was not.
-/// The three states from `PairingWindowState` each get a sentence and, where there is one, a code.
+/// same rule that cost the owner a pairing on 2026-08-10 when a menu item looked pressable and was
+/// not. Each case of `PairingPanelState` gets a heading, a sentence, and — where there is one — a
+/// code and the string it carries.
 ///
-/// The address is above the code and always visible, because **the code is opaque to a human and the
-/// address is the only part they can check**. Every code this laptop makes carries the same
-/// fingerprint, so comparing fingerprints proves it came from here and says nothing about where the
-/// phone will dial.
+/// ### What moved out of this window, and why
+///
+/// It used to hold the address editor as well, on the argument that a code and the address it encodes
+/// are one fact. That argument is still true and the address is still shown here; what left is the
+/// **editing**. The address now belongs to the setup window, beside the paragraphs explaining what it
+/// is for and what the second port is — three fields with no explanation next to a live enrolment
+/// window was a screen that asked somebody to reconfigure their router while a stranger could walk
+/// through the door it had just opened.
+///
+/// ### The code is opaque; the address is the only part a human can check
+///
+/// Every code this laptop makes carries the same certificate fingerprint, so comparing fingerprints
+/// proves the code came from here and says nothing about where the phone will dial. On 2026-08-09
+/// that produced two codes that paired perfectly and then never connected. The address is on screen
+/// **at the same moment as the code, with no click and no hover**.
 @MainActor
 final class PairingWindow: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
-    /// True while this window is on screen. **A save can arrive from the onboarding window**, and the
-    /// app must be able to redraw what is open without opening what is not: `show` makes a window
-    /// when there is none, so calling it to refresh would put a pairing code in front of somebody who
-    /// asked for neither.
+    /// True while this window is on screen. The app redraws what is open without opening what is not:
+    /// `show` makes a window when there is none, so calling it to refresh would put a live enrolment
+    /// code in front of somebody who asked for neither.
     var isOpen: Bool { window != nil }
 
-    /// Handed what was typed: the address, and the port traffic arrives on at this Mac. The view
-    /// never saves either: parsing, refusing and writing live in `AddressEdit`/`SaveAddress` and
-    /// `ListenPortEdit`/`SaveListenPort`, where they are tested without a window.
-    var onSave: ((String, String) -> Void)?
+    /// The owner is finished with the panel — by closing the window, or by pressing Done. **The
+    /// enrolment window at the bridge must not outlive this**, so the app closes it from here.
+    var onClose: (() -> Void)?
 
-    private var field = AddressField()
-    private var addressBox: NSTextField?
-    private var portBox: NSTextField?
+    /// Ask for another code. Offered on every ending, because every ending leaves somebody who came
+    /// here to pair a phone still holding one.
+    var onAskForAnotherCode: (() -> Void)?
 
-    /// What the address editor is saying right now — a refusal, or what was saved. Held here rather
-    /// than in the view, because `show` rebuilds the window's contents around it and a sentence
-    /// somebody is part-way through reading must not be wiped by a redraw.
-    private var addressMessage = ""
+    /// The address the code encodes, in the same rendering the phone will show.
+    var address = ""
 
-    /// Opens, or brings forward what is already open. Rebuilds the contents each time, so a code minted
-    /// after an address change is never a stale picture of the old one.
-    ///
-    /// - Parameters:
-    ///   - field: what the editable box starts with, read from the saved address rather than
-    ///     remembered.
-    ///   - focusAddress: true when the owner arrived by *Set the address…*. **Both menu items open this
-    ///     same window** — one address, one screen, two doors that lead somewhere identical rather than
-    ///     somewhere similar — and the only difference is where the cursor lands.
-    func show(_ state: PairingWindowState, field: AddressField, focusAddress: Bool = false) {
-        self.field = field
+    /// Opens, or redraws what is already open.
+    func show(_ state: PairingPanelState) {
         let window = self.window ?? make()
         window.contentView = view(for: state)
         window.delegate = self
@@ -54,15 +53,24 @@ final class PairingWindow: NSObject, NSWindowDelegate {
         // looking at, which for a thing they asked to see is the same as not opening.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.center()
-        // After the window is key, or the field is focused in a window nobody is typing into.
-        if focusAddress, let addressBox { window.makeFirstResponder(addressBox) }
+        if self.window == nil { window.center() }
         self.window = window
+    }
+
+    /// Redraws only if the window is already up. The panel's clock calls this every second, and a
+    /// timer that could conjure a window would put a code on screen after the owner closed it.
+    func refreshIfOpen(_ state: PairingPanelState) {
+        guard isOpen else { return }
+        show(state)
+    }
+
+    func close() {
+        window?.close()
     }
 
     private func make() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false,
@@ -74,116 +82,75 @@ final class PairingWindow: NSObject, NSWindowDelegate {
         return window
     }
 
+    /// **Closing the window closes the window at the bridge.** The enrolment window is the one moment
+    /// this bridge will talk to a phone it has never met, and the argument for having that branch at
+    /// all is that it lasts seconds and needs a person at the Mac. A panel that went away without
+    /// closing it would leave the second clause resting on a timer.
     func windowWillClose(_: Notification) {
         window = nil
+        onClose?()
     }
 
-    // MARK: - The three states
+    // MARK: - The states
 
-    private func view(for state: PairingWindowState) -> NSView {
+    private func view(for state: PairingPanelState) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
 
+        stack.addArrangedSubview(caption("This phone will connect to"))
+        stack.addArrangedSubview(addressLabel(address))
+
         switch state {
-        case .noAddress(let explanation):
-            stack.addArrangedSubview(heading("No address is set"))
-            stack.addArrangedSubview(body(explanation))
-            stack.addArrangedSubview(addressEditor())
+        case .closed:
+            // Reachable only for the instant between a dismissal and the window going away. It says
+            // the ordinary thing rather than rendering an empty rectangle.
+            stack.addArrangedSubview(heading("No code is on screen"))
+            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
 
-        case .codeUnavailable(let address, let explanation):
-            stack.addArrangedSubview(caption("This phone will connect to"))
-            stack.addArrangedSubview(addressLabel(address))
-            stack.addArrangedSubview(addressEditor())
-            stack.addArrangedSubview(heading("The code could not be made"))
-            stack.addArrangedSubview(body(explanation))
-
-        case .ready(let address, let imagePath, let unproven):
-            stack.addArrangedSubview(caption("This phone will connect to"))
-            stack.addArrangedSubview(addressLabel(address))
-            stack.addArrangedSubview(addressEditor())
-            stack.addArrangedSubview(code(at: imagePath))
+        case .showing(let payload, let expiresAt):
+            stack.addArrangedSubview(code(for: payload))
             stack.addArrangedSubview(
-                body("Point the phone at this code. Check the address above matches what the phone shows "
-                    + "before you confirm — the fingerprint is the same in every code this laptop makes, "
-                    + "so the address is the part that can be wrong."))
-            for line in unproven {
-                stack.addArrangedSubview(warning(line))
-            }
+                body("Point the phone at this code. Check the address above matches what the phone "
+                    + "shows before you confirm — the fingerprint is the same in every code this "
+                    + "laptop makes, so the address is the part that can be wrong."))
+            stack.addArrangedSubview(caption("This code stops working at \(Self.clock(expiresAt))"))
+            // **The paste fallback, and it is the same string the picture carries.** A camera that
+            // will not read the code is the failure this exists for, and a second encoding of the
+            // payload would be a second thing to go wrong.
+            stack.addArrangedSubview(caption("If the camera will not read it, type or paste this instead"))
+            stack.addArrangedSubview(payloadField(payload))
+
+        case .expired, .refused, .withdrawn:
+            stack.addArrangedSubview(heading("That code no longer works"))
+            stack.addArrangedSubview(body(state.sentence ?? ""))
+            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
+
+        case .paired(_, _):
+            stack.addArrangedSubview(heading("Paired"))
+            stack.addArrangedSubview(body(state.sentence ?? ""))
+            stack.addArrangedSubview(button("Done", #selector(done)))
+
+        case .unavailable:
+            stack.addArrangedSubview(heading("There is no code"))
+            stack.addArrangedSubview(body(state.sentence ?? ""))
+            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
         }
 
-        // There is no second half to this screen and no second step for the owner. The phone proves
-        // itself to the bridge during enrolment, over the wire, in the same act as scanning the code -
-        // so there is no certificate to carry back by hand and nowhere to put it if there were.
         return stack
     }
 
-    // MARK: - The address, editable, on the same screen
+    @objc private func askForAnotherCode() { onAskForAnotherCode?() }
 
-    /// **One box and a button**, on every state of this window.
-    ///
-    /// The label above shows the address as it is saved right now; this shows what is being typed.
-    /// Keeping both means the value the phone will be compared against is never hidden behind an edit
-    /// in progress — the address is the only part of a pairing a human can actually check.
-    ///
-    /// **One field, holding `host:port`, because that is what the address IS.** It was two boxes for a
-    /// day; the phone shows one string, the code carries one string, the comparison screen shows one
-    /// string, and the single place it was entered was the place it stopped being one value. The tell
-    /// was that typing what every other surface displays produced a validation error.
-    private func addressEditor() -> NSView {
-        let box = NSTextField(string: field.text)
-        box.placeholderString = "agterm.your-homelab.example:8443"
-        box.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.widthAnchor.constraint(equalToConstant: 340).isActive = true
-        addressBox = box
+    @objc private func done() { close() }
 
-        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
-        save.bezelStyle = .rounded
-        save.keyEquivalent = "\r"
-
-        let row = NSStackView(views: [box, save])
-        row.orientation = .horizontal
-        row.spacing = 8
-
-        // **The second port, and it is a field rather than a derivation.** A router that publishes
-        // one port and delivers to another is ordinary, and taking the bind from the dial address
-        // makes the bridge listen where nothing arrives - a perfect code and a phone that never
-        // connects. Empty means the two are the same, which is the straight-through case.
-        let port = NSTextField(string: arrivalPortText)
-        port.placeholderString = "same as above"
-        port.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        port.translatesAutoresizingMaskIntoConstraints = false
-        port.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        portBox = port
-
-        let column = NSStackView(views: [
-            caption("The address your phone will dial"), row,
-            caption(OnboardingCopy.arrivalPortHeading), port,
-        ])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = 4
-        // A refusal has to be visible without scrolling or hovering; it is the whole point of refusing
-        // in words rather than in silence.
-        if !addressMessage.isEmpty { column.addArrangedSubview(body(addressMessage)) }
-        return column
-    }
-
-    /// What the arrival-port box starts with, read from the store rather than remembered. Empty when
-    /// it follows the dial port, which is what an empty box means when it is saved.
-    var arrivalPortText = ""
-
-    @objc private func saveTapped() {
-        onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
-    }
-
-    /// What the editor says after a save or a refusal. Set by the app, from the outcome — the view does
-    /// not decide whether something was written.
-    func reportOnAddress(_ message: String) {
-        addressMessage = message
+    /// The expiry as a wall clock, not as a countdown. A number ticking down on a screen is something
+    /// people watch instead of holding up their phone; an instant is something they can compare with
+    /// the clock in the corner and forget about.
+    private static func clock(_ instant: Date) -> String {
+        instant.formatted(date: .omitted, time: .shortened)
     }
 
     // MARK: - Pieces
@@ -222,25 +189,36 @@ final class PairingWindow: NSObject, NSWindowDelegate {
         return field
     }
 
-    private func warning(_ text: String) -> NSTextField {
-        let field = NSTextField(wrappingLabelWithString: text)
-        field.font = .systemFont(ofSize: 12)
+    private func button(_ title: String, _ action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        return button
+    }
+
+    /// The payload as text, selectable and wrapped. Not truncated and not shortened: it is the whole
+    /// of what the picture carries, and a middle-elided version of it is not a code.
+    private func payloadField(_ payload: String) -> NSTextField {
+        let field = NSTextField(wrappingLabelWithString: payload)
+        field.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        field.isSelectable = true
         field.preferredMaxLayoutWidth = 420
         return field
     }
 
     /// The code, big enough to scan from a phone held in front of the screen.
     ///
-    /// If the file cannot be read the window says so rather than showing an empty square — a blank
+    /// If the payload cannot be drawn the window says so rather than showing an empty square — a blank
     /// where a code should be is the worst of both: it looks like it worked and cannot be scanned.
-    private func code(at path: String) -> NSView {
-        guard let image = NSImage(contentsOfFile: path) else {
-            return body("The code was written to \(path) but could not be read back.")
+    private func code(for payload: String) -> NSView {
+        guard let rendered = QRRender.image(for: payload, size: 380) else {
+            return body("The bridge sent a code this app could not draw. The text below is the same "
+                + "code; the phone will accept it typed or pasted.")
         }
+        let image = NSImage(cgImage: rendered, size: NSSize(width: 380, height: 380))
         let view = NSImageView(image: image)
-        view.imageScaling = .scaleProportionallyUpOrDown
-        // 380pt of a 776px PNG. A phone camera needs pixels per module, and this is the whole reason
-        // the window is this wide.
+        // Never interpolated. The modules are whole pixels and smoothing them is how a code becomes
+        // one a camera reads slowly or not at all.
+        view.imageScaling = .scaleNone
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             view.widthAnchor.constraint(equalToConstant: 380),

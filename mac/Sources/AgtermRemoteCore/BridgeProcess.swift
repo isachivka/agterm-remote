@@ -2,15 +2,35 @@ import Foundation
 
 /// Where the bridge is, as far as anything that draws a menu is concerned.
 ///
-/// Four cases and no fifth. `.failed` carries a sentence rather than a code because the only reader
+/// Five cases and no sixth. `.failed` carries a sentence rather than a code because the only reader
 /// is a person: the two failures this will actually meet are a port already in use and a binary that
 /// is not there, and neither is diagnosable from a number.
 public enum BridgeState: Equatable, Sendable {
     case stopped
     case starting
     case running(pid: Int32)
+
+    /// **Signalled and not yet gone.**
+    ///
+    /// This state is the visible half of a fix for something measured rather than argued:
+    /// `ChildProcessLauncher.terminate` sends `SIGTERM`, waits out the grace period, escalates to
+    /// `SIGKILL` and waits again — **up to twice the grace period, four seconds, on whatever thread
+    /// called it**, which was the main thread every time the owner pressed Stop. An app that stops
+    /// answering for four seconds is an app that has hung, and the menu it was drawn from is a menu
+    /// nobody can open to find out why.
+    ///
+    /// The kill now happens off the caller's thread, and this is what the menu says meanwhile. It
+    /// exists because the alternative to a state is a lie: announcing `.stopped` before the child has
+    /// gone is what let a second Start add a second live bridge, and that is not a defect anybody
+    /// wants back in exchange for a responsive menu.
+    case stopping
+
     /// Gave up. The string is shown to the owner verbatim, so it has to be a sentence.
     case failed(String)
+
+    /// Whether this is the give-up state. A pattern match on an associated value reads badly inside a
+    /// boolean expression, and this is asked in one.
+    public var hasFailed: Bool { if case .failed = self { true } else { false } }
 }
 
 /// Starting a child process, being told when it dies, and killing it. **The whole seam.**
@@ -196,11 +216,17 @@ public final class BridgeProcess: @unchecked Sendable {
     /// The silence watch's own clock, **separate from the retry ladder's on purpose**. They are two
     /// different waits, and a test that drives one by hand must not find itself driving the other.
     private let watchForSilence: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    /// How the kill is got off the caller's thread. **Its own seam, not a reuse of `schedule`**: a
+    /// test driving the retry ladder by hand must not find itself also holding a Stop that never
+    /// completes, and a test about Stop must not have to fire the ladder to let one finish.
+    private let terminateOn: @Sendable (@escaping @Sendable () -> Void) -> Void
     private let isQuarantined: @Sendable (URL) -> Bool
 
     private let lock = NSRecursiveLock()
     private var _state: BridgeState = .stopped
     private var listenAddress = ""
+    /// What the QR code should name. See `start(listen:socket:advertise:)`.
+    private var dialAddress = ""
     private var socketPath: String?
     private var launches = 0
     private var startedRunningAt = Date(timeIntervalSince1970: 0)
@@ -264,6 +290,9 @@ public final class BridgeProcess: @unchecked Sendable {
             delay, work in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
         },
+        terminateOn: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
         isQuarantined: @escaping @Sendable (URL) -> Bool = { Quarantine.wouldBeHeld($0) },
     ) {
         self.launcher = launcher
@@ -273,6 +302,7 @@ public final class BridgeProcess: @unchecked Sendable {
         self.now = now
         self.schedule = schedule
         self.watchForSilence = watchForSilence
+        self.terminateOn = terminateOn
         self.isQuarantined = isQuarantined
     }
 
@@ -292,7 +322,13 @@ public final class BridgeProcess: @unchecked Sendable {
     ///
     /// It is a refusal rather than a repair: `removexattr` is denied to an unsigned app, so the owner
     /// is given the command instead of a silent failure to run it for them.
-    public func start(listen: String, socket: String?) throws {
+    /// - Parameter advertise: the address a phone dials, when it is not the one being bound. **The
+    ///   two are different addresses and confusing them is what mints a code that pairs and then
+    ///   never connects**: this app binds the wildcard, because it cannot know which interface the
+    ///   owner's router forwards to, and `0.0.0.0` is every interface rather than one anything can
+    ///   dial. Empty means they are the same, which is the straight-through case and the one a person
+    ///   running the bridge by hand gets.
+    public func start(listen: String, socket: String?, advertise: String = "") throws {
         try lock.withLock {
             if case .running = _state { return }
             if isQuarantined(executable) {
@@ -301,6 +337,7 @@ public final class BridgeProcess: @unchecked Sendable {
                 throw Failure.quarantined(sentence, command: Quarantine.command(for: executable))
             }
             listenAddress = listen
+            dialAddress = advertise
             socketPath = socket
             // Pressing Start after a failure is a fresh five. The owner has just done something about
             // the port, or the binary, and a counter that remembered would refuse to try.
@@ -312,28 +349,75 @@ public final class BridgeProcess: @unchecked Sendable {
         }
     }
 
-    /// Terminates it, and reports `.stopped` **only once the child has actually gone**.
+    /// Terminates it, and reports `.stopped` **only once the child has actually gone** — without
+    /// making the caller wait for that.
+    ///
+    /// ### Two things went wrong here, in order, and both are held
     ///
     /// The announcement used to come first, on the reasoning that the owner's instruction is not in
     /// doubt. It was wrong for a reason measured rather than argued: a child that ignores `SIGTERM`
     /// stayed alive while the state said `.stopped`, the pid was cleared, a second Stop was a no-op
     /// because there was nothing left to signal, and the next Start added a **second** live bridge.
-    /// `terminate` now escalates and returns only when the child is gone — see
-    /// [ChildProcessLauncher.terminate] — so the sentence the menu shows is a fact rather than a
-    /// request.
+    /// So `terminate` was made to escalate and return only when the child is gone.
     ///
-    /// Cost, stated where it happens: the caller waits for however long the child takes to die, up to
-    /// the launcher's grace period. In practice that is milliseconds; the bridge closes its listener
-    /// and goes. It is bounded, and the alternative is a stop button that lies.
+    /// That fixed the lie and bought a hang. `terminate` waits the grace period, sends `SIGKILL` and
+    /// waits again — **four seconds on the main thread**, measured, every time the owner presses Stop
+    /// on a child that does not go quietly. An app that stops answering for four seconds looks
+    /// exactly like an app that has crashed, and the menu that would explain it is the thing that
+    /// cannot be opened.
+    ///
+    /// Neither is worth the other, so this keeps both: the kill goes to another thread, and
+    /// [BridgeState.stopping] is what the menu says while it is in flight. `.stopped` is announced
+    /// from the kill's own completion, so it still means the child is gone. **The pid is cleared
+    /// immediately**, which is what stops a second Stop signalling a process already being killed —
+    /// and the menu greys both Start and Stop for the duration, so the window is not one anybody can
+    /// press anything in.
+    ///
+    /// See [stopAndWait] for the two callers that must not return early.
     public func stop() {
+        guard let pidToKill = beginStopping() else { return }
+        terminateOn { [weak self] in self?.finishStopping(pidToKill) }
+    }
+
+    /// Stop, and do not return until the child has actually gone.
+    ///
+    /// **For the paths that are immediately followed by this process ceasing to exist**:
+    /// `applicationWillTerminate`, and the `SIGTERM` handler that calls `exit`. Handing the kill to
+    /// another thread there would mean the app is gone before the signal is delivered, which leaves a
+    /// listener on the port the owner deliberately exposed with no user interface anywhere that could
+    /// close it. The bridge's own `--parent-pid` poll would collect it within a couple of seconds;
+    /// that is the backstop, not the plan.
+    public func stopAndWait() {
+        guard let pidToKill = beginStopping() else { return }
+        finishStopping(pidToKill)
+    }
+
+    /// The half that happens on the caller's thread: mark, clear the pid, and say `.stopping`.
+    /// - Returns: the pid to kill, or nil when there was nothing running to kill.
+    private func beginStopping() -> Int32? {
         lock.withLock {
             stopping = true
             generation += 1
-            if let pidToKill = pid {
-                launcher.terminate(pidToKill)
-                pid = nil
+            guard let victim = pid else {
+                if _state != .stopped { set(.stopped) }
+                return nil
             }
-            if _state != .stopped { set(.stopped) }
+            // Cleared here rather than after the kill: a second Stop must find nothing to signal, and
+            // an exit callback that arrives mid-kill must not be read as the living child crashing.
+            pid = nil
+            set(.stopping)
+            return victim
+        }
+    }
+
+    /// The half that blocks: the signal, the wait, the escalation and the wait again.
+    private func finishStopping(_ pidToKill: Int32) {
+        launcher.terminate(pidToKill)
+        lock.withLock {
+            // **Only if this stop is still the current instruction.** A Start pressed during the kill
+            // owns the state now, and announcing `.stopped` over its `.starting` would describe a
+            // bridge that is coming up as one that is down.
+            if _state == .stopping { set(.stopped) }
         }
     }
 
@@ -352,6 +436,11 @@ public final class BridgeProcess: @unchecked Sendable {
             // interface left anywhere that could close it.
             "--parent-pid", String(parentPID),
         ]
+        // Absent unless it differs from the bind. The bridge falls back to the bound address, which
+        // is the truthful value when there is only one — see `advertised` on the Go side.
+        if !dialAddress.isEmpty {
+            argv += ["--advertise", dialAddress]
+        }
         // Absent unless somebody asked. The bridge resolves its own default, and this app must not
         // learn that path — see BoundaryTests.
         if let socketPath, !socketPath.isEmpty {
@@ -455,9 +544,13 @@ public final class BridgeProcess: @unchecked Sendable {
         // retried, and bump the generation so a retry already waiting is no longer ours to make.
         stopping = true
         generation += 1
-        launcher.terminate(alive)
         pid = nil
+        // The verdict first, and it is `.failed` rather than `.stopping`: the sentence is the whole
+        // point of this path, and there is no announcement owed once the kill finishes. The kill goes
+        // off this thread for the same reason `stop()`'s does — it escalates and waits twice, and
+        // this one runs holding the lock every reader of `state` needs.
         set(.failed(Self.notReadySentence(executable: executable, said: launcher.lastOutput(of: alive))))
+        terminateOn { [weak self] in self?.launcher.terminate(alive) }
     }
 
     /// What a bridge that never bound is reported as. The observation first and the inference second,
@@ -476,8 +569,12 @@ public final class BridgeProcess: @unchecked Sendable {
     /// need a different door.
     ///
     /// Opening the app from the Finder still works, so that is the whole of the advice here.
-    /// [Quarantine.explanation] is printed *before* any spawn, where removal genuinely still works,
-    /// and there the command is correct.
+    /// [Quarantine.explanation] is printed *before* any spawn — but "before any spawn" is not the
+    /// same as "before any blocked exec", and that difference was papered over here for a while. An
+    /// owner who double-clicked the download and was turned away by Gatekeeper has already spent the
+    /// block, so the command is refused for them too. That message now offers the Finder route first
+    /// and the command as the one that may already be past; the difference between the two messages
+    /// is that here the block is certain, so there is nothing left to offer conditionally.
     static func notReadySentence(executable: URL, said: String?) -> String {
         var sentence = """
             The bridge started but never reported a listening address, so it has been stopped.

@@ -12,8 +12,17 @@ import Foundation
 /// A menu has the identical hazard — an item disabled in every state it can be in is a feature that
 /// does not exist — so the menu is a value that [MenuReachabilityTests] can enumerate.
 public enum MenuAction: String, CaseIterable, Sendable {
-    case showPairingCode
-    case setAddress
+    /// Show a code and wait for a phone to walk through it. Named for the act rather than for the
+    /// picture: what the owner is doing is pairing a phone, and the code is how.
+    case pairPhone
+    /// Drop the paired phone. **Offered only when there is one**, which is the one item in this menu
+    /// whose presence — not merely whose enabled state — depends on what the bridge reports.
+    case unpair
+    /// The address, the arrival port, and everything else that has to be true before a phone can
+    /// connect. It was called *Set the address…* and opened the pairing window with the cursor in a
+    /// box; the address now lives in the setup window with the explanation of what it is for, so the
+    /// item is named for where it goes.
+    case setUp
     case startBridge
     case stopBridge
     case restartBridge
@@ -77,45 +86,84 @@ public struct MenuModel: Sendable {
 
     /// The menu for a given moment.
     ///
-    /// `status` is nil before the first check. `hasAddress` is false on first run, when `dial.txt`
-    /// does not exist yet.
-    /// - Parameter implemented: the actions that actually do something in this build. **An action
-    ///   outside this set is never enabled**, whatever the state says — that is the structural version
-    ///   of the rule rather than the remembered one. The menu derives its handlers from the same set,
-    ///   so a pressable item and a working item cannot come apart.
+    /// ### `paired` replaced a status this app was inventing
+    ///
+    /// The previous signature took a `BridgeStatus` — three facts about whether the configured address
+    /// answers and whether what answered is us. **Nothing ever established those facts.** The app
+    /// handed this function a `BridgeStatus` built at the call site out of a placeholder address, `not
+    /// checked` and `notEstablished`, on every rebuild; the three-way verdict was a shape with no
+    /// measurement behind it. The bridge's control socket reports what is actually true — which
+    /// phones are paired — so that is what the menu is drawn from now, and the facts nothing can
+    /// establish are not drawn at all.
+    ///
+    /// - Parameters:
+    ///   - paired: the phones the bridge holds, from `status`. Empty is the ordinary first state.
+    ///   - hasAddress: false on first run, when nothing is stored yet.
+    ///   - bridge: what the supervisor says about its child. The supervisor's own state rather than a
+    ///     three-way translation of it: `.starting` and `.stopping` are both windows in which some of
+    ///     these items must not be pressable, and a translation that flattened either was how a frozen
+    ///     bridge came to be described as Running.
+    ///   - implemented: the actions that actually do something in this build. **An action outside this
+    ///     set is never enabled**, whatever the state says — that is the structural version of the
+    ///     rule rather than the remembered one. The menu derives its handlers from the same set, so a
+    ///     pressable item and a working item cannot come apart.
     public static func items(
-        status: BridgeStatus?,
+        paired: [PairedPhone],
         hasAddress: Bool,
         launchesAtLogin: Bool,
+        bridge: BridgeState = .stopped,
         implemented: Set<MenuAction> = Set(MenuAction.allCases),
     ) -> [MenuItem] {
-        stateItems(status: status, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin).map {
-            // `&&`, never `=`: an unimplemented action cannot be argued back into being pressable by
-            // a state that thinks it should be.
-            MenuItem(action: $0.action, title: $0.title, enabled: $0.enabled && implemented.contains($0.action))
-        }
+        stateItems(paired: paired, hasAddress: hasAddress, launchesAtLogin: launchesAtLogin, bridge: bridge)
+            .map {
+                // `&&`, never `=`: an unimplemented action cannot be argued back into being pressable
+                // by a state that thinks it should be.
+                MenuItem(action: $0.action, title: $0.title, enabled: $0.enabled && implemented.contains($0.action))
+            }
     }
 
     /// What the *state* alone says. Never used directly by the menu — [items] narrows it by what is
     /// actually wired.
-    private static func stateItems(status: BridgeStatus?, hasAddress: Bool, launchesAtLogin: Bool) -> [MenuItem] {
-        // **Two different questions, and they were one bool.** Whether the bridge is UP decides the
-        // glyph above; whether something is up OR on its way decides which of Start and Stop can be
-        // pressed. They only came apart when `.starting` stopped meaning "about to be running" and
-        // started meaning "spawned and not answering yet" — during which Stop must work, because
-        // stopping a bridge that is hanging is precisely what the owner wants to do.
-        let inFlight = status?.running != nil && status?.running != .notRunning
-        return [
+    private static func stateItems(
+        paired: [PairedPhone], hasAddress: Bool, launchesAtLogin: Bool, bridge: BridgeState,
+    ) -> [MenuItem] {
+        // **Three questions, and two of them were one bool.** Whether the bridge is up decides the
+        // glyph; whether something is up OR on its way decides whether Stop can be pressed; and
+        // whether a stop is already in flight decides whether ANYTHING about the bridge can be. That
+        // last one arrived with `.stopping`: the kill escalates and can take twice the grace period,
+        // and during it a second Stop signals a pid that is already being killed while a Start races
+        // an exit that has not landed.
+        let inFlight = bridge != .stopped && !bridge.hasFailed
+        let stopping = bridge == .stopping
+
+        var items: [MenuItem] = [
             // Needs an address to encode. Offering it without one would mint a code for nothing.
-            MenuItem(action: .showPairingCode, title: "Show the pairing code…", enabled: hasAddress),
+            MenuItem(action: .pairPhone, title: "Pair a phone…", enabled: hasAddress),
+        ]
+        // **Present only when there is a phone to drop.** Not "present and disabled": an item naming a
+        // phone that does not exist is the 2026-08-10 defect wearing a politer face, and the name is
+        // the whole content of this item — "Unpair" alone asks somebody to destroy something they
+        // cannot see.
+        if let phone = paired.last {
+            items.append(MenuItem(action: .unpair, title: "Unpair \(Self.describe(phone))", enabled: true))
+        }
+        items += [
             // ALWAYS available: it is the only way out of first run, and the only way to correct a
             // wrong address - which is the failure this whole app exists to make visible.
-            MenuItem(action: .setAddress, title: "Set the address…", enabled: true),
+            MenuItem(action: .setUp, title: "Set up…", enabled: true),
             MenuItem(action: .startBridge, title: "Start the bridge", enabled: !inFlight),
-            MenuItem(action: .stopBridge, title: "Stop the bridge", enabled: inFlight),
+            MenuItem(
+                action: .stopBridge,
+                // The title says which of the two it is. A greyed *Stop the bridge* during a stop
+                // reads as an app that has hung; the word is what says the machine is part-way
+                // through what was asked of it.
+                title: stopping ? "Stopping the bridge…" : "Stop the bridge",
+                enabled: inFlight && !stopping,
+            ),
             // Enabled even when it is down, because "restart" on a stopped bridge is "start it", and a
-            // pin without a restart pins nothing - main.go reads phone-cert.pem once at startup.
-            MenuItem(action: .restartBridge, title: "Restart the bridge", enabled: true),
+            // pin without a restart pins nothing - main.go reads phone-cert.pem once at startup. Not
+            // during a stop, for the same reason Start is not: the child is on its way out.
+            MenuItem(action: .restartBridge, title: "Restart the bridge", enabled: !stopping),
             // The two titles are named constants rather than a ternary of string literals, and that
             // is not style. Written inline, the second literal would sit immediately after a colon
             // that follows the word this menu item is about - and scripts/check-no-credentials.sh
@@ -132,5 +180,14 @@ public struct MenuModel: Sendable {
             // relaunch or ask.
             MenuItem(action: .quit, title: "Quit", enabled: true),
         ]
+        return items
+    }
+
+    /// How a phone is named in the menu. The name the phone gave, and its fingerprint when it gave no
+    /// name — **never an empty pair of quotes**, which is what an unnamed phone rendered as before
+    /// this existed.
+    public static func describe(_ phone: PairedPhone) -> String {
+        let name = phone.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? phone.fingerprint : name
     }
 }

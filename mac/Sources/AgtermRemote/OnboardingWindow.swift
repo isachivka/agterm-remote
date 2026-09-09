@@ -232,7 +232,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
             body("Until a phone comes through, this address is unproven: nothing on this Mac can tell "
                 + "you whether it reaches you from outside. The scan is what proves it."))
 
-        let show = NSButton(title: "Show the pairing code…", target: self, action: #selector(showCodeTapped))
+        let show = NSButton(title: "Pair a phone…", target: self, action: #selector(showCodeTapped))
         show.bezelStyle = .rounded
         show.keyEquivalent = "\r"
         let row = NSStackView(views: [show, recheckButton("Look again")])
