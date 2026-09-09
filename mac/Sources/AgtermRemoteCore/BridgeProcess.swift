@@ -142,6 +142,20 @@ public final class BridgeProcess: @unchecked Sendable {
     /// pressing Start while a retry was pending would leave two bridges fighting over one port.
     private var generation = 0
 
+    /// **Which child an exit belongs to.** Bumped once per launch, captured in that launch's callback,
+    /// and compared when the exit arrives.
+    ///
+    /// `onExit` carries a status and nothing else, and a real `Process` delivers it from its own
+    /// queue milliseconds after the fact. So the exit of a child that Stop killed lands **after** the
+    /// child that Start spawned is already running. Without this counter that exit was read as the
+    /// living child crashing: the supervisor restarted, and the bridge it had just started was left
+    /// running with nothing tracking it — a listener on the owner's exposed port that no menu item
+    /// could reach. Measured as `launched=[1001, 1002, 1003] terminated=[1001, 1003] leaked=[1002]`.
+    ///
+    /// `stopping` cannot do this job: `start()` clears it, and by the time the stale exit arrives it
+    /// is false again.
+    private var runID = 0
+
     /// Every transition, in order. The menu is rebuilt from this rather than from a poll, because a
     /// menu that asks whenever it happens to be opened is wrong for as long as it is closed.
     ///
@@ -197,21 +211,28 @@ public final class BridgeProcess: @unchecked Sendable {
         }
     }
 
-    /// Terminates it and says so immediately.
+    /// Terminates it, and reports `.stopped` **only once the child has actually gone**.
     ///
-    /// `.stopped` is not deferred until the exit arrives: a stop that leaves the menu saying
-    /// *running* until a signal lands is a control the owner presses twice.
+    /// The announcement used to come first, on the reasoning that the owner's instruction is not in
+    /// doubt. It was wrong for a reason measured rather than argued: a child that ignores `SIGTERM`
+    /// stayed alive while the state said `.stopped`, the pid was cleared, a second Stop was a no-op
+    /// because there was nothing left to signal, and the next Start added a **second** live bridge.
+    /// `terminate` now escalates and returns only when the child is gone — see
+    /// [ChildProcessLauncher.terminate] — so the sentence the menu shows is a fact rather than a
+    /// request.
+    ///
+    /// Cost, stated where it happens: the caller waits for however long the child takes to die, up to
+    /// the launcher's grace period. In practice that is milliseconds; the bridge closes its listener
+    /// and goes. It is bounded, and the alternative is a stop button that lies.
     public func stop() {
         lock.withLock {
             stopping = true
             generation += 1
-            let pidToKill = pid
-            pid = nil
-            // Announced BEFORE the signal goes out, deliberately. A launcher that reports the exit
-            // synchronously would otherwise announce `.stopped` from inside the exit and again from
-            // here, and a menu rebuilt twice for one press is a menu that flickers for no reason.
+            if let pidToKill = pid {
+                launcher.terminate(pidToKill)
+                pid = nil
+            }
             if _state != .stopped { set(.stopped) }
-            if let pidToKill { launcher.terminate(pidToKill) }
         }
     }
 
@@ -241,6 +262,8 @@ public final class BridgeProcess: @unchecked Sendable {
     /// - Returns: the spawn error, when there was one, for `start` to rethrow.
     private func launchOnce() -> Failure? {
         launches += 1
+        runID += 1
+        let mine = runID
         launchInFlight = true
         exitDuringLaunch = nil
         // Before the spawn, not after it: the child's life starts when it is spawned, and a launcher
@@ -250,7 +273,7 @@ public final class BridgeProcess: @unchecked Sendable {
         let started: Int32
         do {
             started = try launcher.launch(executable, arguments()) { [weak self] status in
-                self?.handle(exit: status)
+                self?.handle(exit: status, run: mine)
             }
         } catch {
             launchInFlight = false
@@ -266,24 +289,25 @@ public final class BridgeProcess: @unchecked Sendable {
         // for a process that has already gone.
         if let status = exitDuringLaunch {
             exitDuringLaunch = nil
-            handle(exit: status)
+            handle(exit: status, run: mine)
         } else {
             set(.running(pid: started))
         }
         return nil
     }
 
-    private func handle(exit status: Int32) {
+    private func handle(exit status: Int32, run: Int) {
         lock.withLock {
+            // **An exit from a child we are no longer running is not news about the one we are.**
+            // See the note on `runID`: this is the whole fix for Stop-then-Start orphaning a bridge.
+            guard run == runID else { return }
             if launchInFlight {
                 exitDuringLaunch = status
                 return
             }
-            // We asked for this one. Nothing to explain and nothing to restart.
-            if stopping {
-                if _state != .stopped { set(.stopped) }
-                return
-            }
+            // We asked for this one. `stop()` owns the announcement, and it made it only after the
+            // launcher confirmed the child had actually gone.
+            if stopping { return }
             let pidThatDied = pid
             pid = nil
             if now().timeIntervalSince(startedRunningAt) > Self.longEnoughToForget {
@@ -324,14 +348,23 @@ public final class BridgeProcess: @unchecked Sendable {
             + "and start it again from this menu."
         if let pid, let said = launcher.lastOutput(of: pid)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !said.isEmpty {
-            sentence += "\n\nIt said:\n\(said.suffix(Self.sentenceOutputLimit))"
+            sentence += "\n\nIt said:\n\(Self.lastBytes(said, Self.sentenceOutputLimit))"
         }
         return sentence
     }
 
-    /// How much of the child's talk reaches an alert. The launcher keeps more than a dialogue box can
-    /// show; the end is the part that explains the death.
+    /// How much of the child's talk reaches the owner, **in bytes**. The launcher keeps more than a
+    /// status line can show; the end is the part that explains the death.
     private static let sentenceOutputLimit = 800
+
+    /// The last `limit` BYTES, not the last `limit` Characters. `String.suffix` counts Characters,
+    /// so a non-ASCII diagnostic would carry up to four times the ceiling named above — a limit
+    /// documented in one unit and enforced in another.
+    static func lastBytes(_ text: String, _ limit: Int) -> String {
+        let bytes = Array(text.utf8)
+        guard bytes.count > limit else { return text }
+        return String(decoding: bytes.suffix(limit), as: UTF8.self)
+    }
 
     private func set(_ next: BridgeState) {
         _state = next
@@ -342,20 +375,47 @@ public final class BridgeProcess: @unchecked Sendable {
 /// The production launcher. **The only thing in this package that spawns a process it supervises.**
 ///
 /// It keeps the last of the child's output because that is the difference between a `.failed` that
-/// names a port clash and one that says nothing. Bounded, and never written anywhere: the bridge's
-/// own log is a file with a size limit and a rotation policy, and this is a few kilobytes in memory
-/// for the length of one failure.
+/// names a port clash and one that says nothing. Bounded two ways — a byte ceiling per child and a
+/// ceiling on how many children are remembered — because this object lives as long as the app does
+/// and a map that only grows is a leak with a slow fuse.
 public final class ChildProcessLauncher: ProcessLauncher, @unchecked Sendable {
 
-    /// How much of the child's talk is kept. A refusal to bind is one line; a bridge that ran for a
-    /// day and then died says more, and the end of it is the part that explains the death.
-    private static let keepBytes = 4096
+    /// How much of one child's talk is kept, **in bytes**.
+    ///
+    /// Bytes and not Characters. This was `String.suffix`, which counts Characters, so a stderr in a
+    /// non-ASCII language retained up to four times the ceiling this constant names — a limit that
+    /// was documented in one unit and enforced in another.
+    public static let defaultKeepBytes = 4096
+
+    /// How many children's output is remembered at once. The one that just exited plus a little
+    /// history; `.failed` only ever reads the most recent.
+    static let keepOutputsFor = 8
+
+    /// How long a child gets to leave on its own after `SIGTERM` before it is killed outright.
+    public static let defaultGracePeriod: TimeInterval = 2
+
+    private let keepBytes: Int
+    private let grace: TimeInterval
 
     private let lock = NSLock()
     private var children: [Int32: Process] = [:]
+    /// Signalled when a child's termination handler has run, so `terminate` can wait for the fact
+    /// rather than for a timeout.
+    private var gone: [Int32: DispatchSemaphore] = [:]
+    /// A child that died between `run()` returning and its pid being recorded. **This is a real
+    /// window**: the termination handler fires on another queue and used to remove a key that had
+    /// not been inserted yet, after which the insert put it back and nothing ever took it out again.
+    private var exitedBeforeRegistration: Set<Int32> = []
     private var said: [Int32: String] = [:]
+    private var outputOrder: [Int32] = []
 
-    public init() {}
+    /// - Parameters:
+    ///   - gracePeriod: how long `terminate` waits after `SIGTERM` before escalating. Injected so a
+    ///     test does not have to wait two seconds to prove the escalation happens.
+    public init(gracePeriod: TimeInterval = defaultGracePeriod, keepBytes: Int = defaultKeepBytes) {
+        grace = gracePeriod
+        self.keepBytes = keepBytes
+    }
 
     public func launch(
         _ executable: URL, _ arguments: [String], onExit: @escaping @Sendable (Int32) -> Void,
@@ -386,7 +446,19 @@ public final class ChildProcessLauncher: ProcessLauncher, @unchecked Sendable {
             if let rest = try? output.fileHandleForReading.readToEnd(), !rest.isEmpty {
                 self?.remember(String(decoding: rest, as: UTF8.self), of: pid)
             }
-            self?.lock.withLock { _ = self?.children.removeValue(forKey: pid) }
+            if let launcher = self {
+                launcher.lock.withLock {
+                    // Either we are removing a registered child, or we got here first and the
+                    // registration below must know not to insert it.
+                    if launcher.children.removeValue(forKey: pid) == nil {
+                        launcher.exitedBeforeRegistration.insert(pid)
+                    }
+                    // Signalled BEFORE onExit: `terminate` is waiting on this, and `onExit` reaches
+                    // BridgeProcess, which takes a lock the stopping thread is holding. Signal first
+                    // and neither side waits on the other.
+                    launcher.gone[pid]?.signal()
+                }
+            }
             // A process killed by a signal has no exit status of its own; the shell convention of
             // 128 plus the signal is used so the number in the sentence is never a bare zero for a
             // bridge that was cut down.
@@ -398,30 +470,76 @@ public final class ChildProcessLauncher: ProcessLauncher, @unchecked Sendable {
 
         try task.run()
         let pid = task.processIdentifier
-        lock.withLock { children[pid] = task }
+        // The window this class's one race lives in, made reachable on purpose. A short-lived child
+        // can be dead and handled before the line below records it, and the test that proves the
+        // record is not put back afterwards cannot rely on winning a race by coincidence — measured:
+        // a hundred spawn-and-exit cycles hit it zero times.
+        betweenRunAndRegistration?()
+        lock.withLock {
+            // It may already have exited, in which case the handler has been here and there is
+            // nothing to register.
+            if exitedBeforeRegistration.remove(pid) == nil { children[pid] = task }
+        }
         return pid
     }
 
+    /// Asks the child to stop, escalates if it will not, and **returns only once it has gone**.
+    ///
+    /// `SIGTERM` first, because the bridge unwinds on it: it closes its listener, removes its control
+    /// socket and puts back a window it resized. A process killed outright would leave the owner
+    /// looking at the consequences of the last one.
+    ///
+    /// But a child that ignores `SIGTERM` used to be forgotten rather than killed — the state said
+    /// `.stopped`, the process was alive, and the next Start added a second bridge to the same port.
+    /// So after the grace period it is killed, and killed only if it is still one of ours: the pid of
+    /// a child that already exited can be reused by an unrelated process, and this app must never be
+    /// capable of signalling something it did not start.
     public func terminate(_ pid: Int32) {
-        let task = lock.withLock { children[pid] }
-        // `terminate()` on the object rather than a signal to a number: a pid can be reused between
-        // the moment a child dies and the moment somebody presses Stop, and this app must not be
-        // capable of signalling a process it never started.
-        task?.terminate()
+        let waiting: (task: Process, gone: DispatchSemaphore)? = lock.withLock {
+            guard let task = children[pid] else { return nil }
+            let semaphore = gone[pid] ?? DispatchSemaphore(value: 0)
+            gone[pid] = semaphore
+            return (task, semaphore)
+        }
+        // Already gone. Nothing to signal and nothing to wait for.
+        guard let waiting else { return }
+
+        waiting.task.terminate()
+        if waiting.gone.wait(timeout: .now() + grace) == .timedOut {
+            let stillOurs = lock.withLock { children[pid] != nil }
+            if stillOurs { kill(pid, SIGKILL) }
+            _ = waiting.gone.wait(timeout: .now() + grace)
+        }
+        lock.withLock { gone[pid] = nil }
     }
 
     public func lastOutput(of pid: Int32) -> String? {
         lock.withLock { said[pid] }
     }
 
+    /// Called between `run()` returning and the child being recorded. **Nil in production**, and
+    /// internal so it cannot be set from outside this package. See the note at the call site.
+    var betweenRunAndRegistration: (@Sendable () -> Void)?
+
+    /// What is still being tracked. Internal, for the tests that prove none of these maps grow.
+    var tracked: (children: Int, output: Int, waiters: Int) {
+        lock.withLock { (children.count, said.count, gone.count) }
+    }
+
     private func remember(_ text: String, of pid: Int32) {
         guard !text.isEmpty else { return }
         lock.withLock {
-            var kept = (said[pid] ?? "") + text
-            if kept.utf8.count > Self.keepBytes {
-                kept = String(kept.suffix(Self.keepBytes))
+            if said[pid] == nil { outputOrder.append(pid) }
+            // Counted in bytes, trimmed in bytes. A cut can land inside a multi-byte character and
+            // `String(decoding:)` renders that one as a replacement — one mangled character at the
+            // front of a diagnostic is a better trade than a ceiling nobody can predict.
+            var bytes = Array(said[pid]?.utf8 ?? "".utf8)
+            bytes.append(contentsOf: text.utf8)
+            if bytes.count > keepBytes { bytes = Array(bytes.suffix(keepBytes)) }
+            said[pid] = String(decoding: bytes, as: UTF8.self)
+            while outputOrder.count > Self.keepOutputsFor {
+                said.removeValue(forKey: outputOrder.removeFirst())
             }
-            said[pid] = kept
         }
     }
 }
