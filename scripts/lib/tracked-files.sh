@@ -131,8 +131,26 @@ guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine funct
     exit 2
   fi
 
-  guard_tmp="$(mktemp -d)"
-  trap 'rm -rf "$guard_tmp"' EXIT
+  # Checked, and it was not. `mktemp -d` fails on a read-only or full TMPDIR, and an unchecked
+  # failure left `$guard_tmp` empty, `$listing` as "/listing", and the redirect below unable to
+  # open it - which surfaced as "could not list the tracked files", a cause that has nothing to do
+  # with the real problem. Three defects in this library have now been a wrong stated cause rather
+  # than a wrong verdict, and a message that sends somebody to look at their repository when the
+  # fault is their temp directory is the same mistake in a new place.
+  if ! guard_tmp="$(mktemp -d)"; then
+    echo "::error::$name could not create a temporary directory (TMPDIR=${TMPDIR:-/tmp})."
+    echo "    It needs one to hold the listing and the blobs it reads. This is the machine, not"
+    echo "    the repository: nothing has been checked and nothing can be."
+    exit 2
+  fi
+  # The cleanup must not be able to change the verdict, and it could. `rm -rf` fails on a temp
+  # directory the guard is no longer allowed to write to - which is precisely the state the scratch
+  # write below reports - and under `set -e` that aborted the trap on the spot, handing the failed
+  # `rm`'s status back as the script's. Reproduced: `exit 2`, meaning THIS GUARD COULD NOT RUN, came
+  # out as exit 1, meaning it found something. A verdict decided by whether the housekeeping worked
+  # is not a verdict, so the status is saved first, the removal is allowed to fail, and the saved
+  # status is what leaves.
+  trap 'guard_status=$?; rm -rf "$guard_tmp" 2>/dev/null || :; exit "$guard_status"' EXIT
   listing="$guard_tmp/listing"
   blob="$guard_tmp/blob"
   # Where the decode check below throws its output. Truncated on every file, so it holds one file at
@@ -292,7 +310,23 @@ guard_walk() { # $1 = repository root, $2 = the guard's name, $3 = examine funct
     # `pipefail` is set or the index is read explicitly, and the failure when it is not is that
     # every file decodes and nothing is ever refused. A fail-open one edit away is not worth a
     # saved write.
+    #
+    # Which buys one new way to be wrong, and it is answered below rather than left to be
+    # discovered: the write can fail for reasons that have nothing to do with the file. A full or
+    # read-only temp filesystem makes iconv exit non-zero exactly as an undecodable file does, and
+    # reporting THAT as "this file is not valid UTF-8" would send somebody to convert a file whose
+    # encoding was never the problem. That is the mistake the permission check was split out of this
+    # branch to avoid, and this library has now made it three times. So a failure here asks which of
+    # the two it was, by trying to add one byte to the scratch file it just tried to write.
     if ! iconv -f UTF-8 -t UTF-8 < "$target" > "$decoded" 2>/dev/null; then
+      if ! printf 'x' >> "$decoded" 2>/dev/null; then
+        echo "::error::$name could not write its scratch copy of '$path' into $guard_tmp."
+        echo "    It decodes each file to a scratch copy to check that the file is UTF-8, and that"
+        echo "    write failed - a full or read-only temp filesystem, not anything about the file."
+        echo "    Its encoding has NOT been judged and neither has anything after it: free some"
+        echo "    space, or point TMPDIR somewhere writable, and run this again."
+        exit 2
+      fi
       if guard_is_binary_asset "$path"; then
         guard_declined_binary=$((guard_declined_binary + 1))
         continue
