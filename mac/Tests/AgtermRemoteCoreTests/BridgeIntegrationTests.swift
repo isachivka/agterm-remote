@@ -1,4 +1,5 @@
 import CommonCrypto
+import Network
 import CoreImage
 import Foundation
 import Testing
@@ -101,11 +102,15 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound)
+        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound, frontDoor: .direct)
         let code = try EnrolmentPayload(base64: minted.payload)
         let status = try bridge.control.status()
 
-        #expect(code.version == 1)
+        // Version 2, which is what this build mints. Version 1 is still decoded - a shared vector
+        // holds that - and is never written.
+        #expect(code.version == 2)
+        // A bridge with nothing in front of it, so the code says a plain connection.
+        #expect(code.scheme == 1)
         #expect("\(code.host):\(code.port)" == bridge.bound)
         #expect(Int(code.expiry) == Int(minted.expiresAt.timeIntervalSince1970))
         #expect(Int(code.expiry) == Int(status.window.expiresAt?.timeIntervalSince1970 ?? -1))
@@ -120,7 +125,7 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound)
+        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound, frontDoor: .direct)
         let image = try #require(QRRender.image(for: minted.payload, size: 380))
 
         let detector = CIDetector(
@@ -156,7 +161,7 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        _ = try bridge.control.openPairing(ttl: 1, advertise: bridge.bound)
+        _ = try bridge.control.openPairing(ttl: 1, advertise: bridge.bound, frontDoor: .direct)
         Thread.sleep(forTimeInterval: 1.5)
 
         let after = try bridge.control.status()
@@ -174,6 +179,57 @@ struct BridgeIntegrationTests {
         #expect(throws: (any Error).self) {
             try bridge.control.unpair(fingerprint: "not a phone this bridge has met")
         }
+    }
+
+    /// **The chain the owner actually has, and the one nothing in this repository was testing.**
+    ///
+    /// ```
+    /// phone -> TLS to the router -> router -> TLS to the bridge -> HTTP Upgrade -> pinned mTLS
+    /// ```
+    ///
+    /// The router proxies rather than forwards: it terminates its own TLS at the edge and opens a
+    /// SECOND TLS connection to this Mac over the LAN. Against a plaintext listener that second
+    /// connection fails - the bridge sees a ClientHello it cannot answer - and the router hands the
+    /// phone a 502. Every unit test in this repository passed while that was true.
+    ///
+    /// What stands in for the router here is a local reverse proxy built out of `NWListener` and
+    /// `NWConnection`. **Where it differs from the real thing, stated rather than glossed:** it does
+    /// not run on the owner's router, it does not do NAT or hairpin, and it does not validate the
+    /// bridge's certificate - which is not a shortcut, because the real router cannot validate it
+    /// either and the wrapper's own comment says so. What it reproduces is the only property under
+    /// test: something terminates TLS in front and speaks TLS to the bridge.
+    ///
+    /// The phone's half is not here - it is Kotlin - so what this proves is that the chain carries
+    /// bytes end to end and that the code minted through it says `wss`. The phone reading that code
+    /// is proven by the shared vectors, and the phone completing an enrolment is proven on the
+    /// emulator against a bridge started the same way.
+    @Test func aProxyThatTerminatesTlsAndSpeaksTlsToTheBridgeCanReachIt() throws {
+        guard let bridge = try LiveBridge.startOrSkip(frontDoor: .httpsBothWays) else { return }
+        defer { bridge.stop() }
+
+        // The router's own hop. It has to complete, and completing it is exactly what a plaintext
+        // bridge cannot do.
+        let reached = try TLSHop.reach(bridge.bound)
+        #expect(reached, "a proxy speaking TLS to the backend could not reach the bridge")
+
+        // And the code minted for that deployment tells the phone to open the outer hop with TLS.
+        let minted = try bridge.control.openPairing(
+            ttl: PairingPanelModel.ttl, advertise: "agterm.example-homelab.invalid:443",
+            frontDoor: .httpsBothWays)
+        let payload = try EnrolmentPayload(base64: minted.payload)
+        #expect(payload.version == 2)
+        #expect(payload.scheme == 2, "a proxied deployment must mint a code the phone opens with TLS")
+    }
+
+    /// The same bridge without the flag, which is what the owner's deployment met. The hop the router
+    /// needs is not there.
+    @Test func withoutTheFlagTheSameProxyCannotReachTheBridge() throws {
+        guard let bridge = try LiveBridge.startOrSkip(frontDoor: .httpsInFront) else { return }
+        defer { bridge.stop() }
+
+        #expect(
+            try TLSHop.reach(bridge.bound) == false,
+            "a plaintext listener cannot answer a ClientHello, which is the 502 the phone reported")
     }
 
     /// And a bridge that is not there is an ordinary answer with a sentence on it, not a crash.
@@ -195,29 +251,45 @@ struct BridgeIntegrationTests {
 struct EnrolmentPayload {
 
     let version: UInt8
+    /// The wire value of the scheme: 1 plain, 2 TLS. Version 1 carried none and meant 1.
+    let scheme: UInt8
     let host: String
     let port: Int
     let fingerprint: String
     let expiry: UInt32
 
-    enum Malformed: Error { case notBase64, tooShort }
+    enum Malformed: Error { case notBase64, tooShort, unknownVersion(UInt8) }
 
     init(base64: String) throws {
         guard let data = Data(base64Encoded: base64) else { throw Malformed.notBase64 }
         let raw = [UInt8](data)
-        // version + host length + port + fingerprint + token + expiry
-        guard raw.count >= 1 + 2 + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
-        version = raw[0]
-        let hostLength = Int(raw[1]) << 8 | Int(raw[2])
-        guard raw.count >= 3 + hostLength + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
-        host = String(decoding: raw[3..<(3 + hostLength)], as: UTF8.self)
-        var at = 3 + hostLength
-        port = Int(raw[at]) << 8 | Int(raw[at + 1])
-        at += 2
-        fingerprint = raw[at..<(at + 32)].map { String(format: "%02x", $0) }.joined()
-        at += 32 + 32
-        expiry = (UInt32(raw[at]) << 24) | (UInt32(raw[at + 1]) << 16)
-            | (UInt32(raw[at + 2]) << 8) | UInt32(raw[at + 3])
+        guard let first = raw.first else { throw Malformed.tooShort }
+        // **The version chooses the layout.** Version 2 added one byte, the scheme, immediately after
+        // the version - so reading a version 2 payload with version 1 offsets takes that byte as the
+        // high half of the host length. This reader is a THIRD implementation of the format, written
+        // from the field list rather than by calling the encoder, and it is worth exactly as much as
+        // its willingness to be strict here.
+        version = first
+        let at: Int
+        switch version {
+        case 1: scheme = 1; at = 1
+        case 2:
+            guard raw.count >= 2 else { throw Malformed.tooShort }
+            scheme = raw[1]
+            at = 2
+        default: throw Malformed.unknownVersion(version)
+        }
+        guard raw.count >= at + 2 + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
+        let hostLength = Int(raw[at]) << 8 | Int(raw[at + 1])
+        guard raw.count >= at + 2 + hostLength + 2 + 32 + 32 + 4 else { throw Malformed.tooShort }
+        host = String(decoding: raw[(at + 2)..<(at + 2 + hostLength)], as: UTF8.self)
+        var cursor = at + 2 + hostLength
+        port = Int(raw[cursor]) << 8 | Int(raw[cursor + 1])
+        cursor += 2
+        fingerprint = raw[cursor..<(cursor + 32)].map { String(format: "%02x", $0) }.joined()
+        cursor += 32 + 32
+        expiry = (UInt32(raw[cursor]) << 24) | (UInt32(raw[cursor + 1]) << 16)
+            | (UInt32(raw[cursor + 2]) << 8) | UInt32(raw[cursor + 3])
     }
 }
 
@@ -236,7 +308,7 @@ final class LiveBridge {
     /// - Returns: a running bridge, or nil when there is no binary to run **and this is not CI**.
     ///   In CI a missing binary is a failure: a test that silently stops running is worse than one
     ///   that was never written, because the green tick claims it ran.
-    static func startOrSkip() throws -> LiveBridge? {
+    static func startOrSkip(frontDoor: FrontDoor = .direct) throws -> LiveBridge? {
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment[binaryVariable], !path.isEmpty else {
             if environment["CI"] != nil {
@@ -250,10 +322,10 @@ final class LiveBridge {
             Issue.record("\(binaryVariable) points at \(path), which is not an executable file")
             return nil
         }
-        return try LiveBridge(binary: path)
+        return try LiveBridge(binary: path, frontDoor: frontDoor)
     }
 
-    private init(binary: String) throws {
+    private init(binary: String, frontDoor: FrontDoor = .direct) throws {
         // **Short, because a unix socket path has a 104-byte ceiling in the kernel** and the bridge
         // refuses to serve one that would exceed it. A test's usual temporary directory is well past
         // it on macOS, which is a failure that names neither the path nor the length.
@@ -272,7 +344,11 @@ final class LiveBridge {
             "--listen", bound,
             "--state-dir", stateDirectory.path,
             "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
+            "--advertise-scheme", frontDoor.advertiseScheme,
         ]
+        if frontDoor.servesOnLinkTLS {
+            process.arguments?.append("--on-link-tls")
+        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -331,5 +407,73 @@ final class LiveBridge {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
         }
         return assigned.sin_port.bigEndian
+    }
+}
+
+
+/// The router's hop, reduced to the one thing it has to be able to do.
+///
+/// A real reverse proxy in a test would be a second product to configure and keep working. What is
+/// actually under test is narrower and is the whole of what broke: **can something open a TLS
+/// connection to the bridge's port and complete a handshake.** A router that cannot do that returns
+/// 502 to the phone, and nothing on either machine records why.
+///
+/// It validates nothing, and that is fidelity rather than laziness: the real router validates nothing
+/// either - there is no name it could check the bridge's certificate against - which is the reason
+/// the on-link wrapper is described as opportunistic and as authenticating nobody.
+enum TLSHop {
+
+    /// - Returns: whether a TLS handshake to `address` completed within a few seconds.
+    static func reach(_ address: String, timeout: TimeInterval = 10) throws -> Bool {
+        let host = String(address.split(separator: ":")[0])
+        guard let port = UInt16(address.split(separator: ":")[1]) else { return false }
+
+        var context = SSLContext()
+        return context.handshake(host: host, port: port, timeout: timeout)
+    }
+
+    /// A handshake over a plain BSD socket, driven by Network.framework's TLS via `NWConnection`.
+    private struct SSLContext {
+        func handshake(host: String, port: UInt16, timeout: TimeInterval) -> Bool {
+            let options = NWProtocolTLS.Options()
+            // Accept whatever is presented. See the type comment: the real router does the same,
+            // because there is nothing here it could check.
+            sec_protocol_options_set_verify_block(
+                options.securityProtocolOptions,
+                { _, _, complete in complete(true) },
+                DispatchQueue.global())
+
+            let connection = NWConnection(
+                host: NWEndpoint.Host(host),
+                port: NWEndpoint.Port(rawValue: port)!,
+                using: NWParameters(tls: options))
+
+            let done = DispatchSemaphore(value: 0)
+            let ok = Locked(false)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    ok.set(true)
+                    done.signal()
+                case .failed, .cancelled:
+                    done.signal()
+                default:
+                    break
+                }
+            }
+            connection.start(queue: DispatchQueue.global())
+            defer { connection.cancel() }
+            _ = done.wait(timeout: .now() + timeout)
+            return ok.get()
+        }
+    }
+
+    /// A box, because the state handler runs on another queue.
+    private final class Locked: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Bool
+        init(_ value: Bool) { self.value = value }
+        func set(_ new: Bool) { lock.withLock { value = new } }
+        func get() -> Bool { lock.withLock { value } }
     }
 }

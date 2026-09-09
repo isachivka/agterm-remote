@@ -1,5 +1,6 @@
 package dev.isachivka.agtermremote.pairing
 
+import dev.isachivka.agtermremote.wire.BridgeUrl
 import java.io.ByteArrayOutputStream
 
 /**
@@ -38,6 +39,13 @@ data class ConnectionProfile(
      */
     val dialAddress: String get() = if (host.contains(':')) "[$host]:$port" else "$host:$port"
 
+    /**
+     * The whole address the terminal opens. Identical to `EnrollPayload.dialUrl` and deliberately so:
+     * the address enrolment dialled and the address the terminal dials are the same address, opened
+     * the same way, and two renderings of that is how a pairing completes and then never connects.
+     */
+    val dialUrl: String get() = BridgeUrl.of(dialAddress, kind)
+
     // Data classes compare arrays by identity, which would make two profiles carrying the same
     // certificate unequal. Equality is used when deciding whether a rescan actually changed anything,
     // so it has to compare contents.
@@ -70,8 +78,23 @@ data class ConnectionProfile(
  * address, which is why one entry covers both.
  */
 enum class StreamKind(val wire: Int) {
-    /** A plain TCP connection to [ConnectionProfile.host]. Covers both a forwarded port and a relay. */
+    /**
+     * A plain connection to the address: `ws://`.
+     *
+     * Right for a forwarded port at a fixed address or a dynamic-DNS name, and for a mesh network
+     * that carries the packets itself - the phone reaches the bridge, and the bridge is what answers.
+     */
     DirectTcp(1),
+
+    /**
+     * A TLS connection to whatever publishes the Mac: `wss://`.
+     *
+     * Right for a router that proxies rather than forwards, a tunnel whose edge is HTTPS, and a
+     * reverse proxy in front. **What terminates that TLS is the proxy, with its own certificate,
+     * which this design neither pins nor cares about** - the laptop is identified by the pinned mTLS
+     * inside the stream, and this decides reachability rather than trust.
+     */
+    DirectTls(2),
     ;
 
     companion object {

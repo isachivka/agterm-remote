@@ -2,56 +2,99 @@
   {
     "name": "short-host",
     "note": "The ordinary case: a short name, the usual port, a mid-range expiry.",
+    "version": 2,
     "host": "example.test",
     "port": 8443,
+    "scheme": 1,
     "fingerprint_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "token_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
     "expiry_unix": 1800000000,
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA==",
-    "dial_address": "example.test:8443"
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA=",
+    "dial_address": "example.test:8443",
+    "dial_url": "ws://example.test:8443/"
   },
   {
     "name": "host-at-253-bytes",
     "note": "The longest legitimate DNS name: four labels, 253 bytes. Pins the uint16 length prefix against an implementation that assumed one byte would do.",
+    "version": 2,
     "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "port": 443,
+    "scheme": 2,
     "fingerprint_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
     "token_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
     "expiry_unix": 2000000000,
-    "text": "AQD9YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYi5jY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MuZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZAG7QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en3c1lAA=",
-    "dial_address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:443"
+    "text": "AgIA/WFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS5iYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIuY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjLmRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQBu0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fgIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp93NZQA",
+    "dial_address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:443",
+    "dial_url": "wss://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:443/"
   },
   {
     "name": "non-ascii-host",
     "note": "A host with a multi-byte character. The length prefix counts BYTES, not characters: this host is 20 characters and 21 bytes.",
+    "version": 2,
     "host": "münchen.example.test",
     "port": 9443,
+    "scheme": 1,
     "fingerprint_hex": "1114171a1d202326292c2f3235383b3e4144474a4d505356595c5f6265686b6e",
     "token_hex": "22272c31363b40454a4f54595e63686d72777c81868b90959a9fa4a9aeb3b8bd",
     "expiry_unix": 1900000000,
-    "text": "AQAVbcO8bmNoZW4uZXhhbXBsZS50ZXN0JOMRFBcaHSAjJiksLzI1ODs+QURHSk1QU1ZZXF9iZWhrbiInLDE2O0BFSk9UWV5jaG1yd3yBhouQlZqfpKmus7i9cT+zAA==",
-    "dial_address": "münchen.example.test:9443"
+    "text": "AgEAFW3DvG5jaGVuLmV4YW1wbGUudGVzdCTjERQXGh0gIyYpLC8yNTg7PkFER0pNUFNWWVxfYmVoa24iJywxNjtARUpPVFleY2htcnd8gYaLkJWan6SprrO4vXE/swA=",
+    "dial_address": "münchen.example.test:9443",
+    "dial_url": "ws://münchen.example.test:9443/"
   },
   {
     "name": "ipv6-literal-host",
     "note": "An IPv6 literal, unbracketed in the host field as every host is. The payload carries one host and no brackets, so a dialler that appends \":\" and the port produces \"2001:db8::1:8443\", which is not an address - see dial_address, which is what this vector exists to pin.",
+    "version": 2,
     "host": "2001:db8::1",
     "port": 8443,
+    "scheme": 2,
     "fingerprint_hex": "5557595b5d5f61636567696b6d6f71737577797b7d7f81838587898b8d8f9193",
     "token_hex": "aaa8a6a4a2a09e9c9a98969492908e8c8a88868482807e7c7a78767472706e6c",
     "expiry_unix": 1850000000,
-    "text": "AQALMjAwMTpkYjg6OjEg+1VXWVtdX2FjZWdpa21vcXN1d3l7fX+Bg4WHiYuNj5GTqqimpKKgnpyamJaUkpCOjIqIhoSCgH58enh2dHJwbmxuRMKA",
-    "dial_address": "[2001:db8::1]:8443"
+    "text": "AgIACzIwMDE6ZGI4OjoxIPtVV1lbXV9hY2VnaWttb3FzdXd5e31/gYOFh4mLjY+Rk6qopqSioJ6cmpiWlJKQjoyKiIaEgoB+fHp4dnRycG5sbkTCgA==",
+    "dial_address": "[2001:db8::1]:8443",
+    "dial_url": "wss://[2001:db8::1]:8443/"
+  },
+  {
+    "name": "legacy-v1-short-host",
+    "note": "A version 1 code, in the layout that shipped before the scheme existed. It must still decode, and it must mean a plain connection - which is what every version 1 implementation did. A decoder that refused this would tell its owner their Mac is newer than their app about a code it can read perfectly.",
+    "version": 1,
+    "host": "example.test",
+    "port": 8443,
+    "scheme": 1,
+    "fingerprint_hex": "0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5aa",
+    "token_hex": "f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693",
+    "expiry_unix": 1750000000,
+    "text": "AQAMZXhhbXBsZS50ZXN0IPsPFBkeIygtMjc8QUZLUFVaX2RpbnN4fYKHjJGWm6ClqvDt6ufk4d7b2NXSz8zJxsPAvbq3tLGuq6ilop+cmZaTaE7hgA==",
+    "dial_address": "example.test:8443",
+    "dial_url": "ws://example.test:8443/"
+  },
+  {
+    "name": "legacy-v1-ipv6-literal-host",
+    "note": "A version 1 code carrying an IPv6 literal. The bracketing rule and the version-1 default scheme have to hold at the same time, which is the case a decoder patched for one of them gets wrong.",
+    "version": 1,
+    "host": "2001:db8::1",
+    "port": 443,
+    "scheme": 1,
+    "fingerprint_hex": "21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa",
+    "token_hex": "ded9d4cfcac5c0bbb6b1aca7a29d98938e89847f7a75706b66615c57524d4843",
+    "expiry_unix": 1760000000,
+    "text": "AQALMjAwMTpkYjg6OjEBuyEoLzY9REtSWWBnbnV8g4qRmJ+mrbS7wsnQ197l7PP63tnUz8rFwLu2saynop2Yk46JhH96dXBrZmFcV1JNSENo53gA",
+    "dial_address": "[2001:db8::1]:443",
+    "dial_url": "ws://[2001:db8::1]:443/"
   },
   {
     "name": "boundary-values",
     "note": "Every field at its ceiling: the highest port a uint16 holds, and the last second a uint32 expiry can name (2106-02-07T06:28:15Z).",
+    "version": 2,
     "host": "a",
     "port": 65535,
+    "scheme": 2,
     "fingerprint_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "token_hex": "0000000000000000000000000000000000000000000000000000000000000000",
     "expiry_unix": 4294967295,
-    "text": "AQABYf////////////////////////////////////////////8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP////8=",
-    "dial_address": "a:65535"
+    "text": "AgIAAWH/////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////",
+    "dial_address": "a:65535",
+    "dial_url": "wss://a:65535/"
   }
 ]

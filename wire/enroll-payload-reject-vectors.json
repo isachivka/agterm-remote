@@ -2,68 +2,86 @@
   {
     "name": "wrong-version",
     "refusal": "unsupported-version",
-    "note": "Version byte 2 in a build that speaks 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here.",
-    "text": "AgAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "note": "Version byte 3 in a build that mints 2 and reads 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here. This vector used to carry version 2, which the scheme change made VALID; a reject vector that stops rejecting is the quietest way a guard can go hollow, and it is why the generator proves every case is refused before writing it.",
+    "text": "AwEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
+  },
+  {
+    "name": "scheme-zero",
+    "refusal": "unsupported-scheme",
+    "note": "Scheme byte 0, which is the shape a zero-filled field takes and is not a scheme. It must be refused rather than defaulted to a plain connection: defaulting here is the assumption version 1 made silently, and the failure it produces is a phone that cannot reach a front door and cannot say why.",
+    "text": "AgAADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
+  },
+  {
+    "name": "scheme-unknown",
+    "refusal": "unsupported-scheme",
+    "note": "A scheme this build does not know. It is not a malformed payload - it is a Mac that can arrange something this phone cannot - and it must never be treated as one of the two known ones.",
+    "text": "AgkADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
+  },
+  {
+    "name": "v2-payload-labelled-v1",
+    "refusal": "length-mismatch",
+    "note": "A version 2 payload with its version byte set to 1. Read with version 1 offsets the scheme byte becomes the high half of the host length, so the payload claims a host of some thousands of bytes. It must be refused because the version chooses the layout, not because a ceiling happened to catch the number.",
+    "text": "AQEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "version-zero",
     "refusal": "unsupported-version",
     "note": "Version 0 - the shape a zero-filled or truncated-then-padded buffer takes.",
-    "text": "AAAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AAEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "trailing-byte",
     "refusal": "length-mismatch",
     "note": "A valid payload with one byte appended. The length the header describes is the only length the payload may have; a trailing byte is the tail of a second message, or somebody probing for a parser that ignores what it does not understand.",
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAAA="
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gAA"
   },
   {
     "name": "host-length-overruns-buffer",
     "refusal": "length-mismatch",
     "note": "Host length 300 in an 85-byte buffer. Under MaxField, so the ceiling does not catch it: this is the case a decoder that reads hostLen bytes without checking what it holds gets wrong.",
-    "text": "AQEsZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AgEBLGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "host-length-65535",
     "refusal": "host-length-over-ceiling",
     "note": "The largest number the uint16 length field can hold. Must be refused before anything is allocated for it - a length field an attacker chose must never size an allocation.",
-    "text": "Af//ZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AgH//2V4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "host-length-zero",
     "refusal": "empty-host",
     "note": "Host length 0, and a buffer exactly that long, so only the empty host is wrong. A payload naming no host is nothing the phone can act on.",
-    "text": "AQAAIPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AgEAACD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "truncated-in-the-middle",
     "refusal": "length-mismatch",
     "note": "A valid payload with its last four bytes - the expiry - cut off. Long enough to pass a minimum-length check, short of what its own header describes.",
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHg"
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4A=="
   },
   {
     "name": "truncated-to-a-stub",
     "refusal": "too-short",
-    "note": "Twenty bytes: a correct version byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQI="
+    "note": "Twenty bytes: a correct version byte, a correct scheme byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAE="
   },
   {
     "name": "url-safe-alphabet",
     "refusal": "not-standard-base64",
     "note": "The valid payload rendered in the URL-safe base64 alphabet. java.util.Base64.getDecoder() refuses this and so must every other decoder here: two sides that disagree about the alphabet disagree about which codes exist.",
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH__-_fz7-vn49_b19PPy8fDv7u3s6-rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh___v38-_r5-Pf29fTz8vHw7-7t7Ovq6ejn5uXk4-Lh4GtJ0gA="
   },
   {
     "name": "unpadded",
     "refusal": "not-standard-base64",
     "note": "The valid payload rendered without '=' padding. StdEncoding refuses it. java.util.Base64.getDecoder() does NOT - measured on JDK 21, '=' is accepted but not required - so the Kotlin decoder checks the length itself. This vector is the only thing that made that a requirement.",
-    "text": "AQAMZXhhbXBsZS50ZXN0IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA"
+    "text": "AgEADGV4YW1wbGUudGVzdCD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA"
   },
   {
     "name": "host-not-utf8",
     "refusal": "host-not-utf8",
     "note": "The host field filled with 0xff bytes, which are not UTF-8 in any position. A decoder that lets them through arrives at a host of replacement characters - a different host from the one the owner is looking at.",
-    "text": "AQAM////////////////IPsAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH//+/fz7+vn49/b19PPy8fDv7u3s6+rp6Ofm5eTj4uHga0nSAA=="
+    "text": "AgEADP///////////////yD7AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh///v38+/r5+Pf29fTz8vHw7+7t7Ovq6ejn5uXk4+Lh4GtJ0gA="
   },
   {
     "name": "empty-text",

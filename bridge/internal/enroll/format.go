@@ -60,12 +60,77 @@ import (
 	"unicode/utf8"
 )
 
-// Version is the first byte of every payload.
+// Version is the first byte of every payload, and the version this build MINTS.
 //
 // A phone that reads a version it does not know must say so to its owner - "this Mac is newer than
 // this app" - rather than parse the remainder hopefully. That is why the version is FIRST: it is
 // readable from one byte, before any length field has been trusted.
-const Version = 1
+//
+// # Why 2, and what version 1 got wrong
+//
+// Version 1 carried a host and a port and nothing about HOW to reach them, so every implementation
+// had to assume one answer for every deployment. That assumption was wrong for the deployment this
+// project was written for: a router that publishes the Mac by proxying it, terminating HTTPS at the
+// edge. A phone that opens a plain connection to such a front door never reaches the bridge, and
+// nothing anywhere says why - the address is right, the fingerprint is right, and the code simply
+// does not work.
+//
+// It cannot be inferred and must not be guessed. Trying one and falling back to the other doubles the
+// worst case and replaces a fact the owner knows with a heuristic, in a design whose whole discipline
+// about failure is that it never invents a cause. So the owner says it once, on the Mac, and it
+// travels in the payload.
+const Version = 2
+
+// VersionLegacy is version 1, which this build DECODES and never mints.
+//
+// It is kept readable rather than retired because a decoder that refuses it would report "this Mac is
+// newer than this app" for a code that this build can read perfectly - the wrong sentence, and the
+// one a person cannot act on. A version 1 payload means [SchemePlain], because that is the only thing
+// version 1 implementations ever did.
+const VersionLegacy = 1
+
+// Scheme is how the phone opens the OUTER hop - the one that reaches the front door, not the pinned
+// mTLS inside it.
+//
+// **It says nothing about trust and cannot.** The outer hop authenticates nobody in either form: the
+// laptop is identified by the fingerprint in this same payload, compared against the certificate
+// presented by the pinned TLS that runs INSIDE the upgraded stream. What this field decides is
+// whether the phone can reach the front door at all.
+type Scheme uint8
+
+const (
+	// SchemePlain is a plain connection to the bridge's own port: `ws://`.
+	//
+	// Right for a forwarded port, for a fixed address or a dynamic-DNS name, and for a mesh network
+	// that carries the packets itself - the phone reaches the bridge, and the bridge is what answers.
+	SchemePlain Scheme = 1
+	// SchemeTLS is a TLS connection to whatever publishes the Mac: `wss://`.
+	//
+	// Right for a router that proxies rather than forwards, for a tunnel whose edge is HTTPS, and for
+	// a reverse proxy in front. What terminates that TLS is the proxy, with its own certificate,
+	// which this design neither pins nor cares about - see the type comment.
+	SchemeTLS Scheme = 2
+)
+
+// Known reports whether this build understands the scheme.
+//
+// Separate from the switch in [Scheme.URLScheme] so that a scheme added later cannot be silently
+// treated as one of these two by a decoder that forgot to widen its own check.
+func (s Scheme) Known() bool { return s == SchemePlain || s == SchemeTLS }
+
+// URLScheme is the two spellings the phone actually dials with.
+//
+// Here rather than at the call site, and pinned across languages by `dial_url` on every accept
+// vector, for the same reason [Payload.DialAddress] is: a Go helper the Android app cannot import
+// proves nothing about the Android app.
+func (s Scheme) URLScheme() string {
+	if s == SchemeTLS {
+		return "wss"
+	}
+	return "ws"
+}
+
+func (s Scheme) String() string { return s.URLScheme() }
 
 // MaxField is the ceiling on any length-prefixed field, in bytes.
 //
@@ -80,8 +145,15 @@ const (
 	fingerprintLen = 32 // SHA-256 of the bridge certificate's DER
 	tokenLen       = 32 // the one-time enrolment secret
 	expiryLen      = 4  // Unix seconds, uint32
-	// version + host length + port, the parts that surround the host.
-	fixedLen = 1 + 2 + 2 + fingerprintLen + tokenLen + expiryLen
+	// version + host length + port, the parts that surround the host, in version 1.
+	fixedLenV1 = 1 + 2 + 2 + fingerprintLen + tokenLen + expiryLen
+	// Version 2 adds one byte, the scheme, immediately after the version.
+	//
+	// After the version and before everything length-prefixed, deliberately: it is fixed-width and
+	// readable the moment the version is known, so a decoder never has to trust a length field to
+	// find it.
+	schemeLen  = 1
+	fixedLenV2 = fixedLenV1 + schemeLen
 )
 
 // Payload is what one QR code says.
@@ -108,8 +180,15 @@ type Payload struct {
 	// Host is where the phone dials: a DNS name or a literal IP address, as text. It is the owner's
 	// own address and never belongs in this repository - see scripts/check-no-addresses.sh.
 	Host string
-	// Port is the bridge's TLS port.
+	// Port is the port the phone dials. Whose port it is depends on [Payload.Scheme]: the bridge's
+	// own, or that of whatever publishes the Mac.
 	Port int
+	// Scheme is how the outer hop is opened. See [Scheme]: it decides reachability, never trust.
+	//
+	// The zero value is not a scheme. [Encode] refuses it rather than defaulting, because a default
+	// here is exactly the assumption version 1 made silently, and the failure it produces is a phone
+	// that cannot pair for a reason nothing reports.
+	Scheme Scheme
 	// Fingerprint is the SHA-256 of the bridge certificate's DER, not the certificate.
 	Fingerprint [32]byte
 	// Token is the one-time enrolment secret. It authorises exactly one pairing and is worthless
@@ -162,12 +241,30 @@ func (p Payload) DialAddress() string {
 	return net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
 }
 
+// DialURL is the whole address the phone opens: scheme, host, port and the path the front door
+// ignores.
+//
+// **Derived here and pinned by `dial_url` on every accept vector, for the same reason as
+// [Payload.DialAddress].** The two mistakes it forecloses compose: a dialler that builds its own URL
+// has to remember the bracketing AND the scheme mapping, and getting either wrong produces a phone
+// that will not pair with nothing on the wire to say why. One string, derived once, checked by both
+// languages against the same file.
+//
+// The path is "/" and the bridge does not look at it - `frontdoor.readUpgrade` deliberately checks
+// the method and the version and not the path, so a caller cannot learn a correct path from a
+// different answer. It is here because a URL needs one and two implementations should not choose
+// differently.
+func (p Payload) DialURL() string {
+	return p.Scheme.URLScheme() + "://" + p.DialAddress() + "/"
+}
+
 // Encode serialises a payload.
 //
 // The field order is fixed and is asserted by a test, because it is a contract with an
 // implementation in another language that cannot be changed in the same commit:
 //
-//	uint8   version
+//	uint8   version = 2
+//	uint8   scheme          <- added in version 2
 //	uint16  host length, in BYTES
 //	[]byte  host, UTF-8
 //	uint16  port
@@ -175,9 +272,16 @@ func (p Payload) DialAddress() string {
 //	[32]byte token
 //	uint32  expiry, Unix seconds
 //
+// Version 1 is the same without the scheme byte. It is decoded and never emitted; see [VersionLegacy].
+//
 // All integers big-endian. Big-endian rather than little because it is what every wire format the
 // two sides already speak uses, and because Java's DataInput reads nothing else.
 func Encode(p Payload) ([]byte, error) {
+	if !p.Scheme.Known() {
+		// Refused rather than defaulted. See the field comment: a default here is version 1's
+		// mistake with a nicer name.
+		return nil, fmt.Errorf("enroll: scheme %d is not one this build can encode", p.Scheme)
+	}
 	if p.Host == "" {
 		return nil, errors.New("enroll: host is empty")
 	}
@@ -201,8 +305,9 @@ func Encode(p Payload) ([]byte, error) {
 		return nil, fmt.Errorf("enroll: expiry %s is outside the representable range (1970-01-01 to 2106-02-07)", p.Expiry.UTC().Format(time.RFC3339))
 	}
 
-	b := make([]byte, 0, fixedLen+len(p.Host))
+	b := make([]byte, 0, fixedLenV2+len(p.Host))
 	b = append(b, Version)
+	b = append(b, byte(p.Scheme))
 	b = binary.BigEndian.AppendUint16(b, uint16(len(p.Host)))
 	b = append(b, p.Host...)
 	b = binary.BigEndian.AppendUint16(b, uint16(p.Port))
@@ -224,14 +329,42 @@ func Decode(b []byte) (Payload, error) {
 	if len(b) < 1 {
 		return Payload{}, errors.New("enroll: empty payload")
 	}
-	if b[0] != Version {
-		return Payload{}, fmt.Errorf("enroll: unsupported payload version %d, this build speaks %d", b[0], Version)
+
+	// **The two versions are parsed by the same code with one offset difference, and NOT by treating
+	// them as interchangeable.** A decoder that read a version 2 payload with version 1's offsets
+	// would take the scheme byte as the high half of the host length and produce a length in the tens
+	// of thousands - which the ceiling happens to catch today, and which is luck rather than a check.
+	// So the version chooses the layout explicitly and every field is read at the offset that version
+	// puts it at. `v2-payload-labelled-v1` is the reject vector that holds this.
+	var scheme Scheme
+	var fixedLen, at int
+	switch b[0] {
+	case VersionLegacy:
+		// Version 1 said nothing about how to reach the address, and every implementation of it
+		// opened a plain connection. That is what it meant, so that is what it decodes to.
+		scheme, fixedLen, at = SchemePlain, fixedLenV1, 1
+	case Version:
+		fixedLen, at = fixedLenV2, 2
+	default:
+		return Payload{}, fmt.Errorf("enroll: unsupported payload version %d, this build speaks %d and reads %d", b[0], Version, VersionLegacy)
 	}
+
 	if len(b) < fixedLen {
 		return Payload{}, fmt.Errorf("enroll: payload is %d bytes, shorter than the %d-byte minimum", len(b), fixedLen)
 	}
 
-	hostLen := int(binary.BigEndian.Uint16(b[1:3]))
+	if b[0] == Version {
+		scheme = Scheme(b[1])
+		if !scheme.Known() {
+			// A scheme this build does not know is not a malformed payload and must not be reported
+			// as one: it is a Mac that can arrange something this phone cannot. Refused rather than
+			// treated as either of the two known ones, because guessing wrong here is a phone that
+			// cannot reach a front door and cannot say so.
+			return Payload{}, fmt.Errorf("enroll: unsupported scheme %d, this build knows %d and %d", b[1], SchemePlain, SchemeTLS)
+		}
+	}
+
+	hostLen := int(binary.BigEndian.Uint16(b[at : at+2]))
 	// Both halves matter. The ceiling stops a hostile length becoming an allocation; the bounds check
 	// stops it becoming a read past the end. Neither implies the other: 4096 is a comfortable
 	// allocation and still far past the end of a 76-byte buffer.
@@ -249,15 +382,16 @@ func Decode(b []byte) (Payload, error) {
 		return Payload{}, fmt.Errorf("enroll: payload is %d bytes, but its header describes %d", len(b), want)
 	}
 
-	host := string(b[3 : 3+hostLen])
+	host := string(b[at+2 : at+2+hostLen])
 	if !utf8.ValidString(host) {
 		return Payload{}, errors.New("enroll: host is not valid UTF-8")
 	}
 
-	rest := b[3+hostLen:]
+	rest := b[at+2+hostLen:]
 	p := Payload{
-		Host: host,
-		Port: int(binary.BigEndian.Uint16(rest[:2])),
+		Host:   host,
+		Port:   int(binary.BigEndian.Uint16(rest[:2])),
+		Scheme: scheme,
 	}
 	copy(p.Fingerprint[:], rest[2:2+fingerprintLen])
 	copy(p.Token[:], rest[2+fingerprintLen:2+fingerprintLen+tokenLen])

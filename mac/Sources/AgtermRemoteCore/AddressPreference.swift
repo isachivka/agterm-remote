@@ -49,6 +49,13 @@ public enum AddressPreference {
     /// and the person it went stale for would be the person with the simplest setup.
     public static let listenPortKey = "listenPort"
 
+    /// What stands between the phone and this Mac. See [FrontDoor].
+    ///
+    /// **Absent means [FrontDoor.unset]**, which is the simplest deployment. It is a default rather
+    /// than an answer, and the setup screen asks before a code is ever minted - the value is a fact
+    /// about somebody's own network and this Mac cannot observe it.
+    public static let frontDoorKey = "frontDoor"
+
     /// When a phone last completed enrolment through the address stored now.
     ///
     /// **Nil is the ordinary state and it is not an error.** It says the address is unproven, which
@@ -86,6 +93,27 @@ public enum AddressPreference {
         guard defaults.object(forKey: listenPortKey) != nil else { return nil }
         let stored = defaults.integer(forKey: listenPortKey)
         return (1...65535).contains(stored) ? stored : nil
+    }
+
+    /// What stands in front, or the default when nobody has said.
+    ///
+    /// An unrecognised stored value reads as the default rather than as an error: it is the shape a
+    /// downgrade leaves behind, and the remedy - pick again on the setup screen - is the same as
+    /// having never picked. There is nothing here worth a failure case.
+    public static func frontDoor(from defaults: UserDefaults = .standard) -> FrontDoor {
+        guard let stored = defaults.string(forKey: frontDoorKey) else { return .unset }
+        return FrontDoor(rawValue: stored) ?? .unset
+    }
+
+    /// Records what stands in front.
+    ///
+    /// **Changing it does not clear the proof an address has earned**, unlike changing the address
+    /// itself. That is deliberate and it is the honest reading: the proof is about whether a phone
+    /// reached this Mac through that address, and a pairing that has already happened happened. What
+    /// a wrong answer here breaks is the NEXT code, which is why the setup screen asks before minting
+    /// one rather than after.
+    public static func writeFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) {
+        defaults.set(door.rawValue, forKey: frontDoorKey)
     }
 
     /// Sets the arrival port, or clears it back to following the dial port.

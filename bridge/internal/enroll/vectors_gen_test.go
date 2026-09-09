@@ -32,10 +32,14 @@ const (
 )
 
 type generated struct {
-	Name        string `json:"name"`
-	Note        string `json:"note"`
+	Name string `json:"name"`
+	Note string `json:"note"`
+	// Version is which layout Text is in. Both are in the set on purpose: version 1 is decode-only
+	// and a vector is the only thing that proves an old code still pairs.
+	Version     int    `json:"version"`
 	Host        string `json:"host"`
 	Port        int    `json:"port"`
+	Scheme      int    `json:"scheme"`
 	Fingerprint string `json:"fingerprint_hex"`
 	Token       string `json:"token_hex"`
 	Expiry      int64  `json:"expiry_unix"`
@@ -50,6 +54,21 @@ type generated struct {
 	// The vectors are the only mechanism in this repository that both languages read, so this is
 	// where the rule can be enforced rather than merely written down.
 	DialAddress string `json:"dial_address"`
+	// DialURL is derived from scheme, host and port together, and it is the field that pins the
+	// whole of what a dialler must build. See [enroll.Payload.DialURL].
+	DialURL string `json:"dial_url"`
+}
+
+// demoteToV1 turns a version 2 encoding into the version 1 encoding of the same payload.
+//
+// **Derived from the real encoder rather than written out, so a legacy vector cannot drift from what
+// version 1 actually was.** The difference between the two layouts is exactly one byte - the scheme,
+// which version 1 did not carry - so dropping it and relabelling the version is the whole
+// transformation, and it is asserted by decoding the result.
+func demoteToV1(b []byte) []byte {
+	out := make([]byte, 0, len(b)-1)
+	out = append(out, enroll.VersionLegacy)
+	return append(out, b[2:]...)
 }
 
 func TestWriteVectors(t *testing.T) {
@@ -68,11 +87,15 @@ func TestWriteVectors(t *testing.T) {
 	cases := []struct {
 		name, note, host string
 		port             int
+		scheme           enroll.Scheme
 		fp, tok          [32]byte
 		expiry           int64
+		// legacy marks a vector emitted in the version 1 layout, to prove an old code still decodes.
+		legacy bool
 	}{
 		{
 			name:   "short-host",
+			scheme: enroll.SchemePlain,
 			note:   "The ordinary case: a short name, the usual port, a mid-range expiry.",
 			host:   "example.test",
 			port:   8443,
@@ -82,6 +105,7 @@ func TestWriteVectors(t *testing.T) {
 		},
 		{
 			name:   "host-at-253-bytes",
+			scheme: enroll.SchemeTLS,
 			note:   "The longest legitimate DNS name: four labels, 253 bytes. Pins the uint16 length prefix against an implementation that assumed one byte would do.",
 			host:   longHost,
 			port:   443,
@@ -91,6 +115,7 @@ func TestWriteVectors(t *testing.T) {
 		},
 		{
 			name:   "non-ascii-host",
+			scheme: enroll.SchemePlain,
 			note:   "A host with a multi-byte character. The length prefix counts BYTES, not characters: this host is 20 characters and 21 bytes.",
 			host:   "münchen.example.test",
 			port:   9443,
@@ -100,6 +125,7 @@ func TestWriteVectors(t *testing.T) {
 		},
 		{
 			name:   "ipv6-literal-host",
+			scheme: enroll.SchemeTLS,
 			note:   "An IPv6 literal, unbracketed in the host field as every host is. The payload carries one host and no brackets, so a dialler that appends \":\" and the port produces \"2001:db8::1:8443\", which is not an address - see dial_address, which is what this vector exists to pin.",
 			host:   "2001:db8::1",
 			port:   8443,
@@ -108,7 +134,30 @@ func TestWriteVectors(t *testing.T) {
 			expiry: 1_850_000_000,
 		},
 		{
+			name:   "legacy-v1-short-host",
+			note:   "A version 1 code, in the layout that shipped before the scheme existed. It must still decode, and it must mean a plain connection - which is what every version 1 implementation did. A decoder that refused this would tell its owner their Mac is newer than their app about a code it can read perfectly.",
+			host:   "example.test",
+			port:   8443,
+			scheme: enroll.SchemePlain,
+			legacy: true,
+			fp:     counting(0x0f, 5),
+			tok:    counting(0xf0, -3),
+			expiry: 1_750_000_000,
+		},
+		{
+			name:   "legacy-v1-ipv6-literal-host",
+			note:   "A version 1 code carrying an IPv6 literal. The bracketing rule and the version-1 default scheme have to hold at the same time, which is the case a decoder patched for one of them gets wrong.",
+			host:   "2001:db8::1",
+			port:   443,
+			scheme: enroll.SchemePlain,
+			legacy: true,
+			fp:     counting(0x21, 7),
+			tok:    counting(0xde, -5),
+			expiry: 1_760_000_000,
+		},
+		{
 			name:   "boundary-values",
+			scheme: enroll.SchemeTLS,
 			note:   "Every field at its ceiling: the highest port a uint16 holds, and the last second a uint32 expiry can name (2106-02-07T06:28:15Z).",
 			host:   "a",
 			port:   65535,
@@ -120,18 +169,39 @@ func TestWriteVectors(t *testing.T) {
 
 	out := make([]generated, 0, len(cases))
 	for _, c := range cases {
-		text, err := enroll.EncodeToText(enroll.Payload{
-			Host: c.host, Port: c.port, Fingerprint: c.fp, Token: c.tok,
+		p := enroll.Payload{
+			Host: c.host, Port: c.port, Scheme: c.scheme, Fingerprint: c.fp, Token: c.tok,
 			Expiry: time.Unix(c.expiry, 0).UTC(),
-		})
+		}
+		b, err := enroll.Encode(p)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
+		}
+		version := enroll.Version
+		if c.legacy {
+			if c.scheme != enroll.SchemePlain {
+				// A version 1 vector carrying anything else would be recording a payload version 1
+				// could not express.
+				t.Fatalf("%s: a version 1 vector can only mean a plain connection", c.name)
+			}
+			b = demoteToV1(b)
+			version = enroll.VersionLegacy
+		}
+		text := base64.StdEncoding.EncodeToString(b)
+		// Proof at generation time that the bytes about to be written decode to the payload this
+		// vector claims. A vector the generator's own decoder disagrees with pins nothing.
+		if back, err := enroll.DecodeText(text); err != nil {
+			t.Fatalf("%s: the vector does not decode: %v", c.name, err)
+		} else if back != p.Canonical() {
+			t.Fatalf("%s: the vector decodes to a different payload\n want %+v\n got  %+v", c.name, p.Canonical(), back)
 		}
 		out = append(out, generated{
 			Name:        c.name,
 			Note:        c.note,
+			Version:     version,
 			Host:        c.host,
 			Port:        c.port,
+			Scheme:      int(c.scheme),
 			Fingerprint: hex.EncodeToString(c.fp[:]),
 			Token:       hex.EncodeToString(c.tok[:]),
 			Expiry:      c.expiry,
@@ -139,6 +209,9 @@ func TestWriteVectors(t *testing.T) {
 			// Derived from the helper rather than formatted here, so the file cannot record a
 			// bracketing rule the code does not implement.
 			DialAddress: enroll.Payload{Host: c.host, Port: c.port}.DialAddress(),
+			// Derived from the helper for the same reason, and it carries the scheme as well as the
+			// bracketing: a dialler builds one string and gets both right or neither.
+			DialURL: p.DialURL(),
 		})
 	}
 
@@ -167,7 +240,7 @@ type generatedReject struct {
 // a version it did not know, would pass every accept vector and ship.
 func TestWriteRejectVectors(t *testing.T) {
 	valid, err := enroll.Encode(enroll.Payload{
-		Host: "example.test", Port: 8443,
+		Host: "example.test", Port: 8443, Scheme: enroll.SchemePlain,
 		Fingerprint: counting(0, 1), Token: counting(0xff, -1),
 		Expiry: time.Unix(1_800_000_000, 0).UTC(),
 	})
@@ -194,8 +267,23 @@ func TestWriteRejectVectors(t *testing.T) {
 	}{
 		{
 			name: "wrong-version", refusal: "unsupported-version",
-			note: "Version byte 2 in a build that speaks 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here.",
-			text: vectorB64(mutate(func(b []byte) []byte { b[0] = 2; return b })),
+			note: "Version byte 3 in a build that mints 2 and reads 1. Must be reported as a version this build does not know, never parsed hopefully - the remaining bytes mean nothing here. This vector used to carry version 2, which the scheme change made VALID; a reject vector that stops rejecting is the quietest way a guard can go hollow, and it is why the generator proves every case is refused before writing it.",
+			text: vectorB64(mutate(func(b []byte) []byte { b[0] = 3; return b })),
+		},
+		{
+			name: "scheme-zero", refusal: "unsupported-scheme",
+			note: "Scheme byte 0, which is the shape a zero-filled field takes and is not a scheme. It must be refused rather than defaulted to a plain connection: defaulting here is the assumption version 1 made silently, and the failure it produces is a phone that cannot reach a front door and cannot say why.",
+			text: vectorB64(mutate(func(b []byte) []byte { b[1] = 0; return b })),
+		},
+		{
+			name: "scheme-unknown", refusal: "unsupported-scheme",
+			note: "A scheme this build does not know. It is not a malformed payload - it is a Mac that can arrange something this phone cannot - and it must never be treated as one of the two known ones.",
+			text: vectorB64(mutate(func(b []byte) []byte { b[1] = 9; return b })),
+		},
+		{
+			name: "v2-payload-labelled-v1", refusal: "length-mismatch",
+			note: "A version 2 payload with its version byte set to 1. Read with version 1 offsets the scheme byte becomes the high half of the host length, so the payload claims a host of some thousands of bytes. It must be refused because the version chooses the layout, not because a ceiling happened to catch the number.",
+			text: vectorB64(mutate(func(b []byte) []byte { b[0] = enroll.VersionLegacy; return b })),
 		},
 		{
 			name: "version-zero", refusal: "unsupported-version",
@@ -210,20 +298,20 @@ func TestWriteRejectVectors(t *testing.T) {
 		{
 			name: "host-length-overruns-buffer", refusal: "length-mismatch",
 			note: "Host length 300 in an 85-byte buffer. Under MaxField, so the ceiling does not catch it: this is the case a decoder that reads hostLen bytes without checking what it holds gets wrong.",
-			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 300); return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[2:4], 300); return b })),
 		},
 		{
 			name: "host-length-65535", refusal: "host-length-over-ceiling",
 			note: "The largest number the uint16 length field can hold. Must be refused before anything is allocated for it - a length field an attacker chose must never size an allocation.",
-			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[1:3], 0xffff); return b })),
+			text: vectorB64(mutate(func(b []byte) []byte { binary.BigEndian.PutUint16(b[2:4], 0xffff); return b })),
 		},
 		{
 			name: "host-length-zero", refusal: "empty-host",
 			note: "Host length 0, and a buffer exactly that long, so only the empty host is wrong. A payload naming no host is nothing the phone can act on.",
 			text: vectorB64(func() []byte {
-				b := append([]byte{}, valid[:3]...)
-				binary.BigEndian.PutUint16(b[1:3], 0)
-				return append(b, valid[3+len("example.test"):]...)
+				b := append([]byte{}, valid[:4]...)
+				binary.BigEndian.PutUint16(b[2:4], 0)
+				return append(b, valid[4+len("example.test"):]...)
 			}()),
 		},
 		{
@@ -233,7 +321,7 @@ func TestWriteRejectVectors(t *testing.T) {
 		},
 		{
 			name: "truncated-to-a-stub", refusal: "too-short",
-			note: "Twenty bytes: a correct version byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
+			note: "Twenty bytes: a correct version byte, a correct scheme byte and a plausible host length, and nothing else. Refused on the minimum length before any field is read.",
 			text: vectorB64(valid[:20]),
 		},
 		{
@@ -250,7 +338,7 @@ func TestWriteRejectVectors(t *testing.T) {
 			name: "host-not-utf8", refusal: "host-not-utf8",
 			note: "The host field filled with 0xff bytes, which are not UTF-8 in any position. A decoder that lets them through arrives at a host of replacement characters - a different host from the one the owner is looking at.",
 			text: vectorB64(mutate(func(b []byte) []byte {
-				for i := 3; i < 3+len("example.test"); i++ {
+				for i := 4; i < 4+len("example.test"); i++ {
 					b[i] = 0xff
 				}
 				return b

@@ -65,6 +65,11 @@ const (
 const (
 	certFile = "bridge-cert.pem"
 	keyFile  = "bridge-key.pem"
+	// The on-link pair, kept apart from the identity above by name so nothing can confuse the two.
+	// **This one is not an identity.** No phone pins it, nothing validates it, and it may be deleted
+	// at any time - the next start mints another.
+	onLinkCertFile = "on-link-cert.pem"
+	onLinkKeyFile  = "on-link-key.pem"
 )
 
 // identityLifetime is how long a minted bridge identity is valid for, and it is deliberately longer
@@ -106,6 +111,12 @@ func main() {
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
 	stateDir := flag.String("state-dir", "", "directory holding identity and paired peers (required)")
 	logPath := flag.String("log", "", "log file; empty means stderr")
+	advertiseScheme := flag.String("advertise-scheme", "plain",
+		"how a phone should OPEN the advertised address: plain, or tls when something in front terminates HTTPS")
+	lanCert := flag.String("lan-cert", "", "certificate for the on-link hop; set with -lan-key when a proxy in front insists on an HTTPS backend")
+	lanKey := flag.String("lan-key", "", "key for -lan-cert")
+	onLinkTLS := flag.Bool("on-link-tls", false,
+		"serve TLS on this port, minting a certificate in the state directory when -lan-cert is not given")
 	parentPID := flag.Int("parent-pid", 0, "exit when this pid goes away; 0 disables")
 	flag.Parse()
 
@@ -120,7 +131,20 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--parent-pid must be a pid, or 0 to disable")
 		os.Exit(2)
 	}
-	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, *parentPID); err != nil {
+	// Resolved before anything starts, so a typo is a refusal at the command line rather than a
+	// bridge that runs and mints codes nobody can use.
+	scheme, ok := schemeNamed(*advertiseScheme)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "--advertise-scheme must be plain or tls")
+		os.Exit(2)
+	}
+	// Both or neither. One alone is a half-configured hop, and the failure it produces - a proxy that
+	// cannot talk to this port - is exactly the one this pair exists to fix.
+	if (*lanCert == "") != (*lanKey == "") {
+		fmt.Fprintln(os.Stderr, "--lan-cert and --lan-key must both be set, or neither")
+		os.Exit(2)
+	}
+	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, scheme, *lanCert, *lanKey, *onLinkTLS, *parentPID); err != nil {
 		log.Fatalf("agterm-remote-bridge: %v", err)
 	}
 }
@@ -150,7 +174,22 @@ func advertised(advertise, bound string) string {
 	return advertise
 }
 
-func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, parentPID int) error {
+// schemeNamed turns the flag's word into the wire value, and says so rather than defaulting.
+//
+// Words at the command line and on the control socket, numbers on the wire. The words are what a
+// person types and reads back in a launch argument; the numbers are what has to be stable across two
+// implementations forever.
+func schemeNamed(name string) (enroll.Scheme, bool) {
+	switch name {
+	case "plain":
+		return enroll.SchemePlain, true
+	case "tls":
+		return enroll.SchemeTLS, true
+	}
+	return 0, false
+}
+
+func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advertiseScheme enroll.Scheme, lanCert, lanKey string, onLinkTLS bool, parentPID int) error {
 	// The log first, so that everything below reports where the owner will look for it rather than
 	// on a stderr the parent may not be keeping.
 	if logPath != "" {
@@ -272,6 +311,68 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, parent
 	}
 	defer tcp.Close()
 
+	// **The on-link TLS wrapper, and what it is actually for.**
+	//
+	// It sits OUTSIDE the front door and inside nothing: the phone's pinned mTLS is established
+	// through it and is unaffected by it.
+	//
+	// # It authenticates nothing, and that is not the reason it exists
+	//
+	// This is opportunistic encryption of one LAN hop. Whatever connects here does not validate this
+	// certificate - it cannot, there is no name it could check it against - so anybody who can reach
+	// this port completes the handshake. It buys confidentiality against a passive listener on the
+	// LAN and nothing else, and nothing about it should be mistaken for part of the trust model: the
+	// security of this service lives entirely in the pinned mTLS INSIDE the stream, which still
+	// terminates in this process and still accepts exactly one certificate.
+	//
+	// # Its real job is INTEROPERABILITY, and reasoning only about the security cost it nothing and
+	// broke a working deployment
+	//
+	// A router that publishes this Mac by proxying it may be configured to speak HTTPS to its
+	// backend, and some insist on it. When it does, it opens TLS to this port; a plaintext listener
+	// sees a ClientHello it cannot answer, and the router reports 502 to the phone. Measured
+	// upstream, not inferred: the router's first 297 bytes on the wire began 16 03 01, and a
+	// self-signed responder on the same port answered 200 through the same name.
+	//
+	// This was removed once on the argument that it authenticates nothing, which is true and is about
+	// SECURITY. What it is for is reachability, and dropping it left the owner's own deployment
+	// unable to reach its bridge at all - with the address right, the fingerprint right, and nothing
+	// anywhere saying why. The paragraph above is the one that has to survive: not "this is
+	// pointless", but "this is pointless as authentication and load-bearing as plumbing".
+	//
+	// **Minted rather than demanded, when the caller asked for the hop and named no files.**
+	//
+	// Nothing validates this certificate - see the paragraphs above - so there is nothing about it
+	// only a person could decide, and requiring one would put "generate a self-signed certificate"
+	// between an owner and a working pairing for no benefit at all. It lives in the state directory
+	// beside the bridge's own identity, at 0600, and is reused across restarts so that a router
+	// which happens to cache it is not surprised.
+	//
+	// -lan-cert stays for somebody who wants to supply their own, and wins when both are given.
+	if lanCert == "" && onLinkTLS {
+		var err error
+		lanCert, lanKey, err = onLinkIdentity(stateDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Both flags or neither; the pairing is enforced before run is called.
+	if lanCert != "" {
+		pair, err := tls.LoadX509KeyPair(lanCert, lanKey)
+		if err != nil {
+			return fmt.Errorf("on-link certificate: %w", err)
+		}
+		// No client auth: whatever proxies to this port has no certificate to present, and
+		// authentication is not this layer's job. Said here rather than left to be inferred from an
+		// absent field.
+		tcp = tls.NewListener(tcp, &tls.Config{
+			Certificates: []tls.Certificate{pair},
+			MinVersion:   tls.VersionTLS12,
+		})
+		log.Printf("on-link hop is TLS (opportunistic; authenticates nothing)")
+	}
+
 	// A proxy in front may terminate its own TLS and reconnect over the LAN, so a client
 	// certificate cannot survive the trip and the pinned mTLS has to run INSIDE the proxied stream.
 	// The front door is a net.Listener, so the listener above is unchanged and never learns that a
@@ -349,8 +450,11 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, parent
 		// The bound address rather than the --listen argument that produced it, in that case:
 		// net.Listen has already returned above, so a failed bind never reaches this line.
 		Listening: advertised(advertiseAddr, tcp.Addr().String()),
-		Window:    window,
-		Peers:     peers,
+		// How that address is OPENED, which no amount of looking at this listener could answer: what
+		// decides it is whatever publishes this Mac to the phone, and only the owner knows that.
+		Scheme: advertiseScheme,
+		Window: window,
+		Peers:  peers,
 		// The parsed leaf, which is also what the enrolment handler returns to a phone. The QR code
 		// carries the SHA-256 of its DER, so both ends of pairing are talking about one certificate.
 		Certificate: leaf,
@@ -462,6 +566,47 @@ func identity(stateDir string) (tls.Certificate, error) {
 		return own, fmt.Errorf("bridge identity: %w", err)
 	}
 	return own, nil
+}
+
+// onLinkIdentity returns the certificate and key for the on-link hop, minting them if they are not
+// there.
+//
+// **Deliberately simpler than [identity], because it is guarding nothing.** That function races
+// carefully with a second process, waits for a half-written pair and refuses to proceed without the
+// exact certificate every phone has pinned. None of that applies here: two processes that mint
+// different on-link certificates are both perfectly acceptable, since whatever connects validates
+// neither. Copying that machinery would imply this file matters as much as that one, which is the
+// misreading the wrapper's own comment exists to prevent.
+//
+// Same twenty years as the identity, for the same reason: an expiry buys nothing here and guarantees
+// a day the owner's pairing stops working while they are away from the machine that could fix it.
+func onLinkIdentity(stateDir string) (certPath, keyPath string, err error) {
+	certPath = filepath.Join(stateDir, onLinkCertFile)
+	keyPath = filepath.Join(stateDir, onLinkKeyFile)
+	if _, err := os.Stat(certPath); err == nil {
+		if _, err := os.Stat(keyPath); err == nil {
+			return certPath, keyPath, nil
+		}
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("state directory: %w", err)
+	}
+	id, err := pinning.Mint("agterm-remote on-link", identityLifetime)
+	if err != nil {
+		return "", "", fmt.Errorf("mint the on-link certificate: %w", err)
+	}
+	// The key first and at 0600, matching the identity's ordering and mode. It protects nothing that
+	// matters and is written that way anyway: a key readable by anything on the machine is a habit
+	// worth not having.
+	if err := os.WriteFile(keyPath, id.KeyPEM, 0o600); err != nil {
+		return "", "", fmt.Errorf("install the on-link key: %w", err)
+	}
+	if err := os.WriteFile(certPath, id.CertPEM, 0o600); err != nil {
+		_ = os.Remove(keyPath)
+		return "", "", fmt.Errorf("install the on-link certificate: %w", err)
+	}
+	log.Printf("minted an on-link certificate in %s", stateDir)
+	return certPath, keyPath, nil
 }
 
 // errHalfPair is one of the two files without the other. Its own error because the caller has to
