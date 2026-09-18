@@ -251,7 +251,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // the old answer - and the symptom of that is a pairing code that cannot work, which is the
         // failure this whole question exists to end.
         onboarding.onFrontDoor = { [weak self] chosen in
-            AddressPreference.writeFrontDoor(chosen)
+            // The restart is conditional on the answer actually moving. The migration pane's confirm
+            // button writes whether or not anything changed - that is what ends the question for
+            // good - and for the commonest case it confirms the answer already in effect, which used
+            // to mean tearing down a running bridge to store the value it was already serving.
+            guard AddressPreference.writeFrontDoor(chosen) else { return }
             self?.restartTheBridgeIfItIsRunning()
         }
         onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }

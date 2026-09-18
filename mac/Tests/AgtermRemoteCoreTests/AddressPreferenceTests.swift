@@ -340,6 +340,26 @@ struct AddressProvenanceTests {
         #expect(AddressPreference.frontDoor(from: store.defaults) == .direct)
     }
 
+    /// **Writing says whether it changed anything, and confirming the default changes nothing.**
+    ///
+    /// The caller restarts the bridge on this answer. The migration pane's confirm button writes
+    /// whether or not the value moved - that is what ends the question for good - and the commonest
+    /// press of it confirms the answer already in effect, which used to tear down a running bridge to
+    /// store the value it was already serving. *Absent* reads as `.unset`, which IS `.direct`, so
+    /// that case has to report no change as well.
+    @Test func writingReportsWhetherTheEffectiveAnswerMoved() {
+        let store = scratch()
+        defer { store.discard() }
+
+        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults) == false)
+        #expect(AddressPreference.frontDoorAnswered(in: store.defaults), "it still has to record it")
+
+        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults) == false)
+        #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults))
+        #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults) == false)
+        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults))
+    }
+
     /// **It cannot overwrite a real answer.** The guard is *absent*, not *default*: somebody who
     /// picked the third rung and then edits their address must not be quietly moved back.
     @Test func confirmingNeverOverwritesAnAnswerSomebodyGave() {

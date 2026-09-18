@@ -506,5 +506,9 @@ struct EditingMenuTests {
         #expect(
             main.code.contains("AddressPreference.confirmFrontDoor("),
             "saving an address records no answer, so a new owner meets the migration pane too")
+        #expect(
+            main.code.contains("guard AddressPreference.writeFrontDoor(chosen) else { return }"),
+            "the bridge is restarted whatever the answer was, so confirming the answer already in effect tears down a running bridge for nothing"
+        )
     }
 }
