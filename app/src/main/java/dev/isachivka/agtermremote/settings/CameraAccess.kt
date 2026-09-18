@@ -105,7 +105,20 @@ class AskedForCamera(private val file: File) {
         }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * Matches the `asked-for-camera` path excluded in `data_extraction_rules.xml` and
+         * `backup_rules.xml`, the same way `PairedLaptop.DIRECTORY` does. `BackupRulesTest` fails if
+         * either exclusion is removed; this constant is what it protects.
+         *
+         * **It has to be excluded**, and the reason is sharper than it first looks. This file records
+         * that the dialog was shown on THIS device, and `shouldShowRequestPermissionRationale` is
+         * false on a fresh install — so a restored profile reads *asked* and *would not ask again*
+         * together, which is the verdict [CameraAccess.Blocked]. The owner of a new handset would be
+         * told they had refused a camera nobody had asked them about, and handed a button to a system
+         * toggle that is already on, while `PairingHost` puts the real permission dialog in front of
+         * them at the same moment.
+         */
         const val FILE = "asked-for-camera"
     }
 }
