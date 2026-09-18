@@ -72,6 +72,26 @@ class SettingsTest {
      */
     private val laptopCertificate = ByteArray(385) { ((it * 17 + 5) % 256).toByte() }
 
+    /**
+     * **The camera is granted before anything renders**, and it is about the runner rather than about
+     * the product.
+     *
+     * Unpairing leaves the scanner on screen, the scanner asks for the camera on arrival, and a
+     * system permission dialog over the test's own window takes the composition out of the tree — the
+     * run then fails with *no compose hierarchies found*, which says nothing about the section under
+     * test. Every assertion this class makes after an unpairing is exposed to that, and the emulator's
+     * permission state is not something a test should be at the mercy of. Granting it costs nothing
+     * here: no test in this class is about the permission, and `CameraAccessTest` covers the verdict
+     * without a device.
+     */
+    @Before
+    fun grantTheCamera() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+            InstrumentationRegistry.getInstrumentation().targetContext.packageName,
+            android.Manifest.permission.CAMERA,
+        )
+    }
+
     @Before
     fun clean() = wipe()
 
