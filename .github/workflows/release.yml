@@ -108,7 +108,9 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: dev.isachivka.agtermremote
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
-          track: internal
+          # `tracks`, not `track`: the singular is deprecated and warns on every run. The
+          # predecessor project had to fix exactly this after a release.
+          tracks: internal
           status: completed
 
   # **macOS: the bundle, wrapped, attached to the release the tag already created.**

@@ -3,8 +3,9 @@
 Your [agterm](https://github.com/umputun/agterm) sessions on your phone. Pair by scanning one QR
 code.
 
-> **Under construction.** Nothing here is installable yet. This README is a stub; it will be
-> replaced with real instructions once the first release exists.
+> **Early.** The first release exists and installs. The Android half ships to Play's internal
+> testing track rather than to the store, and the QR code has never been read by a real camera on
+> real hardware — [docs/pairing.md](docs/pairing.md) says what was proved and how to close it.
 
 ## What it is
 
@@ -31,6 +32,57 @@ cannot bundle it.
 
 Because the socket belongs to agterm, its shape is not under this project's control. Releases here
 name the agterm versions they were verified against.
+
+## Install
+
+**The Mac app** — download `AgtermRemote-<version>.dmg` from
+[Releases](https://github.com/isachivka/agterm-remote/releases), open it, and drag the app to
+Applications. The Go bridge is inside the bundle; there is nothing else to install, no `go install`
+first and no launchd plist afterwards. The bridge is a child process of the app and dies with it.
+
+The bundle is **ad-hoc signed**, not signed with a paid Apple Developer ID and not notarised. macOS
+will therefore refuse the first launch and offer the app in System Settings → Privacy & Security
+instead, where **Open Anyway** allows it. The exact wording changes between macOS versions, so this
+paragraph describes the shape of it rather than pretending to a transcript nobody recorded.
+
+Building it yourself gets you the same bundle and the same signature:
+
+```
+cd mac && ./scripts/bundle.sh
+```
+
+**The phone app** — Play's internal testing track, which needs an invitation from the developer
+account. There is no public listing yet.
+
+```
+cd app && ./gradlew installDebug   # or build it yourself
+```
+
+## Arrange an address
+
+The phone dials the Mac directly. How it gets there is yours to arrange and this project integrates
+with none of it: a port forward with a fixed address, a port forward with a dynamic-DNS name, a
+Tailscale or WireGuard address, or a reverse proxy in front. Whatever you choose, the Mac app asks
+for the address the phone should dial and whether something terminates TLS in front of the bridge.
+
+## Pair
+
+Open the Mac app, start the bridge, and choose **Show pairing code**. On the phone, scan it. That is
+the whole of it: one code, one direction, no file to move across and no second scan. The code carries
+the address, the bridge's certificate fingerprint and a single-use token that expires in five
+minutes.
+
+[docs/pairing.md](docs/pairing.md) has the payload format, the ALPN split that keeps a
+certificate-less connection away from the API, and the measured scanning distance.
+
+## Build and test
+
+```
+cd bridge && go test ./...          # the Go bridge, no third-party dependencies
+cd app    && ./gradlew test         # Android unit tests
+cd mac    && swift test             # the Mac app, including bridge integration tests
+./scripts/check-*.sh                # the guards CI requires on every pull request
+```
 
 ## Contributing
 
