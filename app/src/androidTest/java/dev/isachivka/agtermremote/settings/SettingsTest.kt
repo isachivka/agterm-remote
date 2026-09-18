@@ -146,11 +146,20 @@ class SettingsTest {
      * Spec §5.5. The pinned identity is independent of where that laptop happens to answer: an owner
      * whose address changed must not have to re-pair, and must certainly not have their trust reset
      * by editing a text field.
+     *
+     * **And the key in the real keystore with it**, which is the half only a device can assert. The
+     * certificate is what this phone trusts and it is one re-scan away from being replaced; the key
+     * is what the MAC trusts, and an owner whose key is destroyed has to go back to their laptop and
+     * unpin a peer before they can pair again. `LaptopSettingsTest` asserts the same property against
+     * the lambda; this asserts it against the keystore the app actually writes to, through the real
+     * text field and the real Save button.
      */
     @Test
     fun editingTheAddressKeepsThePinnedLaptop() {
         pairWithFake()
         val before = PairedLaptop(dir).read()!!.bridgeCertificate
+        val keyBefore = PhoneIdentity.existing()
+        assertNotNull("the fixture did not mint a key", keyBefore)
 
         openSettings()
         setAddress("example.test:9443")
@@ -159,6 +168,16 @@ class SettingsTest {
         assertEquals("example.test", after.host)
         assertEquals(9443, after.port)
         assertArrayEquals(before, after.bridgeCertificate)
+
+        val keyAfter = PhoneIdentity.existing()
+        assertNotNull("correcting an address destroyed this phone's key", keyAfter)
+        // The same key, not merely a key: a save that deleted the entry and minted a fresh one would
+        // leave a non-null certificate here and a phone the Mac no longer recognises.
+        assertArrayEquals(
+            "the address change replaced this phone's key, so the Mac will refuse it",
+            keyBefore!!.encoded,
+            keyAfter!!.encoded,
+        )
     }
 
     /**

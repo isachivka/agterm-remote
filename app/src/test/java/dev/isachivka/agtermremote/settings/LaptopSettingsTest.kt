@@ -54,6 +54,13 @@ class LaptopSettingsTest {
      * address changed — a new dynamic IP, a tunnel rebuilt — must not have to re-pair, because
      * re-pairing mints a new key on this phone and evicts the peer their Mac pinned by hand. A text
      * field that quietly reset trust would be the most expensive control in the application.
+     *
+     * **The pinning has two halves and this asserts both.** The certificate is what this phone
+     * trusts; the key in the phone's keystore is what the Mac trusts, and it is the half an owner
+     * cannot recover from — a lost certificate is one re-scan away, a destroyed key needs the Mac's
+     * peer list edited as well. Until this line existed, adding `discardIdentity()` to the save path
+     * left the whole unit suite and the instrumented settings suite green: the exact defect the brief
+     * warns about passed everything.
      */
     @Test
     fun `editing the address keeps the pinned laptop`() {
@@ -68,6 +75,12 @@ class LaptopSettingsTest {
         assertEquals("example.test", after.host)
         assertEquals(9443, after.port)
         assertArrayEquals(before, after.bridgeCertificate)
+        assertEquals(
+            "correcting an address destroyed this phone's key; the owner now has to re-pair, and " +
+                "their Mac has to be told to forget the peer it pinned",
+            0,
+            identityDiscarded,
+        )
     }
 
     /** And the stream kind with it: how the phone opens the address is not part of the address. */
@@ -82,6 +95,24 @@ class LaptopSettingsTest {
         assertArrayEquals(before.bridgeCertificate, after.bridgeCertificate)
         assertEquals("moved.example", after.host)
         assertEquals(1, after.port)
+        assertEquals("the phone's key is not part of the address either", 0, identityDiscarded)
+    }
+
+    /**
+     * **A refused address destroys nothing either.**
+     *
+     * The refusal arm returns before the store is touched, and it must return before the keystore is
+     * touched too. A typo is the likeliest thing to happen in this box, and the cost of getting this
+     * wrong is the same as getting the successful arm wrong.
+     */
+    @Test
+    fun `an address that will not parse leaves the phone's key alone`() {
+        val settings = settings(paired())
+
+        settings.edit("agterm.example-homelab.invalid")
+        assertFalse(settings.save())
+
+        assertEquals(0, identityDiscarded)
     }
 
     @Test
