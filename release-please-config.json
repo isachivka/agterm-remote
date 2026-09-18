@@ -10,5 +10,6 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true
     }
-  }
+  },
+  "signoff": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 }
