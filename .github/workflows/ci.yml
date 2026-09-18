@@ -78,6 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: bash scripts/tests/guards_test.sh
+      - run: bash scripts/tests/instrumentation_verdict_test.sh
       - run: ./scripts/check-no-tokens.sh
       - run: ./scripts/check-no-credentials.sh
       - run: ./scripts/check-no-private-keys.sh

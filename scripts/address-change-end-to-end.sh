@@ -78,21 +78,30 @@ start_bridge() { # $1 = the port to listen on and advertise
     echo "the bridge never opened its control socket"; cat "$work/bridge.log"; exit 1
 }
 
-# **The runner's own report, read rather than trusted.** `am instrument` exits 0 on a failed test, and
-# it exits 0 having run nothing at all. So the transcript is kept and three things are checked in it:
-# that the run said OK, that it was not a skip, and that at least one test executed.
+# **The runner's own report, read rather than trusted.** `am instrument` exits 0 on a failed test, on
+# a run that matched nothing, and on a process that crashed — so the transcript is kept, and
+# `lib/instrumentation-verdict.sh` decides what it says.
+#
+# That verdict lives in its own file for one reason: **the version of it that was inline here could
+# not fail.** It accepted a run as a pass if the transcript contained `INSTRUMENTATION_CODE: -1`,
+# which `am instrument` prints at the end of every completed run whatever the result, so the check
+# that read the actual verdict line never decided anything. A phase-two run in which the phone failed
+# to reach the moved bridge would have been printed as proof that it reached it. Out here it has
+# `scripts/tests/instrumentation_verdict_test.sh` around it, built from real transcripts including
+# that exact failing one, and CI runs it.
 run_phase() { # $1 = method, $2... = -e arguments
     local method="$1"; shift
     local out="$work/$method.txt"
     "$adb" shell am instrument -w -r \
         -e class "$suite#$method" "$@" "$runner" | tee "$out"
-    grep -q "INSTRUMENTATION_STATUS: stream=.*OK\|^OK (" "$out" ||
-        grep -q "INSTRUMENTATION_CODE: -1" "$out" ||
-        { echo "== $method did not report success"; exit 1; }
-    if grep -q "assumption_failure\|AssumptionViolated" "$out"; then
-        echo "== $method SKIPPED ITSELF, which is not a pass"; exit 1
+    if ! "$root/scripts/lib/instrumentation-verdict.sh" "$out" 1 "$method"; then
+        # Kept outside $work, which the exit trap is about to delete. A refusal that points at a
+        # transcript nobody can open afterwards is a refusal with no evidence behind it.
+        kept="$(mktemp -t "agterm-$method")"
+        cp "$out" "$kept"
+        echo "== the full transcript is kept at $kept"
+        exit 1
     fi
-    grep -q "Tests run: 1\|numtests=1" "$out" || { echo "== $method ran no test"; exit 1; }
 }
 
 echo "== building the bridge"
