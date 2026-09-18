@@ -271,17 +271,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
                 + "one thing it used to assume, and it cannot work the answer out for itself."))
         stack.addArrangedSubview(body(FrontDoorCopy.explanation))
 
-        let door = NSPopUpButton(frame: .zero, pullsDown: false)
-        for choice in FrontDoor.allCases {
-            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
-            door.lastItem?.representedObject = choice.rawValue
-        }
-        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
-        door.target = self
-        door.action = #selector(frontDoorChanged(_:))
-        door.translatesAutoresizingMaskIntoConstraints = false
-        door.widthAnchor.constraint(equalToConstant: 340).isActive = true
-        frontDoorBox = door
+        let door = frontDoorPopup()
         stack.addArrangedSubview(door)
         stack.addArrangedSubview(body(FrontDoorCopy.detail(for: frontDoor)))
 
@@ -353,17 +343,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         //
         // A popup rather than a checkbox, because there are three answers and the third one is the
         // one nobody would guess at: it names the symptom - a 502 - rather than the mechanism.
-        let door = NSPopUpButton(frame: .zero, pullsDown: false)
-        for choice in FrontDoor.allCases {
-            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
-            door.lastItem?.representedObject = choice.rawValue
-        }
-        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
-        door.target = self
-        door.action = #selector(frontDoorChanged(_:))
-        door.translatesAutoresizingMaskIntoConstraints = false
-        door.widthAnchor.constraint(equalToConstant: 340).isActive = true
-        frontDoorBox = door
+        let door = frontDoorPopup()
 
         let column = NSStackView(views: [
             row, caption(OnboardingCopy.arrivalPortHeading), port,
@@ -378,6 +358,28 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // refusing in words rather than in silence.
         if !addressMessage.isEmpty { column.addArrangedSubview(body(addressMessage)) }
         return column
+    }
+
+    /// **The one front-door popup**, built here because there are two panes that show it.
+    ///
+    /// The address pane asks the question beside the box, and the migration pane asks it of somebody
+    /// who finished setting up before the question existed. They are different panes with different
+    /// copy around them, and the control itself has to be identical: same three answers in the same
+    /// order, same selection, same action. Built twice it was eleven lines duplicated line for line,
+    /// which is eleven chances for the two panes to start meaning different things.
+    private func frontDoorPopup() -> NSPopUpButton {
+        let door = NSPopUpButton(frame: .zero, pullsDown: false)
+        for choice in FrontDoor.allCases {
+            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
+            door.lastItem?.representedObject = choice.rawValue
+        }
+        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
+        door.target = self
+        door.action = #selector(frontDoorChanged(_:))
+        door.translatesAutoresizingMaskIntoConstraints = false
+        door.widthAnchor.constraint(equalToConstant: 340).isActive = true
+        frontDoorBox = door
+        return door
     }
 
     /// Re-reads the three local facts. Named for what it does — it looks again at this Mac — rather

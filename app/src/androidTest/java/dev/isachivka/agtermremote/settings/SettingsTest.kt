@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -26,6 +27,7 @@ import dev.isachivka.agtermremote.ui.settings.TAG_ADDRESS
 import dev.isachivka.agtermremote.ui.settings.TAG_ADDRESS_SAVE
 import dev.isachivka.agtermremote.ui.settings.TAG_CANCEL
 import dev.isachivka.agtermremote.ui.settings.TAG_FINGERPRINT
+import dev.isachivka.agtermremote.ui.settings.TAG_NOTE
 import dev.isachivka.agtermremote.ui.settings.TAG_REPLACE_KEY
 import dev.isachivka.agtermremote.ui.settings.TAG_UNPAIR
 import dev.isachivka.agtermremote.ui.theme.AppTheme
@@ -69,6 +71,26 @@ class SettingsTest {
      * well-formed certificate would — a codec that quietly re-encoded would be invisible against one.
      */
     private val laptopCertificate = ByteArray(385) { ((it * 17 + 5) % 256).toByte() }
+
+    /**
+     * **The camera is granted before anything renders**, and it is about the runner rather than about
+     * the product.
+     *
+     * Unpairing leaves the scanner on screen, the scanner asks for the camera on arrival, and a
+     * system permission dialog over the test's own window takes the composition out of the tree — the
+     * run then fails with *no compose hierarchies found*, which says nothing about the section under
+     * test. Every assertion this class makes after an unpairing is exposed to that, and the emulator's
+     * permission state is not something a test should be at the mercy of. Granting it costs nothing
+     * here: no test in this class is about the permission, and `CameraAccessTest` covers the verdict
+     * without a device.
+     */
+    @Before
+    fun grantTheCamera() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+            InstrumentationRegistry.getInstrumentation().targetContext.packageName,
+            android.Manifest.permission.CAMERA,
+        )
+    }
 
     @Before
     fun clean() = wipe()
@@ -146,11 +168,20 @@ class SettingsTest {
      * Spec §5.5. The pinned identity is independent of where that laptop happens to answer: an owner
      * whose address changed must not have to re-pair, and must certainly not have their trust reset
      * by editing a text field.
+     *
+     * **And the key in the real keystore with it**, which is the half only a device can assert. The
+     * certificate is what this phone trusts and it is one re-scan away from being replaced; the key
+     * is what the MAC trusts, and an owner whose key is destroyed has to go back to their laptop and
+     * unpin a peer before they can pair again. `LaptopSettingsTest` asserts the same property against
+     * the lambda; this asserts it against the keystore the app actually writes to, through the real
+     * text field and the real Save button.
      */
     @Test
     fun editingTheAddressKeepsThePinnedLaptop() {
         pairWithFake()
         val before = PairedLaptop(dir).read()!!.bridgeCertificate
+        val keyBefore = PhoneIdentity.existing()
+        assertNotNull("the fixture did not mint a key", keyBefore)
 
         openSettings()
         setAddress("example.test:9443")
@@ -159,6 +190,16 @@ class SettingsTest {
         assertEquals("example.test", after.host)
         assertEquals(9443, after.port)
         assertArrayEquals(before, after.bridgeCertificate)
+
+        val keyAfter = PhoneIdentity.existing()
+        assertNotNull("correcting an address destroyed this phone's key", keyAfter)
+        // The same key, not merely a key: a save that deleted the entry and minted a fresh one would
+        // leave a non-null certificate here and a phone the Mac no longer recognises.
+        assertArrayEquals(
+            "the address change replaced this phone's key, so the Mac will refuse it",
+            keyBefore!!.encoded,
+            keyAfter!!.encoded,
+        )
     }
 
     /**
@@ -180,6 +221,12 @@ class SettingsTest {
 
         assertNull(PairedLaptop(dir).read())
         assertNull(PhoneIdentity.existing())
+
+        // **And the screen says so.** The panel is gone the instant the store is cleared and the
+        // scanner takes its place, so without this the most irreversible act in the application
+        // reported nothing at all: the owner pressed Unpair twice and got a viewfinder.
+        compose.onNodeWithTag(TAG_NOTE).assertIsDisplayed()
+        compose.onNodeWithTag(TAG_NOTE).assertTextContains("Unpaired", substring = true)
     }
 
     // --- What holds the two of them up -------------------------------------------------------------

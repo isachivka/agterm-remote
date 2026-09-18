@@ -71,6 +71,24 @@ struct DialAddressTests {
         #expect(why == .ambiguousWithoutBrackets("2001:db8::1:8443"))
     }
 
+    /// **The port boundary, pinned on this side too.**
+    ///
+    /// The phone's `PairingAddress.parse` is this function case for case, and the one place the two
+    /// disagreed was here: a digit string too large for 32 bits was *not a number* in Kotlin and *out
+    /// of range* in Swift, because `Int` is 64-bit. The phone now reads it as a Long, which puts the
+    /// boundary in the same place on both sides — and nothing on this side pinned where that boundary
+    /// was, so nothing would ever have noticed it moving.
+    @Test func theSamePortBoundaryAsThePhone() {
+        guard case .failure(let tooLarge) = DialAddress.parse("agterm.example-homelab.invalid:99999999999999")
+        else { return #expect(Bool(false), "a fourteen-digit port was accepted") }
+        #expect(tooLarge == .portOutOfRange(99_999_999_999_999))
+
+        guard case .failure(let wider) =
+            DialAddress.parse("agterm.example-homelab.invalid:99999999999999999999999999")
+        else { return #expect(Bool(false), "a port too wide for 64 bits was accepted") }
+        #expect(wider == .portNotANumber("99999999999999999999999999"))
+    }
+
     @Test func aPlainHostRendersAsHostAndPort() {
         #expect(DialAddress(host: "agterm.example-homelab.invalid", port: 8443).displayed
             == "agterm.example-homelab.invalid:8443")

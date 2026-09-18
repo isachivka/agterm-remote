@@ -8,4 +8,5 @@
 <full-backup-content>
     <exclude domain="file" path="datastore" />
     <exclude domain="file" path="pairing" />
+    <exclude domain="file" path="asked-for-camera" />
 </full-backup-content>

@@ -136,15 +136,26 @@ public enum AddressPreference {
         writeFrontDoor(door, to: defaults)
     }
 
-    /// Records what stands in front.
+    /// Records what stands in front, and **says whether that changed anything.**
     ///
     /// **Changing it does not clear the proof an address has earned**, unlike changing the address
     /// itself. That is deliberate and it is the honest reading: the proof is about whether a phone
     /// reached this Mac through that address, and a pairing that has already happened happened. What
     /// a wrong answer here breaks is the NEXT code, which is why the setup screen asks before minting
     /// one rather than after.
-    public static func writeFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) {
+    ///
+    /// - Returns: whether the EFFECTIVE answer moved. The write always happens — recording the answer
+    ///   is the whole point of the migration pane, and an answer that is absent is a question that
+    ///   gets asked again — but *absent* already reads as `.unset`, which is `.direct`, so confirming
+    ///   the default changes nothing any code is built from. The caller restarts the bridge on this,
+    ///   and the migration pane's confirm button is pressed by somebody whose answer is usually the
+    ///   one already in effect: without this it tore down a running bridge to store the value it was
+    ///   already serving.
+    @discardableResult
+    public static func writeFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) -> Bool {
+        let before = frontDoor(from: defaults)
         defaults.set(door.rawValue, forKey: frontDoorKey)
+        return before != door
     }
 
     /// Sets the arrival port, or clears it back to following the dial port.

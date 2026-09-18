@@ -21,9 +21,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -33,6 +38,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import dev.isachivka.agtermremote.R
 import dev.isachivka.agtermremote.pairing.Fingerprint
 import dev.isachivka.agtermremote.pairing.PairedLaptop
@@ -67,11 +74,21 @@ fun LaptopSection(
     val laptop = settings.laptop
     if (laptop == null) {
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // **The outcome of the thing that put this phone here**, and it is rendered in this
+            // branch because this branch is where unpairing lands.
+            //
+            // `confirm()` clears the laptop before it sets the note, so a note rendered only beside
+            // the address box could never be read: pressing Unpair twice replaced the panel with a
+            // viewfinder and said nothing at all about what had just happened. The two most
+            // irreversible acts in the application were the two that reported nothing.
+            settings.note?.let { note -> Panel { Note(note) } }
             CameraBlockedNote()
             PairingHost(store = store)
         }
         return
     }
+
+    val focus = LocalFocusManager.current
 
     Panel(modifier = modifier) {
         Title(R.string.settings_address_title)
@@ -80,6 +97,11 @@ fun LaptopSection(
             value = settings.address,
             onValueChange = settings::edit,
             singleLine = true,
+            // A box with no label is announced as "edit box" and nothing else, which on a screen
+            // holding one address, one fingerprint and one irreversible button is the only control a
+            // person cannot identify by listening to it. The title above it is a separate node and a
+            // screen reader does not read the two together.
+            label = { Text(stringResource(R.string.settings_address_label)) },
             textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             // Base64 is not the only case-sensitive thing on this screen: a host is displayed as the
             // bytes the payload carried, and a keyboard that capitalises the first letter produces an
@@ -91,19 +113,16 @@ fun LaptopSection(
             modifier = Modifier.fillMaxWidth().testTag(TAG_ADDRESS),
         )
         Button(
-            onClick = { settings.save() },
+            // **The return value is what closes the keyboard**, and it is the reason `save()` has
+            // one. A stored address uncovers the sentence under the box, which the IME was sitting
+            // on top of; a refused one leaves the keyboard up, because the next thing that has to
+            // happen is more typing.
+            onClick = { if (settings.save()) focus.clearFocus() },
             modifier = Modifier.testTag(TAG_ADDRESS_SAVE),
         ) {
             Text(stringResource(R.string.settings_address_save))
         }
-        settings.note?.let { note ->
-            Text(
-                text = note,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.testTag(TAG_NOTE),
-            )
-        }
+        settings.note?.let { note -> Note(note) }
 
         Title(R.string.settings_fingerprint_title)
         Body(R.string.settings_fingerprint_body)
@@ -214,17 +233,32 @@ private fun CameraBlockedNote() {
         .filterIsInstance<Activity>()
         .firstOrNull()
 
-    val access = cameraAccess(
-        hasCamera = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
-        granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED,
-        everAsked = AskedForCamera(context).wasAsked(),
-        // No activity means nothing could have shown the dialog, so nothing can claim it was refused
-        // for good. `true` reads as "asking is still on the table", which is the safe direction: it
-        // withholds a sentence rather than inventing one.
-        wouldAskAgain = activity == null ||
-            ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA),
-    )
+    // **Asked again every time this screen comes back to the front**, because the button below sends
+    // the owner away to change exactly this and brings them straight back here.
+    //
+    // Measured on an emulator before this existed: permission refused, the note on screen, the
+    // permission then granted from outside the app, the activity resumed in the same process — and
+    // the screen still read *Camera access is off for this app*, under a button to a toggle that was
+    // already on. The verdict is computed at composition time, and nothing recomposed.
+    //
+    // Only the grant direction needs watching. A permission REVOKED while this app is in the
+    // background takes the process with it, so there is no state left to be stale.
+    var recheck by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { recheck++ }
+
+    val access = remember(recheck) {
+        cameraAccess(
+            hasCamera = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY),
+            granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED,
+            everAsked = AskedForCamera(context).wasAsked(),
+            // No activity means nothing could have shown the dialog, so nothing can claim it was
+            // refused for good. `true` reads as "asking is still on the table", which is the safe
+            // direction: it withholds a sentence rather than inventing one.
+            wouldAskAgain = activity == null ||
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA),
+        )
+    }
     if (access != CameraAccess.Blocked) return
 
     Panel(modifier = Modifier.testTag(TAG_CAMERA_BLOCKED)) {
@@ -275,7 +309,10 @@ private fun FingerprintRows(rows: List<String>) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(TAG_FINGERPRINT)
-            .semantics { contentDescription = rows.joinToString(" ") },
+            // mergeDescendants, or the rows are announced twice: once as this description and once
+            // as the two Text nodes under it. Sixty-four hex characters read out a second time is
+            // not a detail on a screen whose whole purpose is that somebody compares them.
+            .semantics(mergeDescendants = true) { contentDescription = rows.joinToString(" ") },
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         rows.forEach { row ->
@@ -286,6 +323,23 @@ private fun FingerprintRows(rows: List<String>) {
             )
         }
     }
+}
+
+/**
+ * The one sentence the screen says about what just happened, in one rendering.
+ *
+ * One composable rather than two, because it is drawn in both branches — beside the address box after
+ * a save, and above the scanner after an unpairing — and two copies of it are two things to keep in
+ * step for no reason.
+ */
+@Composable
+private fun Note(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.testTag(TAG_NOTE),
+    )
 }
 
 @Composable
