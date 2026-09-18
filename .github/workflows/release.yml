@@ -1,0 +1,151 @@
+name: Release
+
+# release-please watches `main`, keeps a release pull request up to date from the conventional
+# commits, and tags when that pull request is merged. Only then do the two publishing jobs run, which
+# is why they all live in one workflow: `release_created` is the fact they branch on.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # **Android, to the internal track and no further.**
+  #
+  # Promotion to production is a decision somebody makes in the console, not a side effect of merging
+  # a pull request.
+  android:
+    name: android
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the bundle
+        run: ./gradlew bundleRelease
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      # **The step this pipeline exists to have.**
+      #
+      # `releaseSigningFrom` returns null when any of the four variables is missing, and
+      # `app/build.gradle.kts` then assigns NO signing config - so `bundleRelease` succeeds, produces
+      # an UNSIGNED bundle, and the job goes green. One renamed secret is all it takes, and the first
+      # anyone would hear of it is Play rejecting an upload that a green tick said was fine. A build
+      # that looks finished and is not is worse than one that fails.
+      #
+      # The expected fingerprint is derived from the keystore secret itself rather than stored as a
+      # sixth secret: two places to change a fact is how they come to disagree.
+      - name: The bundle is signed, by the key this project publishes with
+        run: |
+          set -euo pipefail
+          aab=app/build/outputs/bundle/release/app-release.aab
+          test -f "$aab"
+
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.p12"
+          expected="$(keytool -list -v \
+              -keystore "$RUNNER_TEMP/upload.p12" -storetype PKCS12 \
+              -storepass "$SIGNING_KEYSTORE_PASSWORD" -alias "$SIGNING_KEY_ALIAS" \
+            | awk '/SHA256:/ { print $2; exit }')"
+          rm -f "$RUNNER_TEMP/upload.p12"
+
+          # `|| true`: with no signature block at all `unzip` exits non-zero, and under `set -e`
+          # that would abort with unzip's message instead of the one below, which is the message
+          # somebody actually needs.
+          block="$(unzip -Z1 "$aab" 'META-INF/*.RSA' 'META-INF/*.EC' 'META-INF/*.DSA' \
+            2>/dev/null | head -n 1 || true)"
+          if [ -z "$block" ]; then
+            echo "error: $aab carries no signature block at all - it was built UNSIGNED." >&2
+            echo "    Check the four SIGNING_* secrets. The build does not fail without them." >&2
+            exit 1
+          fi
+          unzip -p "$aab" "$block" > "$RUNNER_TEMP/signer.der"
+          actual="$(keytool -printcert -file "$RUNNER_TEMP/signer.der" \
+            | awk '/SHA256:/ { print $2; exit }')"
+
+          echo "keystore: $expected"
+          echo "bundle:   $actual"
+          if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+            echo "error: the bundle is not signed by this project's upload key." >&2
+            exit 1
+          fi
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+
+      - uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.isachivka.agtermremote
+          releaseFiles: app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+
+  # **macOS: the bundle, wrapped, attached to the release the tag already created.**
+  mac:
+    name: mac
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24'
+          cache: false
+
+      # The version is passed in, and `bundle.sh` refuses to sign if the plist does not come back
+      # saying it. Without it every release would report 0.0.0 in Get Info, in About and in every
+      # crash report - which this project has already shipped once.
+      - name: Assemble the bundle
+        working-directory: mac
+        run: ./scripts/bundle.sh release "${{ needs.release-please.outputs.version }}"
+
+      - name: Wrap it in a disk image
+        id: dmg
+        working-directory: mac
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: echo "path=$(./scripts/dmg.sh)" >> "$GITHUB_OUTPUT"
+
+      # The checksum goes in the release notes so somebody can verify a download without trusting the
+      # page it came from, and so a Homebrew cask has something to point at when one exists.
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          DMG: ${{ steps.dmg.outputs.path }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 "$DMG"
+          gh release upload "$TAG" "$DMG" --clobber
