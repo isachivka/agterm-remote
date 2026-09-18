@@ -209,7 +209,15 @@ class PairingAddressTest {
             "agterm.example-homelab.invalid:84 43" to AddressRefusal.PortNotANumber,
             "agterm.example-homelab.invalid:0" to AddressRefusal.PortOutOfRange,
             "agterm.example-homelab.invalid:65536" to AddressRefusal.PortOutOfRange,
-            "agterm.example-homelab.invalid:99999999999999" to AddressRefusal.PortNotANumber,
+            // 64 bits wide, because the Mac reads it with a 64-bit Int and the two must agree on
+            // where "not a number" stops and "out of range" starts. `DialAddressTests` holds the
+            // same row.
+            "agterm.example-homelab.invalid:99999999999999" to AddressRefusal.PortOutOfRange,
+            "agterm.example-homelab.invalid:99999999999999999999999999" to AddressRefusal.PortNotANumber,
+            // The commonest paste there is, and it has more than one colon - so without its own case
+            // it was answered with the sentence about IPv6 brackets.
+            "https://agterm.example-homelab.invalid:8443" to AddressRefusal.LooksLikeAUrl,
+            "agterm.example-homelab.invalid:8443/sessions" to AddressRefusal.LooksLikeAUrl,
             "2001:db8::1:8443" to AddressRefusal.AmbiguousWithoutBrackets,
             "[2001:db8::1:8443" to AddressRefusal.UnclosedBracket,
         )

@@ -64,8 +64,12 @@ object PairingAddress {
      * sit in one file, are held to one case table, and change together. Split apart they drift, and a
      * formatter and a parser that disagree turn one destination into two.
      *
-     * It is the Kotlin half of `DialAddress.parse`, case for case. The two cannot be linked, so the
-     * table in [PairingAddressTest] is what holds them together.
+     * It is the Kotlin half of `DialAddress.parse`, case for case, plus the one refusal the Mac keeps
+     * a layer up: a pasted URL. On the Mac the reader and the editor are two functions
+     * (`DialAddress.parse` and `AddressEdit.parse`); on the phone there is one box and this is it, so
+     * `looksLikeAURL` belongs here rather than nowhere. The two cannot be linked, so the table in
+     * [PairingAddressTest] is what holds them together — including the port boundary, which is 64
+     * bits on both sides.
      *
      * ### What it does not do
      *
@@ -92,6 +96,14 @@ object PairingAddress {
             if (!rest.startsWith(":")) return TypedAddress.Refused(AddressRefusal.NoPort)
             portText = rest.substring(1)
         } else {
+            // **Before the colons are counted**, because a pasted URL has two of them and would
+            // otherwise be refused with the sentence about IPv6 brackets — an answer to a question
+            // nobody asked, on what is the single commonest thing to paste into a box like this.
+            // `AddressEdit.parse` refuses it on the Mac for the same reason; this is the phone's half
+            // of the same editor.
+            if (trimmed.contains("://") || trimmed.contains('/')) {
+                return TypedAddress.Refused(AddressRefusal.LooksLikeAUrl)
+            }
             when (trimmed.count { it == ':' }) {
                 0 -> return TypedAddress.Refused(AddressRefusal.NoPort)
                 1 -> Unit
@@ -103,12 +115,20 @@ object PairingAddress {
 
         if (host.isEmpty()) return TypedAddress.Refused(AddressRefusal.Empty)
         if (portText.isEmpty()) return TypedAddress.Refused(AddressRefusal.NoPort)
-        // `toIntOrNull` and not a regex: it refuses a leading sign, spaces and anything non-decimal,
-        // and it refuses a value too large for an Int rather than wrapping it into range.
-        val port = portText.toIntOrNull()
+        // **`toLongOrNull` and not `toIntOrNull`, to agree with the Mac at the same boundary.**
+        //
+        // Swift's `Int` is 64-bit, so `host:99999999999999` is *out of range* over there and was
+        // *not a number* here — the same string, two different sentences, out of a pair of parsers
+        // whose whole claim is that they answer case for case. Reading it as a Long puts the
+        // boundary in the same place: a digit string that will not fit in 64 bits is not a number on
+        // either side, and one that fits but is outside 1..65535 is out of range on both.
+        //
+        // Still a parse and not a regex: it refuses spaces and anything non-decimal, and it refuses
+        // an overlong value rather than wrapping it into range.
+        val port = portText.toLongOrNull()
             ?: return TypedAddress.Refused(AddressRefusal.PortNotANumber)
         if (port !in 1..65535) return TypedAddress.Refused(AddressRefusal.PortOutOfRange)
-        return TypedAddress.Read(host, port)
+        return TypedAddress.Read(host, port.toInt())
     }
 }
 
@@ -116,7 +136,7 @@ object PairingAddress {
  * An address a person typed, once it has been read — or the reason it was not.
  *
  * Sealed and exhaustive, so a new refusal cannot inherit somebody else's sentence. The screen that
- * consumes this is `PairedLaptopSection`, and the sentence is the whole of what it shows.
+ * consumes this is `LaptopSection`, and the sentence is the whole of what it shows.
  */
 sealed interface TypedAddress {
 
@@ -146,6 +166,16 @@ enum class AddressRefusal(val sentence: String) {
 
     /** No colon at all, so no port. The field that most often differs between the two ends. */
     NoPort("That address has no port. Add one after a colon, as host:port."),
+
+    /**
+     * A URL was pasted. **The commonest paste mistake there is**, and until it had its own sentence
+     * it was answered with the one about IPv6 brackets, because `https://host:8443` simply has more
+     * than one colon.
+     */
+    LooksLikeAUrl(
+        "Type the address on its own, with no scheme and no path — the part between // and the " +
+            "next /, plus the port, as host:port.",
+    ),
 
     PortNotANumber("What follows the colon is not a number. Write the port in digits, as host:port."),
 
