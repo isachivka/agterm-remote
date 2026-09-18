@@ -15,6 +15,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import dev.isachivka.agtermremote.settings.AskedForCamera
 import kotlinx.coroutines.launch
 
@@ -95,6 +97,24 @@ class PairingFlow(private val enrol: suspend (EnrollPayload) -> EnrollResult) {
         state = PairingOutcome.of(enrol((decoded as EnrollDecode.Read).payload))
     }
 
+    /**
+     * The camera this phone was refused has been granted — in the system settings, while this screen
+     * sat in the background.
+     *
+     * **The un-latching half of [cameraUnavailable]**, and it exists because the settings screen now
+     * has a button that sends the owner to that very toggle and brings them back here. Without it,
+     * granting the permission changed nothing they could see: `fallback` stays `NeedsCamera`, so the
+     * paste field remains and **Try again** returns to it.
+     *
+     * It moves [state] only out of [PairingUi.NeedsCamera]. A phone part-way through an enrolment, or
+     * looking at a result, is not dragged back to a viewfinder by a permission that changed
+     * underneath it.
+     */
+    fun cameraRestored() {
+        fallback = PairingUi.Scanning
+        if (state == PairingUi.NeedsCamera) state = PairingUi.Scanning
+    }
+
     /** Back to whichever route this phone actually has. */
     fun retry() {
         state = fallback
@@ -113,8 +133,9 @@ class PairingFlow(private val enrol: suspend (EnrollPayload) -> EnrollResult) {
  * **A refusal is a supported state, not an error**, and there is deliberately no button that asks
  * again: the owner refused on purpose, and a screen that immediately asks in a different shape is the
  * app arguing with them. The paste field is under the refusal and needs no permission at all. A
- * permission granted later in Settings is picked up the next time this screen is opened, because the
- * check below is read rather than remembered.
+ * permission granted later in the system settings is picked up **on the next resume** — see the
+ * lifecycle effect below, and the settings screen's button that makes that round trip a thing the app
+ * itself asks for.
  *
  * ### The store is written by the enrolment and by nothing here
  *
@@ -147,6 +168,28 @@ fun PairingHost(
     val askForCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permitted = granted
         if (!granted) flow.cameraUnavailable()
+    }
+
+    // **And read again every time this screen comes back to the front.**
+    //
+    // The comment above used to say a permission granted in Settings is picked up the next time this
+    // screen is opened, and that was true of a screen nothing in the app led away from. The settings
+    // screen now has an *Open system settings* button that sends the owner to this exact toggle and
+    // returns them here, so "the next time this screen is opened" became "after they leave the
+    // settings screen and come back", which nothing on the screen tells them. Measured on an
+    // emulator: refused, granted from outside, activity resumed in the same process, and the paste
+    // field was still the only thing on offer.
+    //
+    // Only the grant direction is watched. A permission REVOKED while this app is in the background
+    // takes the process with it, so there is no stale `true` to correct.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (!permitted &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permitted = true
+            flow.cameraRestored()
+        }
     }
 
     // Once per arrival at this screen. `Unit` rather than a changing key: asking again on every

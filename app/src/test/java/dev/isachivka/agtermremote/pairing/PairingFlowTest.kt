@@ -1,6 +1,8 @@
 package dev.isachivka.agtermremote.pairing
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
@@ -63,6 +65,45 @@ class PairingFlowTest {
         flow.retry()
 
         assertEquals("a refused camera was offered again", PairingUi.NeedsCamera, flow.state)
+    }
+
+    /**
+     * **A refusal the owner has since undone.**
+     *
+     * The settings screen sends them to the system toggle and brings them back, so the refusal that
+     * latched has to be capable of being un-latched — otherwise granting the permission changes
+     * nothing they can see, and Try again still returns to the paste field.
+     */
+    @Test
+    fun `granting the camera in the system settings gives the scanner back`() {
+        val flow = flow()
+
+        flow.cameraUnavailable()
+        flow.cameraRestored()
+
+        assertEquals("the viewfinder did not come back", PairingUi.Scanning, flow.state)
+
+        flow.retry()
+
+        assertEquals("Try again still leads to the paste field", PairingUi.Scanning, flow.state)
+    }
+
+    /**
+     * And it does not drag somebody out of what they were doing. The permission can change under a
+     * screen that is part-way through an enrolment or showing its result, and only the screen that is
+     * *asking for a camera* is the one a granted camera belongs on.
+     */
+    @Test
+    fun `a camera granted underneath a result does not replace the result`() = runBlocking {
+        val flow = flow()
+
+        flow.onCode("this is not a pairing code")
+        val shown = flow.state
+        assertNotEquals("the fixture never reached a result", PairingUi.Scanning, shown)
+
+        flow.cameraRestored()
+
+        assertEquals("a permission change threw away what the owner was reading", shown, flow.state)
     }
 
     /** Nothing has gone wrong: the screen opens on the scanner and Try again returns to it. */

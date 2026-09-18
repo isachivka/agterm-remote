@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -26,6 +27,7 @@ import dev.isachivka.agtermremote.ui.settings.TAG_ADDRESS
 import dev.isachivka.agtermremote.ui.settings.TAG_ADDRESS_SAVE
 import dev.isachivka.agtermremote.ui.settings.TAG_CANCEL
 import dev.isachivka.agtermremote.ui.settings.TAG_FINGERPRINT
+import dev.isachivka.agtermremote.ui.settings.TAG_NOTE
 import dev.isachivka.agtermremote.ui.settings.TAG_REPLACE_KEY
 import dev.isachivka.agtermremote.ui.settings.TAG_UNPAIR
 import dev.isachivka.agtermremote.ui.theme.AppTheme
@@ -199,6 +201,12 @@ class SettingsTest {
 
         assertNull(PairedLaptop(dir).read())
         assertNull(PhoneIdentity.existing())
+
+        // **And the screen says so.** The panel is gone the instant the store is cleared and the
+        // scanner takes its place, so without this the most irreversible act in the application
+        // reported nothing at all: the owner pressed Unpair twice and got a viewfinder.
+        compose.onNodeWithTag(TAG_NOTE).assertIsDisplayed()
+        compose.onNodeWithTag(TAG_NOTE).assertTextContains("Unpaired", substring = true)
     }
 
     // --- What holds the two of them up -------------------------------------------------------------
