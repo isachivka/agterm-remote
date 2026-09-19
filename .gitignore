@@ -10,3 +10,6 @@ bridge/bridge
 mac/.build/
 dist/
 .superpowers/
+
+# revmux review archive: every agent's verbatim stream, per round. The profile beside it IS tracked.
+.revmux/tasks/

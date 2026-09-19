@@ -822,6 +822,7 @@ func unpair(conn net.Conn, p *Pairing, fingerprint string) {
 // question about the owner's network, the router, and whether a tunnel is in front - none of which
 // this process can see, and all of which the Mac app either knows or can ask. The only refusals left
 // are structural: a string that is not a host and a port, and a port that is not a port.
+
 // isWildcard reports whether a host names every interface rather than one address.
 //
 // Used for a LOG LINE and for nothing else. It is deliberately not exhaustive and does not need to

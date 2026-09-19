@@ -11,7 +11,7 @@ package dev.isachivka.agtermremote.agterm
  * round trip to their laptop, with the dialog still open and their text still in it.
  *
  * The two must agree, or the phone accepts something the laptop refuses and the owner watches a
- * rename silently fail. `SessionLabelTest` pins them to the same boundaries — which is the honest
+ * rename silently fail. `CreateAndRenameTest` pins them to the same boundaries — which is the honest
  * version of "keep them in sync", since one is Kotlin and one is Go and no type can join them.
  *
  * ### The name is never put in a message

@@ -65,9 +65,6 @@ internal class TlsDriver private constructor(
     private val transportOut: OutputStream,
 ) {
 
-    /** What the handshake actually negotiated, so a caller can assert it rather than assume it. */
-    val negotiatedProtocol: String? get() = engine.applicationProtocol
-
     /** Application bytes decrypted but not yet handed to the caller. */
     private var decrypted: ByteBuffer = ByteBuffer.allocate(0)
 

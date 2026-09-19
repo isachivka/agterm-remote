@@ -30,10 +30,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// apart, which is the structural version of the rule the owner met the hard way: on 2026-08-10
     /// every item but Quit was lit and inert.
     ///
-    /// Start and Stop are in it **only when there is a bridge to start**. Until this change they were
-    /// permanently in it, over a supervisor that asked launchd about a job no installer here creates —
-    /// lit, pressable, and incapable. A missing binary is not a reason to offer the control and
-    /// apologise afterwards; it is a reason for the control to look as dead as it is.
+    /// There is no Start and no Stop in it, and there is no such action to put in it: the bridge runs
+    /// for as long as this app is open and an address exists (see `runTheBridge`). What a missing
+    /// binary changes is what the menu SAYS - its tooltip and the window's bridge line - not what it
+    /// offers, because there is nothing to offer.
     private var implemented: Set<MenuAction> {
         // `.pairPhone` is in this set now, and the sentence it replaces said it would come back "when
         // the panel that asks the bridge for a code lands, and not one change earlier". This is that
@@ -96,8 +96,8 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     private let loginItem = LoginItem(service: SystemLoginItem())
 
-    /// The bridge, as a child process. `nil` when the binary is not where it should be — which is a
-    /// state the menu shows by greying two items rather than by failing at the press.
+    /// The bridge, as a child process. `nil` when the binary is not where it should be — a state the
+    /// menu's tooltip and the window's bridge line say in words, since there is no item to grey.
     ///
     /// Resolved once, at launch. A menu whose enabled items depended on a file system lookup
     /// performed on every rebuild would change under somebody mid-press; the three places it looks
@@ -170,9 +170,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // nothing was running. Nobody sets an address for a phone to dial and then wants the thing
         // that answers it to be off - so having one IS the instruction, and this obeys it.
         //
-        // The Start and Stop items stay, for the times somebody means it. Stop lasts until the next
-        // launch, which its own warning now says.
-        runTheBridge()
+        // There is no Start and no Stop. A bridge that fails says so in the menu and in the window,
+        // and the next save - the act by which the owner does something about it - tries again.
+        _ = runTheBridge()
     }
 
     /// **Bring the bridge up, or put it down and up again when it is already up.**
@@ -183,14 +183,25 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     ///
     /// Without a stored address there is nothing to bind and nothing to advertise, so this does
     /// nothing at all: the first run stays silent until setup is finished.
-    private func runTheBridge() {
-        guard let bridge, case .success = AddressPreference.read() else { return }
+    ///
+    /// **A failed bridge is started again by this, and that is the whole point of calling it from a
+    /// save.** The commonest failure is `address already in use`; the owner reads it, opens Settings,
+    /// changes the port and presses Save - and this is the only thing that call reaches. It used to
+    /// skip `.failed` on the argument that a save might not have touched the cause, and offered
+    /// "the menu still offers Start" as the way back, when there is no Start anywhere. The result
+    /// was a dead bridge, no code and no button, with quitting the app as the only recovery.
+    /// `BridgeProcess.start` already treats a start after a failure as a fresh five attempts.
+    ///
+    /// Returns whether a start was issued, so a caller that wants to wait for the bridge to come up
+    /// only waits when something is on its way. A bridge already starting or stopping is left to
+    /// land on its own; the supervisor reports where it lands.
+    @discardableResult
+    private func runTheBridge() -> Bool {
+        guard let bridge, case .success = AddressPreference.read() else { return false }
         switch bridge.state {
-        case .running: bridge.stop(); startBridge()
-        case .stopped: startBridge()
-        // A failed start is not retried on a timer or by a save that did not touch the reason it
-        // failed; the owner has been told what happened and the menu still offers Start.
-        case .failed, .starting, .stopping: break
+        case .running: bridge.stop(); startBridge(); return true
+        case .stopped, .failed: startBridge(); return true
+        case .starting, .stopping: return true
         }
     }
 
@@ -286,8 +297,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // A code on screen carries the OLD answer - the scheme travels in the payload - so it is
             // withdrawn and asked for again the moment the bridge is back.
             if panel.state.isShowingACode { panel.close() }
-            codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty
-            runTheBridge()
+            if runTheBridge() { codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty }
         }
         settings.onUnpair = { [weak self] in self?.unpairPhone() }
         // The enrolment window at the bridge must not outlive the window that shows its code.
@@ -339,6 +349,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             stopThePanelClock()
             if panel.state.isShowingACode { panel.close() }
             return
+        }
+        // **The wait cannot outlive the thing it waits for.** The flag is set when a start is issued
+        // and cleared when the supervisor reports where the bridge landed; a bridge that is not on
+        // its way has nothing to report, so a flag left standing beside it would keep this from ever
+        // asking for a code again - the wedge the first whole-repository review found.
+        if codeIsWaitingForTheBridge, let bridge, bridge.state != .starting, bridge.state != .stopping {
+            codeIsWaitingForTheBridge = false
         }
         if !panel.state.isShowingACode, !codeIsWaitingForTheBridge {
             if case .refused = panel.state { return }
@@ -650,9 +667,8 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
         // port it names and advertises what the phone will dial, and a bridge already up is holding
         // the previous answer to both. The code follows the bridge.
-        if case .saved = outcome {
+        if case .saved = outcome, runTheBridge() {
             codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty
-            runTheBridge()
         }
         // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
         // started existing.
