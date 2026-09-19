@@ -383,10 +383,33 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         }
         pairing.address = address.displayed
         pairing.onClose = { [weak self] in self?.closePairing() }
-        pairing.onAskForAnotherCode = { [weak self] in self?.mintACode() }
-        mintACode()
+        pairing.onAskForAnotherCode = { [weak self] in self?.askForACode() }
+        askForACode()
         startThePanelClock()
     }
+
+    /// **Ask for a code, starting the bridge first if that is what is in the way.**
+    ///
+    /// The panel used to say *there is no code, the bridge is not running, start it from the menu* -
+    /// a correct sentence that sends somebody who pressed the pairing button to a different menu to
+    /// press a different button and then come back. It was the first thing the first person to
+    /// install this ran into, on the last pane of setup.
+    ///
+    /// Starting it here is not a new decision about whether the bridge should run: pressing this
+    /// button already says the owner wants a phone to reach this Mac, and the bridge is the thing
+    /// that lets one. What it must not do is pretend - so the panel says the bridge is being started,
+    /// and the code is asked for only when the supervisor reports a running child. A start that fails
+    /// says so through the same path any other failed start does.
+    private func askForACode() {
+        guard let bridge, bridge.state == .stopped || bridge.state.hasFailed else { return mintACode() }
+        codeIsWaitingForTheBridge = true
+        pairing.show(.unavailable("Starting the bridge, then asking it for a code…"))
+        startBridge()
+    }
+
+    /// Set between asking for a code with the bridge down and the supervisor reporting it up. See
+    /// `askForACode` and `bridgeChanged`.
+    private var codeIsWaitingForTheBridge = false
 
     /// Ask the bridge for a code and draw whatever came back — including a refusal, which is a
     /// sentence on the panel rather than an empty square.
@@ -710,6 +733,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         } else if case .running = state {
             failure = nil
             startWasAsked = false
+        }
+        // The pairing panel asked for a code while the bridge was down and is waiting on this.
+        // Cleared on any settled state, not only on success: a start that failed has already said so,
+        // and a flag left set would mint a code into a panel nobody is watching at the next start.
+        if codeIsWaitingForTheBridge, state != .starting, state != .stopping {
+            codeIsWaitingForTheBridge = false
+            if case .running = state, pairing.isOpen { mintACode() }
         }
         rebuildMenu()
     }
