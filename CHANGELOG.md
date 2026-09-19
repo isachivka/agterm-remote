@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/isachivka/agterm-remote/compare/v0.3.0...v0.3.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **app:** coming back to the terminal re-reads whether a laptop is paired ([#84](https://github.com/isachivka/agterm-remote/issues/84)) ([0ef3ac4](https://github.com/isachivka/agterm-remote/commit/0ef3ac4ce9eb09d6a56d210507009860b6af1daa))
+
 ## [0.3.0](https://github.com/isachivka/agterm-remote/compare/v0.2.0...v0.3.0) (2026-09-19)
 
 
