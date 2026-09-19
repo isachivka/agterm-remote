@@ -223,37 +223,18 @@ struct BridgeProcessTests {
         #expect(bridge.state == .starting)
     }
 
-    /// **The two flags that carry what stands in front of this Mac, which the bridge cannot observe.**
-    ///
-    /// `--advertise-scheme` decides how a pairing code tells the phone to open the address, and it is
-    /// passed on every launch rather than left to the bridge's own default, so the two processes
-    /// cannot drift into disagreeing about a deployment neither can see. `--on-link-tls` decides
-    /// whether this port serves TLS, and it is a flag rather than a request because the answer is
-    /// settled when the listener is built.
-    @Test func startTellsTheBridgeWhatStandsInFrontOfThisMac() throws {
-        for door in FrontDoor.allCases {
-            let launcher = RecordingLauncher()
-            try bridge(launcher).start(listen: "0.0.0.0:8443", socket: nil, frontDoor: door)
-
-            let argv = launcher.arguments
-            guard let at = argv.firstIndex(of: "--advertise-scheme") else {
-                #expect(Bool(false), "\(door): the scheme must always be passed")
-                continue
-            }
-            #expect(argv[at + 1] == door.advertiseScheme)
-            #expect(argv.contains("--on-link-tls") == door.servesOnLinkTLS)
-        }
-    }
-
-    /// The direct deployment asks for nothing extra: a plain port and a plain scheme. Named
-    /// explicitly, because the DEFAULT is no longer this one - see `FrontDoor.unset`.
-    @Test func theDirectDeploymentAddsNoOnLinkTls() throws {
+    /// **Nothing about the network is described to the bridge**, because nothing about it was ever
+    /// observable from here. The two flags that used to carry the owner's answer - `--advertise-scheme`
+    /// and `--on-link-tls` - are gone with the question: the bridge serves both dresses on its one
+    /// port and the phone tries TLS first. A launch that passed either would be the question coming
+    /// back by the side door.
+    @Test func startDescribesNothingAboutWhatStandsInFront() throws {
         let launcher = RecordingLauncher()
 
-        try bridge(launcher).start(listen: "0.0.0.0:8443", socket: nil, frontDoor: .direct)
+        try bridge(launcher).start(listen: "0.0.0.0:8443", socket: nil)
 
+        #expect(!launcher.arguments.contains("--advertise-scheme"))
         #expect(!launcher.arguments.contains("--on-link-tls"))
-        #expect(launcher.arguments.contains("plain"))
     }
 
     /// The state directory is required by the binary and has no default there on purpose, so the app

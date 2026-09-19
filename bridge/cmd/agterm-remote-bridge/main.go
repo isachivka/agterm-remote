@@ -47,6 +47,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/control"
 	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 	"github.com/isachivka/agterm-remote/bridge/internal/frontdoor"
+	"github.com/isachivka/agterm-remote/bridge/internal/hop"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
 	"github.com/isachivka/agterm-remote/bridge/internal/parent"
@@ -111,12 +112,8 @@ func main() {
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
 	stateDir := flag.String("state-dir", "", "directory holding identity and paired peers (required)")
 	logPath := flag.String("log", "", "log file; empty means stderr")
-	advertiseScheme := flag.String("advertise-scheme", "plain",
-		"how a phone should OPEN the advertised address: plain, or tls when something in front terminates HTTPS")
-	lanCert := flag.String("lan-cert", "", "certificate for the on-link hop; set with -lan-key when a proxy in front insists on an HTTPS backend")
+	lanCert := flag.String("lan-cert", "", "certificate for the on-link hop; set with -lan-key to supply your own instead of the minted one")
 	lanKey := flag.String("lan-key", "", "key for -lan-cert")
-	onLinkTLS := flag.Bool("on-link-tls", false,
-		"serve TLS on this port, minting a certificate in the state directory when -lan-cert is not given")
 	parentPID := flag.Int("parent-pid", 0, "exit when this pid goes away; 0 disables")
 	flag.Parse()
 
@@ -133,16 +130,11 @@ func main() {
 	}
 	// Resolved before anything starts, so a typo is a refusal at the command line rather than a
 	// bridge that runs and mints codes nobody can use.
-	scheme, ok := schemeNamed(*advertiseScheme)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "--advertise-scheme must be plain or tls")
-		os.Exit(2)
-	}
-	if err := checkHopFlags(scheme, *onLinkTLS, *lanCert, *lanKey); err != nil {
+	if err := checkLanFlags(*lanCert, *lanKey); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, scheme, *lanCert, *lanKey, *onLinkTLS, *parentPID); err != nil {
+	if err := run(*listen, *advertise, *socket, *stateDir, *logPath, *lanCert, *lanKey, *parentPID); err != nil {
 		log.Fatalf("agterm-remote-bridge: %v", err)
 	}
 }
@@ -172,50 +164,21 @@ func advertised(advertise, bound string) string {
 	return advertise
 }
 
-// checkHopFlags refuses the two ways the outer hop and this port can be told to disagree.
+// checkLanFlags refuses a half-supplied on-link certificate. Both or neither: one alone is a
+// half-configured hop, and the failure it produces - a proxy that cannot talk to this port - is exactly
+// the one the pair exists to fix.
 //
-// A function rather than two ifs in main, so it can be tested: main exits the process, and a rule
-// that is only reachable by starting a program is a rule nothing asserts.
-func checkHopFlags(scheme enroll.Scheme, onLinkTLS bool, lanCert, lanKey string) error {
-	// Both or neither. One alone is a half-configured hop, and the failure it produces - a proxy that
-	// cannot talk to this port - is exactly the one this pair exists to fix.
+// The scheme flag and the on-link flag that used to sit beside these are gone: the port serves TLS
+// and plain HTTP alike, decided per connection by internal/hop, so there is no combination left that
+// describes a bridge nothing can reach.
+func checkLanFlags(lanCert, lanKey string) error {
 	if (lanCert == "") != (lanKey == "") {
 		return errors.New("--lan-cert and --lan-key must both be set, or neither")
-	}
-	// **The combination that describes a bridge nothing can reach.**
-	//
-	// A phone told to open a plain connection, arriving at a port that answers only TLS: the
-	// handshake cannot happen and there is nothing anywhere to say why. The Mac app cannot express it
-	// at all - control.FrontDoor has three cases and this is the absent fourth - but **the command
-	// line is a second way in, and a type that forbids a state is worth nothing if the flags beside
-	// it permit the same state.**
-	//
-	// Refused rather than repaired. Either half could be "corrected" here and both corrections are
-	// guesses about somebody's network, which is the mistake version 1 of the payload made.
-	if scheme == enroll.SchemePlain && (onLinkTLS || lanCert != "") {
-		return errors.New(
-			"--advertise-scheme plain serves a plain outer hop, so TLS on this port is unreachable: " +
-				"pass --advertise-scheme tls, or drop the on-link flags")
 	}
 	return nil
 }
 
-// schemeNamed turns the flag's word into the wire value, and says so rather than defaulting.
-//
-// Words at the command line and on the control socket, numbers on the wire. The words are what a
-// person types and reads back in a launch argument; the numbers are what has to be stable across two
-// implementations forever.
-func schemeNamed(name string) (enroll.Scheme, bool) {
-	switch name {
-	case "plain":
-		return enroll.SchemePlain, true
-	case "tls":
-		return enroll.SchemeTLS, true
-	}
-	return 0, false
-}
-
-func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advertiseScheme enroll.Scheme, lanCert, lanKey string, onLinkTLS bool, parentPID int) error {
+func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCert, lanKey string, parentPID int) error {
 	// The log first, so that everything below reports where the owner will look for it rather than
 	// on a stderr the parent may not be keeping.
 	if logPath != "" {
@@ -337,67 +300,35 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advert
 	}
 	defer tcp.Close()
 
-	// **The on-link TLS wrapper, and what it is actually for.**
+	// **One port, TLS or plain, decided per connection - and nobody is asked.**
 	//
-	// It sits OUTSIDE the front door and inside nothing: the phone's pinned mTLS is established
-	// through it and is unaffected by it.
+	// A router that publishes this Mac by proxying it may insist on speaking HTTPS to its backend;
+	// a tunnel may speak plain HTTP to it; a phone with a forwarded port dials it directly. This
+	// used to be a flag, set from a popup with three answers, and two real setups in two days got
+	// it wrong the same way. internal/hop answers whatever arrives by its first byte instead.
 	//
-	// # It authenticates nothing, and that is not the reason it exists
-	//
-	// This is opportunistic encryption of one LAN hop. Whatever connects here does not validate this
-	// certificate - it cannot, there is no name it could check it against - so anybody who can reach
-	// this port completes the handshake. It buys confidentiality against a passive listener on the
-	// LAN and nothing else, and nothing about it should be mistaken for part of the trust model: the
-	// security of this service lives entirely in the pinned mTLS INSIDE the stream, which still
-	// terminates in this process and still accepts exactly one certificate.
-	//
-	// # Its real job is INTEROPERABILITY, and reasoning only about the security cost it nothing and
-	// broke a working deployment
-	//
-	// A router that publishes this Mac by proxying it may be configured to speak HTTPS to its
-	// backend, and some insist on it. When it does, it opens TLS to this port; a plaintext listener
-	// sees a ClientHello it cannot answer, and the router reports 502 to the phone. Measured
-	// upstream, not inferred: the router's first 297 bytes on the wire began 16 03 01, and a
-	// self-signed responder on the same port answered 200 through the same name.
-	//
-	// This was removed once on the argument that it authenticates nothing, which is true and is about
-	// SECURITY. What it is for is reachability, and dropping it left the owner's own deployment
-	// unable to reach its bridge at all - with the address right, the fingerprint right, and nothing
-	// anywhere saying why. The paragraph above is the one that has to survive: not "this is
-	// pointless", but "this is pointless as authentication and load-bearing as plumbing".
-	//
-	// **Minted rather than demanded, when the caller asked for the hop and named no files.**
-	//
-	// Nothing validates this certificate - see the paragraphs above - so there is nothing about it
-	// only a person could decide, and requiring one would put "generate a self-signed certificate"
-	// between an owner and a working pairing for no benefit at all. It lives in the state directory
-	// beside the bridge's own identity, at 0600, and is reused across restarts so that a router
-	// which happens to cache it is not surprised.
-	//
-	// -lan-cert stays for somebody who wants to supply their own, and wins when both are given.
-	if lanCert == "" && onLinkTLS {
+	// The certificate authenticates nothing - nothing validates it - so it is minted here rather than
+	// demanded, and reused across restarts so a router that caches it is not surprised. -lan-cert
+	// stays for somebody who wants to supply their own. The security of this service lives in the
+	// pinned mTLS INSIDE the stream, unaffected by how the hop was dressed.
+	if lanCert == "" {
 		var err error
 		lanCert, lanKey, err = onLinkIdentity(stateDir)
 		if err != nil {
 			return err
 		}
 	}
-
-	// Both flags or neither; the pairing is enforced before run is called.
-	if lanCert != "" {
-		pair, err := tls.LoadX509KeyPair(lanCert, lanKey)
-		if err != nil {
-			return fmt.Errorf("on-link certificate: %w", err)
-		}
-		// No client auth: whatever proxies to this port has no certificate to present, and
-		// authentication is not this layer's job. Said here rather than left to be inferred from an
-		// absent field.
-		tcp = tls.NewListener(tcp, &tls.Config{
-			Certificates: []tls.Certificate{pair},
-			MinVersion:   tls.VersionTLS12,
-		})
-		log.Printf("on-link hop is TLS (opportunistic; authenticates nothing)")
+	pair, err := tls.LoadX509KeyPair(lanCert, lanKey)
+	if err != nil {
+		return fmt.Errorf("on-link certificate: %w", err)
 	}
+	// No client auth: whatever proxies to this port has no certificate to present, and
+	// authentication is not this layer's job.
+	tcp = hop.Listen(tcp, &tls.Config{
+		Certificates: []tls.Certificate{pair},
+		MinVersion:   tls.VersionTLS12,
+	})
+	log.Printf("on-link hop serves TLS and plain HTTP alike (opportunistic; authenticates nothing)")
 
 	// A proxy in front may terminate its own TLS and reconnect over the LAN, so a client
 	// certificate cannot survive the trip and the pinned mTLS has to run INSIDE the proxied stream.
@@ -476,9 +407,10 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advert
 		// The bound address rather than the --listen argument that produced it, in that case:
 		// net.Listen has already returned above, so a failed bind never reaches this line.
 		Listening: advertised(advertiseAddr, tcp.Addr().String()),
-		// How that address is OPENED, which no amount of looking at this listener could answer: what
-		// decides it is whatever publishes this Mac to the phone, and only the owner knows that.
-		Scheme: advertiseScheme,
+		// How the phone opens that address, as a HINT: the payload still carries a scheme, and the
+		// phone tries TLS first regardless and falls back to plain if the far end speaks plain HTTP.
+		// TLS is the answer that works in every real deployment but one, so it is the hint.
+		Scheme: enroll.SchemeTLS,
 		Window: window,
 		Peers:  peers,
 		// The parsed leaf, which is also what the enrolment handler returns to a phone. The QR code
@@ -486,9 +418,6 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advert
 		Certificate: leaf,
 		// The handler's own probe rather than a second opinion about what "reachable" means.
 		Agterm: handler.AgtermReachable,
-		// The front door's count of TLS opened against a plain port. With on-link TLS the
-		// wrapper below the door consumes every ClientHello, so this stays at zero by construction.
-		TLSOnPlainHop: ln.TLSHellos,
 	}
 	if door, err := control.Listen(ctx, stateDir, handler, pairing); err != nil {
 		log.Printf("control socket unavailable: %v", err)

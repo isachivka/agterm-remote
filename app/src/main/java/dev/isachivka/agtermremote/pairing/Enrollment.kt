@@ -1,5 +1,7 @@
 package dev.isachivka.agtermremote.pairing
 
+import dev.isachivka.agtermremote.wire.WireFailure
+import dev.isachivka.agtermremote.wire.WireException
 import dev.isachivka.agtermremote.wire.BridgeUrl
 import dev.isachivka.agtermremote.wire.ByteStream
 import dev.isachivka.agtermremote.wire.TlsDriver
@@ -174,11 +176,24 @@ object Enrollment {
         // Everything before this line failed without anything answering. Everything after it failed
         // with a machine on the other end that completed an HTTP upgrade. That boundary, and not the
         // exception type, is what picks the arm below - see the catch around the handshake.
+        // **TLS first, plain if the far end will not speak it - and nobody is asked.** The payload's
+        // scheme byte is a hint the Mac no longer has to get right: `wss://` is correct for a
+        // forwarded port, a mesh network, a proxying router and an HTTPS tunnel alike, because the
+        // bridge's own port serves TLS and the phone validates no outer certificate. The one
+        // deployment it is wrong for answers the ClientHello with plain HTTP, which is the one outer
+        // TLS failure that can exist, and one retry covers it. The answer that worked is stored with
+        // the laptop, so the terminal never repeats the experiment.
+        var kind = StreamKind.DirectTls
         val stream = try {
-            // The whole URL, derived once by the payload, so the transport is handed a string rather
-            // than the job of assembling one. The scheme is the owner's declared fact and the
-            // bracketing is the format's rule; neither belongs at a call site.
-            openStream(payload.dialUrl)
+            openStream(BridgeUrl.of(payload.dialAddress, kind))
+        } catch (e: WireException) {
+            if (e.failure != WireFailure.NotTls) return EnrollResult.Unreachable(e)
+            kind = StreamKind.DirectTcp
+            try {
+                openStream(BridgeUrl.of(payload.dialAddress, kind))
+            } catch (e2: Exception) {
+                return EnrollResult.Unreachable(e2)
+            }
         } catch (e: Exception) {
             return EnrollResult.Unreachable(e)
         }
@@ -242,7 +257,7 @@ object Enrollment {
                 driver.output.flush()
                 val line = BufferedReader(InputStreamReader(driver.input, Charsets.UTF_8)).readLine()
                     ?: return@use EnrollResult.Refused(REFUSED)
-                reply(line, payload, identity, store)
+                reply(line, payload, identity, store, kind = kind)
             } catch (e: Exception) {
                 EnrollResult.Refused(REFUSED)
             }
@@ -289,6 +304,8 @@ object Enrollment {
         payload: EnrollPayload,
         identity: X509Certificate,
         store: PairedLaptop,
+        /** The dress the transport was opened in - what the laptop is stored with. */
+        kind: StreamKind,
     ): EnrollResult {
         val parsed = try {
             JSONObject(line)
@@ -321,9 +338,9 @@ object Enrollment {
         // Written last. Everything above can refuse; nothing above this line has stored anything.
         store.write(
             ConnectionProfile(
-                // Stored as the payload said, so the terminal opens the address the same way
-                // enrolment just did. Assuming one here is what version 1 of the payload did.
-                kind = payload.scheme,
+                // Stored as it WORKED, so the terminal opens the address the same way enrolment
+                // just did - see the note above the open.
+                kind = kind,
                 host = payload.host,
                 port = payload.port,
                 bridgeCertificate = der,

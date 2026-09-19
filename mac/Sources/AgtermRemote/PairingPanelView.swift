@@ -21,7 +21,7 @@ import AppKit
 @MainActor
 final class PairingPanelView: NSObject {
 
-    func make(state: PairingPanelState, address: String, warning: String?) -> NSView {
+    func make(state: PairingPanelState, address: String) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -69,11 +69,6 @@ final class PairingPanelView: NSObject {
         case .unavailable:
             stack.addArrangedSubview(heading("There is no code"))
             stack.addArrangedSubview(body(state.sentence ?? ""))
-        }
-
-        if let warning {
-            stack.addArrangedSubview(caption("What the bridge saw"))
-            stack.addArrangedSubview(body(warning))
         }
 
         return stack

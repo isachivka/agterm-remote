@@ -76,7 +76,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// What the panel showed last, so a redraw is not asked for on a state that has not moved.
     private func panelChanged(to state: PairingPanelState) {
         settings.panelState = state
-        settings.panelWarning = panel.warning
         settings.refreshIfOpen()
         // A phone that walked through the window has proven the address it dialled. This is the
         // moment that fact becomes true, and the menu and the window say it.
@@ -273,13 +272,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // app does not cross.
             agtermSocketExists: AgtermPresence.isRunning(),
             address: AddressPreference.stored(),
-            isPaired: AddressPreference.provenAt() != nil,
-            // **The upgrade path, and the only thing that puts the front-door pane on screen.** An
-            // owner who paired before the question existed holds an address, a paired phone and no
-            // answer - and the setup window opens only for what is unfinished, so their setup looked
-            // finished and the question was unreachable. Everybody setting up from now on answers it
-            // beside the address box; see `AddressPreference.confirmFrontDoor` at the save.
-            frontDoorAnswered: AddressPreference.frontDoorAnswered())
+            isPaired: AddressPreference.provenAt() != nil)
     }
 
     /// **Opened for what is left to SET UP, never for agterm being down.**
@@ -298,17 +291,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // One save path for the whole app: `SaveAddress` with its refusals. A second saver would be a
         // second opinion about what an address is.
         settings.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
-        // **Stored, and then the bridge is restarted.** Whether this port serves TLS is settled when
-        // the listener is built, so a bridge already up is serving the old answer. The restart is
-        // conditional on the answer actually moving.
-        settings.onFrontDoor = { [weak self] chosen in
-            guard AddressPreference.writeFrontDoor(chosen) else { return }
-            guard let self else { return }
-            // A code on screen carries the OLD answer - the scheme travels in the payload - so it is
-            // withdrawn and asked for again the moment the bridge is back.
-            if panel.state.isShowingACode { panel.close() }
-            if runTheBridge() { codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty }
-        }
         settings.onUnpair = { [weak self] in self?.unpairPhone() }
         // The enrolment window at the bridge must not outlive the window that shows its code.
         settings.onClose = { [weak self] in
@@ -331,13 +313,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     /// Everything the window shows that is not the owner's own typing.
     private func fillSettings() {
-        settings.frontDoor = AddressPreference.frontDoor()
         settings.agtermIsThere = AgtermPresence.isRunning()
         settings.bridgeLine = BridgeReport.tooltip(for: bridge?.state ?? .stopped, failure: failure)
         settings.paired = pairedPhones.last
         settings.hasAddress = AddressPreference.read().isSuccess
         settings.panelState = panel.state
-        settings.panelWarning = panel.warning
     }
 
     /// Redraw the open window after something it describes moved. Keeps what is in the boxes.
@@ -504,7 +484,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// Draw a panel state on the window, before the model has one of its own to report.
     private func drawPanel(_ state: PairingPanelState) {
         settings.panelState = state
-        settings.panelWarning = panel.warning
         settings.refreshIfOpen()
     }
 
@@ -513,7 +492,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // Read at the press, exactly like the address and for the same reason: the owner can put a
         // proxy in front of this Mac while the bridge is running, and the bridge is not restarted
         // when they do.
-        panel.open(advertising: address, frontDoor: AddressPreference.frontDoor())
+        panel.open(advertising: address)
         drawPanel(panel.state)
     }
 
@@ -535,7 +514,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
                 // nothing at all.
                 self.panel.tick()
-                self.surfaceWhatTheBridgeSaw()
                 // **An expired code is replaced, not announced.** Nobody used it; the window is still
                 // open; the owner still wants a phone to reach this Mac. Only expiry renews itself -
                 // see `keepTheCodeAlive` for the brake that does not.
@@ -549,17 +527,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private var panelClock: Timer?
-
-    /// The hint moves without the state moving, so the clock checks it and redraws only on a change
-    /// - a redraw every second would take the selection out of the paste field under the owner.
-    private var lastWarning: String?
-    private func surfaceWhatTheBridgeSaw() {
-        let now = panel.warning
-        guard now != lastWarning else { return }
-        lastWarning = now
-        settings.panelWarning = now
-        settings.refreshIfOpen()
-    }
 
     private func stopThePanelClock() {
         panelClock?.invalidate()
@@ -628,14 +595,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // floor, and the port has its own refusals which say their own sentence.
         let port = SaveListenPort().save(arrivalPort, dialPort: try? AddressPreference.read().get().port)
         let outcome = SaveAddress().save(typed, confirmed: confirmed)
-
-        // **The answer that is on screen, recorded once, so nobody is asked the same question twice.**
-        // The popup beside the box writes on a CHANGE, and the commonest answer is the one already
-        // selected - so somebody who agrees with it would finish setup with no answer stored and meet
-        // the migration pane afterwards, written for people who were never asked. It cannot overwrite
-        // a real answer and it changes no behaviour: the value it stores is the one every code was
-        // already being built from.
-        AddressPreference.confirmFrontDoor(settings.frontDoor)
 
         switch outcome {
         case .saved(let address):
@@ -752,12 +711,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // the 2026-08-09 failure: a code that pairs and then never connects.
             try bridge.start(
                 listen: Address(address).listen(on: arrival), socket: nil,
-                advertise: address.displayed,
-                // The other half of the same fact, and it has to be here because it decides a flag
-                // rather than a request: whether this port serves TLS is settled when the listener is
-                // built. Changing it therefore needs a restart, which is why it is asked on the setup
-                // screen rather than beside the code.
-                frontDoor: AddressPreference.frontDoor())
+                advertise: address.displayed)
         } catch {
             // A start that could not happen at all: the binary vanished between launch and now, or
             // macOS is holding it because the app arrived by download. The error's own words, not a

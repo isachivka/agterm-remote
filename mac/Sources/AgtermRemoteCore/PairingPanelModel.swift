@@ -54,16 +54,6 @@ public enum PairingEnding: Equatable, Sendable {
     }
 }
 
-/// TLS opened against the bridge's plain port: how many times, and how long ago the last one was.
-public struct PlainHopTLSHint: Equatable, Sendable {
-    public let count: Int
-    public let ago: TimeInterval
-    public init(count: Int, ago: TimeInterval) {
-        self.count = count
-        self.ago = ago
-    }
-}
-
 /// The enrolment window as `status` reports it.
 ///
 /// A value rather than three accessors, because every field describes the **same instant**. Asking
@@ -79,17 +69,7 @@ public struct PairingWindowReport: Equatable, Sendable {
     public let attemptsLeft: Int
     public let ended: PairingEnding
 
-    /// Something opened TLS against the bridge's plain port - the trace of a router that insists on
-    /// an HTTPS backend, and the reason a code pairs nowhere when the front-door answer is `direct`.
-    /// Nil when nothing of the kind has happened. Carried with the window report because it is the
-    /// bridge's account of why a pairing is not arriving.
-    public let tlsOnPlainHop: PlainHopTLSHint?
-
-    public init(
-        open: Bool, expiresAt: Date?, attemptsLeft: Int, ended: PairingEnding,
-        tlsOnPlainHop: PlainHopTLSHint? = nil,
-    ) {
-        self.tlsOnPlainHop = tlsOnPlainHop
+    public init(open: Bool, expiresAt: Date?, attemptsLeft: Int, ended: PairingEnding) {
         self.open = open
         self.expiresAt = expiresAt
         self.attemptsLeft = attemptsLeft
@@ -128,9 +108,7 @@ public protocol ControlClient {
     /// - Returns: the payload, and the expiry **the window will actually enforce** — clamped to
     ///   `enroll.MaxTTL` at the far end. A panel that displayed the ttl it asked for would strand
     ///   somebody mid-pairing on a code that advertised an hour against a five-minute window.
-    func openPairing(
-        ttl: TimeInterval, advertise: String, frontDoor: FrontDoor
-    ) throws -> (payload: String, expiresAt: Date)
+    func openPairing(ttl: TimeInterval, advertise: String) throws -> (payload: String, expiresAt: Date)
 
     /// Shut it. Idempotent at the far end; this app still only calls it for a window it opened.
     func closePairing() throws
@@ -252,25 +230,6 @@ public final class PairingPanelModel: @unchecked Sendable {
 
     private let lock = NSLock()
     private var _state: PairingPanelState = .closed
-    /// The last hint the bridge gave, kept only while the code was minted for a `direct` front door
-    /// - behind HTTPS the port is TLS already and a hello there is not a misconfiguration.
-    private var _hint: PlainHopTLSHint?
-    private var openedFor: FrontDoor = .unset
-
-    /// What the bridge saw on its port, if it is the misconfiguration this panel can name.
-    public var plainHopSawTLS: PlainHopTLSHint? { lock.withLock { _hint } }
-
-    /// The sentence for it, or nil. Said here so the window and any test read the same words.
-    public var warning: String? {
-        guard let h = plainHopSawTLS else { return nil }
-        let ago = Int(h.ago.rounded())
-        let times = h.count == 1 ? "once" : "\(h.count) times"
-        return "Something has tried to speak HTTPS to this Mac's port \(times), most recently "
-            + "\(ago)s ago — that is what a router or proxy does when it expects an HTTPS backend. "
-            + "This address is set up as direct, so those connections are refused and the phone "
-            + "reports a Mac that does not answer. In Settings, set how your phone reaches this Mac "
-            + "to the answer that serves HTTPS both ways, then show a fresh code."
-    }
 
     /// True once this panel has opened a window at the bridge and has not closed it. **Closing is
     /// conditional on this**: a panel that fired `pair-close` on every dismissal would shut a window
@@ -307,14 +266,7 @@ public final class PairingPanelModel: @unchecked Sendable {
     ///
     /// - Parameter address: what the code should tell the phone to dial. **Read at the press**, not at
     ///   the spawn — see [ControlClient.openPairing]. Empty leaves the choice to the bridge.
-    /// - Parameter frontDoor: what stands between the phone and this Mac, which decides how the code
-    ///   tells the phone to OPEN that address. Read at the press for the same reason the address is:
-    ///   somebody can put a proxy in front while this app is running.
-    public func open(advertising address: String = "", frontDoor: FrontDoor = .unset) {
-        lock.withLock {
-            openedFor = frontDoor
-            _hint = nil
-        }
+    public func open(advertising address: String = "") {
         let mine = lock.withLock { () -> Int in
             generation += 1
             return generation
@@ -322,8 +274,7 @@ public final class PairingPanelModel: @unchecked Sendable {
         apply(.asking, from: mine)
         off { [self] in
             do {
-                let minted = try control.openPairing(
-                    ttl: Self.ttl, advertise: address, frontDoor: frontDoor)
+                let minted = try control.openPairing(ttl: Self.ttl, advertise: address)
                 let accepted = lock.withLock { () -> Bool in
                     guard generation == mine else { return false }
                     weOpenedAWindow = true
@@ -392,9 +343,6 @@ public final class PairingPanelModel: @unchecked Sendable {
             guard case .success(let report) = answer else {
                 return apply(.unavailable(Self.bridgeStoppedAnswering), from: mine, clearingWindow: true)
             }
-            // Read on every tick, not only on an ending: the hello arrives while the code is still
-            // valid, and that is precisely when the owner is looking at the panel.
-            lock.withLock { if openedFor == .direct { _hint = report.window.tlsOnPlainHop } }
 
             switch report.window.ended {
             case .paired:

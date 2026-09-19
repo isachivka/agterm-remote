@@ -1,5 +1,8 @@
 package dev.isachivka.agtermremote.agterm
 
+import dev.isachivka.agtermremote.pairing.StreamKind
+import dev.isachivka.agtermremote.wire.WireFailure
+import dev.isachivka.agtermremote.wire.WireException
 import android.content.Context
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.mutableStateOf
@@ -62,8 +65,21 @@ class AgtermViewModel(context: Context) : ViewModel() {
 
     val sessions = AgtermSessions(
         connect = {
-            val profile = PairedLaptop(appContext).read()
-            profile?.let { BridgeConnection.open(it, PhoneIdentity.keyManager()) }
+            val store = PairedLaptop(appContext)
+            store.read()?.let { profile ->
+                try {
+                    BridgeConnection.open(profile, PhoneIdentity.keyManager())
+                } catch (e: WireException) {
+                    // The thing in front of the Mac changed what it speaks since pairing. The other
+                    // dress is tried once and, if it answers, remembered - the same rule enrolment
+                    // applied on the first day, with the certificate untouched.
+                    if (e.failure != WireFailure.NotTls) throw e
+                    val other = profile.copy(
+                        kind = if (profile.kind == StreamKind.DirectTls) StreamKind.DirectTcp else StreamKind.DirectTls,
+                    )
+                    BridgeConnection.open(other, PhoneIdentity.keyManager()).also { store.write(other) }
+                }
+            }
         },
         keyState = { PhoneIdentity.signingState() },
         scope = viewModelScope,

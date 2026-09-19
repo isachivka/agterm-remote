@@ -63,7 +63,9 @@ account. There is no public listing yet.
 The phone dials the Mac directly. How it gets there is yours to arrange and this project integrates
 with none of it: a port forward with a fixed address, a port forward with a dynamic-DNS name, a
 Tailscale or WireGuard address, or a reverse proxy in front. Whatever you choose, the Mac app asks
-for the address the phone should dial and whether something terminates TLS in front of the bridge.
+for one thing: the address the phone should dial. It does not ask what is in between — the bridge
+answers TLS and plain HTTP alike on its one port, and the phone works out which to speak and
+remembers.
 
 ## Pair
 
