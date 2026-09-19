@@ -70,14 +70,14 @@ struct MenuActionsTests {
         #expect(items.allSatisfy { !$0.enabled })
     }
 
-    /// Wiring an action does not resurrect one the STATE disables: `stopBridge` stays dead while the
-    /// bridge is down, even though it is implemented. Both conditions have to hold.
+    /// Wiring an action does not resurrect one the STATE disables: `pairPhone` stays dead while there
+    /// is no address, even though it is implemented. Both conditions have to hold.
     @Test func wiringDoesNotOverrideTheState() {
         let items = MenuModel.items(
-            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopped)
+            paired: [], hasAddress: false, launchesAtLogin: false, bridge: .stopped)
 
-        #expect(items.first { $0.action == .stopBridge }?.enabled == false)
-        #expect(items.first { $0.action == .startBridge }?.enabled == true)
+        #expect(items.first { $0.action == .pairPhone }?.enabled == false)
+        #expect(items.first { $0.action == .setUp }?.enabled == true)
     }
 
     // --- shared with the reachability tests -------------------------------------------------------

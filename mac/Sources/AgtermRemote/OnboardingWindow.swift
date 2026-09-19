@@ -41,6 +41,22 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// enrolment. Nothing here reaches the network. See the note on the address pane.
     var onRecheck: (() -> Void)?
 
+    /// What the bridge is doing, in the app's own words. Supplied by the app from the supervisor's
+    /// state - this window never asks a process anything.
+    var bridgeLine = ""
+
+    /// **Settings mode: every field at once, reachable whenever somebody wants it.**
+    ///
+    /// The ladder below is right for a first run and wrong forever after. Setting up through it once,
+    /// the first person to install this ended with an address, a wrong answer to the front-door
+    /// question and no way back to either: the pane that holds those boxes is passed on the way to the
+    /// code and never offered again. Correcting them meant editing preferences by hand.
+    ///
+    /// So the steps stay, for the run where they are true, and this is the other door: one pane with
+    /// the address, the arrival port, the front-door answer, the bridge and the code on it. Setup is a
+    /// sequence; settings are a place.
+    private var settingsMode = false
+
     private var field = AddressField()
     private var addressBox: NSTextField?
     private var portBox: NSTextField?
@@ -71,12 +87,19 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// setup on the far side of it.
     private var pastAgterm = false
 
+    /// Open the settings pane, whatever the ladder thinks.
+    func showSettings(_ onboarding: Onboarding, field: AddressField) {
+        settingsMode = true
+        show(onboarding, field: field)
+    }
+
     func show(_ onboarding: Onboarding, field: AddressField) {
         self.field = field
         current = onboarding
         let pane = self.pane(for: onboarding)
         let window = self.window ?? make()
         window.contentView = view(for: onboarding, pane: pane)
+        window.title = settingsMode ? "Agterm Remote Settings" : "Set up Agterm Remote"
         window.delegate = self
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -118,6 +141,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_: Notification) {
         window = nil
+        // Closing ends settings mode, so the next automatic open is the ladder again if the ladder is
+        // what the facts call for.
+        settingsMode = false
     }
 
     // MARK: - The panes
@@ -128,6 +154,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        if settingsMode {
+            settingsPane(into: stack, onboarding: onboarding)
+            return stack
+        }
         stack.addArrangedSubview(caption(Self.position(of: pane)))
 
         switch pane {
@@ -227,9 +257,41 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(body(OnboardingCopy.addressExposure))
     }
 
+    /// **Everything, on one pane, in the order somebody would want to change it.**
+    ///
+    /// Not a fourth step and not a copy of the others: the same editor the address step draws, with
+    /// the things around it that a person coming back would be coming back FOR - what the bridge is
+    /// doing, and the code.
+    private func settingsPane(into stack: NSStackView, onboarding: Onboarding) {
+        stack.addArrangedSubview(heading(OnboardingCopy.addressHeading))
+        stack.addArrangedSubview(body(OnboardingCopy.addressExplanation))
+        stack.addArrangedSubview(addressEditor())
+
+        stack.addArrangedSubview(caption("The bridge"))
+        // Said, not controlled: it runs while this app is open and an address exists, and a saved
+        // address restarts it. There is nothing here to press because there is nothing to decide.
+        stack.addArrangedSubview(body(bridgeLine))
+        stack.addArrangedSubview(recheckButton("Look again"))
+
+        stack.addArrangedSubview(caption("Your phone"))
+        if let address = onboarding.address {
+            stack.addArrangedSubview(body("A code carries \(address.dial.displayed) and this Mac's certificate."))
+        }
+        let show = NSButton(title: "Show the code…", target: self, action: #selector(showCodeTapped))
+        show.bezelStyle = .rounded
+        stack.addArrangedSubview(show)
+
+        // agterm is a fact rather than a gate here: somebody changing an address does not need to be
+        // stopped because their terminal is not running at that moment.
+        stack.addArrangedSubview(
+            body(onboarding.agtermIsThere
+                ? "agterm is running."
+                : "agterm is not running. The bridge shows no sessions until it is."))
+    }
+
     /// **Step 3. The code, and the warning that rides on it.**
     private func pairingPane(into stack: NSStackView, address: Address?) {
-        stack.addArrangedSubview(heading("Scan the code with your phone"))
+        stack.addArrangedSubview(heading("Show the code, then scan it with your phone"))
         if let address {
             stack.addArrangedSubview(caption("Your phone will connect to"))
             stack.addArrangedSubview(addressLabel(address.dial.displayed))
@@ -242,8 +304,17 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(
             body("Until a phone comes through, this address is unproven: nothing on this Mac can tell "
                 + "you whether it reaches you from outside. The scan is what proves it."))
+        // **Why the code is not already on this screen.** Showing it is not a display decision: it
+        // mints a single-use token and opens a five-minute window during which a phone with no
+        // certificate can enrol. A pane that opened that window merely by being navigated to would
+        // leave it open on every setup somebody walked away from. So it is minted when it is asked
+        // for - and the heading now says so, because the first person to reach this pane read
+        // "Scan the code" and looked for a code that was deliberately not there yet.
+        stack.addArrangedSubview(
+            body("The code appears when you ask for it: showing it opens a five-minute window during "
+                + "which a phone can pair, so it is not left sitting on this screen."))
 
-        let show = NSButton(title: "Pair a phone…", target: self, action: #selector(showCodeTapped))
+        let show = NSButton(title: "Show the code…", target: self, action: #selector(showCodeTapped))
         show.bezelStyle = .rounded
         show.keyEquivalent = "\r"
         let row = NSStackView(views: [show, recheckButton("Look again")])

@@ -23,8 +23,8 @@ public enum ControlFailure: Error, Equatable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notListening(let path):
-            "The bridge is not running, so there is nothing to ask for a code. Start it from the menu. "
-                + "(Nothing is answering at \(path).)"
+            "The bridge is not running, so there is nothing to ask for a code. Press Show a code and "
+                + "it will be started, or start it from the menu. (Nothing is answering at \(path).)"
         case .refused(let sentence):
             sentence
         case .unreadable(let what):
