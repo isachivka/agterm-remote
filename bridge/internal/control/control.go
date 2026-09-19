@@ -226,6 +226,18 @@ type statusReply struct {
 	Agterm bool `json:"agterm"`
 	// Window is what the pairing panel needs in order to say why a code stopped working.
 	Window windowReply `json:"window"`
+	// TLSOnPlainHop is present only when something has opened TLS against this bridge's plain port
+	// - the trace a router that insists on an HTTPS backend leaves, and the one misconfiguration
+	// the bridge can actually see. Absent means nothing of the kind has happened, or the hop is
+	// TLS and the question does not arise.
+	TLSOnPlainHop *tlsHintReply `json:"tls_on_plain_hop,omitempty"`
+}
+
+// tlsHintReply is a count and an age. An age rather than a timestamp, because the two processes
+// share a clock only approximately and "12 seconds ago" is what the owner's app will say anyway.
+type tlsHintReply struct {
+	Count      int   `json:"count"`
+	AgoSeconds int64 `json:"ago_seconds"`
 }
 
 // pairedPeer is one phone, as the owner sees it. **The certificate is not here.** It is what
@@ -345,6 +357,9 @@ type Pairing struct {
 	Window *enroll.Window
 	// Peers is the trust store. Read by `status` and written by `unpair`, and by nothing else here.
 	Peers *trust.Store
+	// TLSOnPlainHop reports TLS handshakes attempted against the plain outer port, from the front
+	// door. Nil means the door does not report it; a reply then simply omits the field.
+	TLSOnPlainHop func() (count int, last time.Time)
 	// Certificate is this bridge's own certificate. The QR payload carries the SHA-256 of its DER,
 	// read from the bridge's own identity rather than derived a second time somewhere else: it is
 	// what the phone checks the TLS server certificate against, and a mismatch fails every pairing
@@ -608,7 +623,13 @@ func status(ctx context.Context, conn net.Conn, p *Pairing) {
 		w.ExpiresAt = state.Expiry.Unix()
 	}
 
-	reply(conn, statusReply{Listening: p.Listening, Paired: out, Agterm: up, Window: w})
+	out2 := statusReply{Listening: p.Listening, Paired: out, Agterm: up, Window: w}
+	if p.TLSOnPlainHop != nil {
+		if n, last := p.TLSOnPlainHop(); n > 0 {
+			out2.TLSOnPlainHop = &tlsHintReply{Count: n, AgoSeconds: int64(time.Since(last).Seconds())}
+		}
+	}
+	reply(conn, out2)
 }
 
 // openWindow mints a code, and it is the only thing anywhere that can do so.

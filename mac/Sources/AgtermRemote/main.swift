@@ -75,6 +75,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     /// What the panel showed last, so a redraw is not asked for on a state that has not moved.
     private func panelChanged(to state: PairingPanelState) {
+        pairing.warning = panel.warning
         pairing.refreshIfOpen(state)
         // A phone that walked through the window has proven the address it dialled. This is the
         // moment that fact becomes true, and the menu says it.
@@ -501,6 +502,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
                 // nothing at all.
                 self.panel.tick()
+                self.surfaceWhatTheBridgeSaw()
             }
         }
         // Menus and modal alerts run their own run-loop mode; without this the code on screen would
@@ -510,6 +512,17 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private var panelClock: Timer?
+
+    /// The hint moves without the state moving, so the clock checks it and redraws only on a change
+    /// - a redraw every second would take the selection out of the paste field under the owner.
+    private var lastWarning: String?
+    private func surfaceWhatTheBridgeSaw() {
+        let now = panel.warning
+        guard now != lastWarning else { return }
+        lastWarning = now
+        pairing.warning = now
+        pairing.refreshIfOpen(panel.state)
+    }
 
     private func stopThePanelClock() {
         panelClock?.invalidate()
