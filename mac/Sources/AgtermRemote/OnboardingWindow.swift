@@ -229,7 +229,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     /// **Step 3. The code, and the warning that rides on it.**
     private func pairingPane(into stack: NSStackView, address: Address?) {
-        stack.addArrangedSubview(heading("Scan the code with your phone"))
+        stack.addArrangedSubview(heading("Show the code, then scan it with your phone"))
         if let address {
             stack.addArrangedSubview(caption("Your phone will connect to"))
             stack.addArrangedSubview(addressLabel(address.dial.displayed))
@@ -242,8 +242,17 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(
             body("Until a phone comes through, this address is unproven: nothing on this Mac can tell "
                 + "you whether it reaches you from outside. The scan is what proves it."))
+        // **Why the code is not already on this screen.** Showing it is not a display decision: it
+        // mints a single-use token and opens a five-minute window during which a phone with no
+        // certificate can enrol. A pane that opened that window merely by being navigated to would
+        // leave it open on every setup somebody walked away from. So it is minted when it is asked
+        // for - and the heading now says so, because the first person to reach this pane read
+        // "Scan the code" and looked for a code that was deliberately not there yet.
+        stack.addArrangedSubview(
+            body("The code appears when you ask for it: showing it opens a five-minute window during "
+                + "which a phone can pair, so it is not left sitting on this screen."))
 
-        let show = NSButton(title: "Pair a phone…", target: self, action: #selector(showCodeTapped))
+        let show = NSButton(title: "Show the code…", target: self, action: #selector(showCodeTapped))
         show.bezelStyle = .rounded
         show.keyEquivalent = "\r"
         let row = NSStackView(views: [show, recheckButton("Look again")])
