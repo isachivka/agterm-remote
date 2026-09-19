@@ -158,6 +158,35 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // not cannot be expected to know that the way in is a menu-bar icon they have never met.
         showOnboardingIfUnfinished()
         watchForPairing()
+        // **The bridge runs because an address exists, not because somebody pressed Start.**
+        //
+        // It used to wait to be started from the menu, and the first person to install this met the
+        // consequence on the last pane of setup: a pairing panel saying there was no code because
+        // nothing was running. Nobody sets an address for a phone to dial and then wants the thing
+        // that answers it to be off - so having one IS the instruction, and this obeys it.
+        //
+        // The Start and Stop items stay, for the times somebody means it. Stop lasts until the next
+        // launch, which its own warning now says.
+        runTheBridge()
+    }
+
+    /// **Bring the bridge up, or put it down and up again when it is already up.**
+    ///
+    /// Called at launch and after an address is saved. A running bridge cannot honour a new listen
+    /// port or a changed front-door answer - both are settled when the listener is built - so the
+    /// same call that starts a stopped one restarts a running one.
+    ///
+    /// Without a stored address there is nothing to bind and nothing to advertise, so this does
+    /// nothing at all: the first run stays silent until setup is finished.
+    private func runTheBridge() {
+        guard let bridge, case .success = AddressPreference.read() else { return }
+        switch bridge.state {
+        case .running: bridge.stop(); startBridge()
+        case .stopped: startBridge()
+        // A failed start is not retried on a timer or by a save that did not touch the reason it
+        // failed; the owner has been told what happened and the menu still offers Start.
+        case .failed, .starting, .stopping: break
+        }
     }
 
     /// The three facts, as they stand right now.
@@ -581,6 +610,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             panel.close()
             pairing.show(panel.state)
         }
+        // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
+        // port it names and advertises what the phone will dial, and a bridge already up is holding
+        // the previous answer to both.
+        if case .saved = outcome { runTheBridge() }
         // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
         // started existing.
         rebuildMenu()
@@ -625,8 +658,8 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         let confirm = NSAlert()
         confirm.messageText = "Stop the bridge?"
         confirm.informativeText =
-            "Any phone connected through it drops immediately, and nothing brings it back by itself — "
-                + "you start it again from this menu."
+            "Any phone connected through it drops immediately. It stays down until you start it from "
+                + "this menu, or until you next open this app."
         confirm.addButton(withTitle: "Stop it")
         confirm.addButton(withTitle: "Cancel")
         confirm.alertStyle = .warning
