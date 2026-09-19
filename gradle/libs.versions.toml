@@ -1,13 +1,13 @@
 [versions]
 # Toolchain versions are pinned deliberately. See the README for the pinned set.
-agp = "9.3.1"
+agp = "9.4.1"
 # Kotlin is not chosen independently: AGP 9.3.1 ships built-in Kotlin at 2.2.10, and the
 # Compose compiler plugin must match the Kotlin version in use.
 kotlin = "2.2.10"
 coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
-composeBom = "2026.06.01"
+composeBom = "2026.09.00"
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 # Pinned forward deliberately: Compose ui-test-junit4 drags in espresso-core 3.5.0 and
@@ -20,7 +20,7 @@ espresso = "3.7.0"
 datastore = "1.2.1"
 # The only HTTP client this app has. Latest stable on Maven Central, checked against the artifact's
 # maven-metadata. mockwebserver3 ships from the same version and stays test-only.
-okhttp = "5.4.0"
+okhttp = "5.5.0"
 # Test-only. org.json is in the Android platform and costs the .apk nothing, but the android.jar
 # that unit tests compile against is stubs that throw, so the JVM tests need a real implementation.
 # The device test parses the same fixture against the platform's own copy.
