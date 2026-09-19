@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/isachivka/agterm-remote/compare/v0.5.1...v0.6.0) (2026-09-19)
+
+
+### Features
+
+* nobody is asked how the phone reaches the Mac ([#96](https://github.com/isachivka/agterm-remote/issues/96)) ([8c0e3a0](https://github.com/isachivka/agterm-remote/commit/8c0e3a0e1a766ffe87529b6e19b24964dd60b88f))
+
 ## [0.5.1](https://github.com/isachivka/agterm-remote/compare/v0.5.0...v0.5.1) (2026-09-19)
 
 
