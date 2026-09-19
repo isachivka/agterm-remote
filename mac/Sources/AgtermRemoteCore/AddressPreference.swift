@@ -51,7 +51,7 @@ public enum AddressPreference {
 
     /// What stands between the phone and this Mac. See [FrontDoor].
     ///
-    /// **Absent means [FrontDoor.unset]**, which is the simplest deployment. It is a default rather
+    /// **Absent means [FrontDoor.unset]**, the answer that works in the most deployments. It is a default rather
     /// than an answer, and the setup screen asks before a code is ever minted - the value is a fact
     /// about somebody's own network and this Mac cannot observe it.
     public static let frontDoorKey = "frontDoor"
@@ -146,7 +146,7 @@ public enum AddressPreference {
     ///
     /// - Returns: whether the EFFECTIVE answer moved. The write always happens — recording the answer
     ///   is the whole point of the migration pane, and an answer that is absent is a question that
-    ///   gets asked again — but *absent* already reads as `.unset`, which is `.direct`, so confirming
+    ///   gets asked again — but *absent* already reads as `.unset`, which is `.httpsBothWays`, so confirming
     ///   the default changes nothing any code is built from. The caller restarts the bridge on this,
     ///   and the migration pane's confirm button is pressed by somebody whose answer is usually the
     ///   one already in effect: without this it tore down a running bridge to store the value it was

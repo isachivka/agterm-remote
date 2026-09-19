@@ -286,7 +286,17 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             // good - and for the commonest case it confirms the answer already in effect, which used
             // to mean tearing down a running bridge to store the value it was already serving.
             guard AddressPreference.writeFrontDoor(chosen) else { return }
-            self?.restartTheBridgeIfItIsRunning()
+            guard let self else { return }
+            // **A code on screen carries the OLD answer.** The scheme travels in the payload, so a
+            // code minted under the previous answer points the phone the wrong way. It used to be
+            // left up until the restart killed its window, and the panel then said "that code no
+            // longer works" and asked for a press. Now the code is asked for again the moment the
+            // bridge is back - the same wait the pairing button uses when the bridge is down.
+            if panel.state.isShowingACode || onboarding.showsCode || pairing.isOpen {
+                panel.close()
+                codeIsWaitingForTheBridge = true
+            }
+            runTheBridge()
         }
         onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }
         onboarding.onAskForAnotherCode = { [weak self] in self?.askForACode() }
@@ -821,7 +831,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // and a flag left set would mint a code into a panel nobody is watching at the next start.
         if codeIsWaitingForTheBridge, state != .starting, state != .stopping {
             codeIsWaitingForTheBridge = false
-            if case .running = state, pairing.isOpen { mintACode() }
+            if case .running = state, pairing.isOpen || onboarding.showsCode { mintACode() }
         }
         rebuildMenu()
         refreshTheSettingsPane()

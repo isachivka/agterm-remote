@@ -69,13 +69,23 @@ public enum FrontDoor: String, CaseIterable, Equatable, Sendable {
     /// at all.
     case httpsBothWays
 
-    /// The default for somebody who has not been asked yet.
+    /// The default for somebody who has not been asked yet - and **it is the answer that works in
+    /// the most deployments, not the simplest one.**
     ///
-    /// The simplest deployment, and the one whose failure is easiest to recognise: a phone that
-    /// cannot open a plain connection to a proxy gets no further than the first hop, whereas a wrong
-    /// guess in the other direction fails inside somebody else's proxy with a status code they have
-    /// to go and find.
-    public static let unset: FrontDoor = .direct
+    /// It was `.direct`, on the argument that its failure is the easiest to recognise. Two real
+    /// setups in two days, both behind a router that publishes HTTPS and speaks HTTPS to the Mac,
+    /// kept the default and got a phone that "cannot find the computer" with nothing anywhere able
+    /// to say why: the router refuses a plain connection at its own edge, so not one byte reaches
+    /// this Mac and there is nothing here to detect. The owner's instruction was to change the
+    /// default so that this never affects them again.
+    ///
+    /// `.httpsBothWays` is the right choice for that AND the safest guess for everybody else: the
+    /// phone dials `wss://` and this port serves TLS, so it works behind a proxying router, and it
+    /// works on a plain port forward, Tailscale or WireGuard too - the phone does not validate the
+    /// outer certificate, so it reaches the bridge's own TLS directly. The one deployment it is
+    /// wrong for is a proxy that insists on a PLAIN backend, and that failure at least reaches
+    /// something that can be asked.
+    public static let unset: FrontDoor = .httpsBothWays
 
     /// The word the bridge's `-advertise-scheme` flag and the control socket's `scheme` field take.
     ///
@@ -115,9 +125,9 @@ public enum FrontDoorCopy {
     /// detail is what tells them whether it is theirs.
     public static func label(for door: FrontDoor) -> String {
         switch door {
-        case .direct: return "Straight to this Mac"
-        case .httpsInFront: return "Through something that adds HTTPS"
-        case .httpsBothWays: return "Through something that adds HTTPS, and expects HTTPS back"
+        case .direct: return "Straight to this Mac - a port forward, Tailscale or WireGuard"
+        case .httpsInFront: return "Through a tunnel or proxy that adds HTTPS and speaks plain HTTP to this Mac"
+        case .httpsBothWays: return "Through a router or proxy that adds HTTPS and expects HTTPS from this Mac too"
         }
     }
 
