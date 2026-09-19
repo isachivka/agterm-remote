@@ -25,6 +25,7 @@ import dev.isachivka.agtermremote.ui.settings.PhoneKeySection
 import dev.isachivka.agtermremote.ui.settings.SettingsScreen
 import dev.isachivka.agtermremote.ui.nav.BackStack
 import dev.isachivka.agtermremote.ui.nav.Screen
+import dev.isachivka.agtermremote.ui.nav.Start
 import dev.isachivka.agtermremote.ui.nav.startDestination
 import dev.isachivka.agtermremote.ui.theme.AppTheme
 
@@ -129,7 +130,19 @@ fun App(modifier: Modifier = Modifier) {
             SettingsScreen(
                 onBack = { stack = stack.pop() },
                 modifier = modifier,
-                pairingSection = { LaptopSection(settings = laptop, store = pairedLaptop) },
+                pairingSection = {
+                    LaptopSection(
+                        settings = laptop,
+                        store = pairedLaptop,
+                        // Where a freshly paired phone goes: back to the terminal if it came from
+                        // there, and onto a fresh terminal stack if the app opened on this screen
+                        // because nothing was paired yet. The second case is the one that left the
+                        // first real install sitting on a receipt with no way forward.
+                        onPaired = {
+                            stack = if (stack.canPop) stack.pop() else BackStack.initialFor(Start.Terminal)
+                        },
+                    )
+                },
                 // Null while the key is fine, which is the ordinary case and draws no heading. See
                 // the parameter's own note: this is what keeps the only other destructive control in
                 // the app off a healthy phone's screen entirely.

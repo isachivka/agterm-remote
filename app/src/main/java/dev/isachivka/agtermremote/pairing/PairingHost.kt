@@ -147,10 +147,27 @@ fun PairingHost(
     store: PairedLaptop,
     modifier: Modifier = Modifier,
     enrol: suspend (EnrollPayload) -> EnrollResult = { payload -> defaultEnrol(payload, store) },
+    /**
+     * Called once, when the enrolment has succeeded and the store has been written.
+     *
+     * The first person to pair on real hardware sat on this screen after the Mac had accepted the
+     * phone, saw the receipt, and had nowhere to go: the app had opened here because nothing was
+     * paired, so there was no terminal underneath it to go back to. Sessions appeared only after the
+     * app was killed and reopened. Where to go is the caller's decision - this composable does not
+     * know what is under it - which is why this is a callback and not a navigation.
+     */
+    onPaired: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val flow = remember(store) { PairingFlow(enrol) }
+
+    // Keyed on the state so it fires on the transition and not on every recomposition of a screen
+    // that stays Paired. The receipt with the fingerprint is not lost: the settings screen shows the
+    // pinned fingerprint whenever it is opened.
+    LaunchedEffect(flow.state) {
+        if (flow.state is PairingUi.Paired) onPaired()
+    }
 
     // Read rather than remembered: a permission revoked in Settings while this app sat in the
     // background must be observed the next time it matters, and a cached `true` is how an app tells
