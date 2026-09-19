@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/isachivka/agterm-remote/compare/v0.4.0...v0.5.0) (2026-09-19)
+
+
+### Features
+
+* **mac:** one window — address, port, how the phone gets here, and the code ([#91](https://github.com/isachivka/agterm-remote/issues/91)) ([8d33715](https://github.com/isachivka/agterm-remote/commit/8d3371559163f67ff250d673b33824165d83dbdd))
+
 ## [0.4.0](https://github.com/isachivka/agterm-remote/compare/v0.3.2...v0.4.0) (2026-09-19)
 
 
