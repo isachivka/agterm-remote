@@ -41,16 +41,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// enrolment. Nothing here reaches the network. See the note on the address pane.
     var onRecheck: (() -> Void)?
 
-    /// Start and stop it from the settings pane. The menu keeps its own items; these are the same
-    /// two actions offered where somebody is already looking at what the bridge is doing.
-    var onStartBridge: (() -> Void)?
-    var onStopBridge: (() -> Void)?
-
-    /// What the bridge is doing, in the app's own words, and whether each button applies. Supplied by
-    /// the app from the supervisor's state - this window never asks a process anything.
+    /// What the bridge is doing, in the app's own words. Supplied by the app from the supervisor's
+    /// state - this window never asks a process anything.
     var bridgeLine = ""
-    var bridgeCanStart = true
-    var bridgeCanStop = false
 
     /// **Settings mode: every field at once, reachable whenever somebody wants it.**
     ///
@@ -275,19 +268,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(addressEditor())
 
         stack.addArrangedSubview(caption("The bridge"))
+        // Said, not controlled: it runs while this app is open and an address exists, and a saved
+        // address restarts it. There is nothing here to press because there is nothing to decide.
         stack.addArrangedSubview(body(bridgeLine))
-        // Both buttons, always present, each enabled by what the bridge is actually doing. A single
-        // button that changes its verb makes somebody read it before every press.
-        let start = NSButton(title: "Start", target: self, action: #selector(startBridgeTapped))
-        start.bezelStyle = .rounded
-        start.isEnabled = bridgeCanStart
-        let stop = NSButton(title: "Stop", target: self, action: #selector(stopBridgeTapped))
-        stop.bezelStyle = .rounded
-        stop.isEnabled = bridgeCanStop
-        let buttons = NSStackView(views: [start, stop, recheckButton("Look again")])
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        stack.addArrangedSubview(buttons)
+        stack.addArrangedSubview(recheckButton("Look again"))
 
         stack.addArrangedSubview(caption("Your phone"))
         if let address = onboarding.address {
@@ -498,8 +482,6 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }
     @objc private func showCodeTapped() { onShowPairingCode?() }
-    @objc private func startBridgeTapped() { onStartBridge?() }
-    @objc private func stopBridgeTapped() { onStopBridge?() }
     @objc private func recheckTapped() { onRecheck?() }
 
     /// Walks past step 1. Nothing is stored and nothing is claimed about agterm — the pane simply

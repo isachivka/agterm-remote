@@ -43,8 +43,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         //
         // `.unpair` likewise: the menu only carries the item when the bridge reports a phone, so an
         // action that cannot apply is absent rather than lit.
-        var actions: Set<MenuAction> = [.quit, .setUp, .startAtLogin, .pairPhone, .unpair]
-        if bridge != nil { actions.formUnion([.startBridge, .stopBridge]) }
+        let actions: Set<MenuAction> = [.quit, .setUp, .startAtLogin, .pairPhone, .unpair]
         return actions
     }
 
@@ -294,14 +293,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             onboarding.show(again, field: AddressField(AddressPreference.read()))
             rebuildMenu()
         }
-        onboarding.onStartBridge = { [weak self] in
-            self?.startBridge()
-            self?.refreshTheSettingsPane()
-        }
-        onboarding.onStopBridge = { [weak self] in
-            self?.stopBridge()
-            self?.refreshTheSettingsPane()
-        }
         describeTheBridge(to: onboarding)
         if asSettings {
             onboarding.showSettings(now, field: AddressField(AddressPreference.read()))
@@ -314,11 +305,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func describeTheBridge(to window: OnboardingWindow) {
         let state = bridge?.state ?? .stopped
         window.bridgeLine = BridgeReport.tooltip(for: state, failure: failure)
-        // The same rule the menu uses, for the same reason: a start racing an exit that has not
-        // landed, and a second stop signalling a pid already being killed.
-        let inFlight = state != .stopped && !state.hasFailed
-        window.bridgeCanStart = bridge != nil && !inFlight
-        window.bridgeCanStop = bridge != nil && inFlight && state != .stopping
     }
 
     /// Redraw the settings pane after something it describes has changed. Does nothing when it is
@@ -687,26 +673,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         onboarding.reportOnAddress(sentence)
     }
 
-    /// **Stop, with the cost said BEFORE the press takes effect.**
-    ///
-    /// Stopping cuts any phone connected through the bridge, and nothing brings it back: there is no
-    /// supervisor above this app and no job anywhere that outlives it. The Start item is the only way
-    /// back. The owner confirms that sentence first — afterwards would be an apology, not a warning.
-    @objc private func stopBridge() {
-        guard let bridge else { return }
-        let confirm = NSAlert()
-        confirm.messageText = "Stop the bridge?"
-        confirm.informativeText =
-            "Any phone connected through it drops immediately. It stays down until you start it from "
-                + "this menu, or until you next open this app."
-        confirm.addButton(withTitle: "Stop it")
-        confirm.addButton(withTitle: "Cancel")
-        confirm.alertStyle = .warning
-        NSApp.activate(ignoringOtherApps: true)
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
-
-        bridge.stop()
-    }
 
     /// **A running bridge is holding the old answer, so it is put down and picked up again.**
     ///
@@ -734,7 +700,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     ///
     /// Without a stored address there is no port and nothing to bind, so the owner is sent to the
     /// screen that fixes that instead of being shown a failure.
-    @objc private func startBridge() {
+    private func startBridge() {
         guard let bridge else { return }
         guard case .success(let address) = AddressPreference.read() else {
             notify(
@@ -1057,14 +1023,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         case .pairPhone: #selector(pairPhone)
         case .unpair: #selector(unpairPhone)
         case .startAtLogin: #selector(toggleStartAtLogin)
-        // Wired only when there is a bridge binary to run. This is the same condition `implemented`
-        // uses and it has to be, because the assertion below holds them to each other: an item with a
-        // handler must be offered, and an item with none must not be lit.
-        case .startBridge: bridge == nil ? nil : #selector(startBridge)
-        case .stopBridge: bridge == nil ? nil : #selector(stopBridge)
-        // Not yet built. They are ABSENT from `implemented`, so they are also not enabled - a menu
-        // item that looks pressable and is not is the defect the owner met on 2026-08-10.
-        default: nil
         }
     }
 

@@ -62,55 +62,18 @@ struct MenuModelTests {
         }
     }
 
-    // MARK: - The four bridge states, including the two nothing asserted
+    // MARK: - The bridge is not something the menu asks about
 
-    /// **`.starting` is not running, and Stop must work on it.** A bridge that was spawned and has not
-    /// announced a listener is exactly what somebody wants to call off — a frozen binary sits in this
-    /// state for the whole ten-second ceiling.
-    @Test func startingOffersStopAndNotStart() {
-        let items = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: .starting)
-
-        #expect(items.first { $0.action == .startBridge }?.enabled == false, "two bridges, one port")
-        #expect(items.first { $0.action == .stopBridge }?.enabled == true, "a start cannot be called off")
-    }
-
-    /// **`.stopping` offers neither**, and that is the visible half of not blocking the main thread.
-    /// The kill is on its way and takes up to twice the grace period; a second Stop signals a pid that
-    /// is already being killed, and a Start in that window races the exit that has not landed yet.
-    @Test func stoppingOffersNeitherStartNorStop() {
-        let items = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopping)
-
-        #expect(items.first { $0.action == .startBridge }?.enabled == false)
-        #expect(items.first { $0.action == .stopBridge }?.enabled == false)
-        #expect(items.first { $0.action == .restartBridge }?.enabled == false)
-    }
-
-    /// The title says so too. A greyed item with the same words as a live one tells somebody the app
-    /// has hung; the word is what says the machine is mid-way through what they asked for.
-    @Test func stoppingSaysSoInTheTitle() {
-        let items = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopping)
-
-        #expect(items.first { $0.action == .stopBridge }?.title.lowercased().contains("stopping") == true)
-    }
-
-    @Test func runningOffersStopAndStoppedOffersStart() {
-        let up = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: .running(pid: 1))
-        let down = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopped)
-
-        #expect(up.first { $0.action == .startBridge }?.enabled == false)
-        #expect(up.first { $0.action == .stopBridge }?.enabled == true)
-        #expect(down.first { $0.action == .startBridge }?.enabled == true)
-        #expect(down.first { $0.action == .stopBridge }?.enabled == false)
-    }
-
-    /// A bridge that gave up can be started again. Pressing Start after a failure is a fresh five —
-    /// the owner has just done something about the port or the binary.
-    @Test func aFailedBridgeCanBeStartedAgain() {
-        let items = MenuModel.items(
-            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .failed("address already in use"))
-
-        #expect(items.first { $0.action == .startBridge }?.enabled == true)
-        #expect(items.first { $0.action == .stopBridge }?.enabled == false)
+    /// **No bridge control in any state.** It runs while the app is open and an address exists; the
+    /// three items that used to manage it were three ways to end up with a code and nothing
+    /// listening behind it. Every state still renders the same menu - see the test below.
+    @Test func noStateOffersABridgeControl() {
+        for state in [BridgeState.stopped, .starting, .running(pid: 1), .stopping, .failed("port")] {
+            let titles = MenuModel.items(paired: [], hasAddress: true, launchesAtLogin: false, bridge: state)
+                .map { $0.title.lowercased() }
+            #expect(!titles.contains { $0.contains("start the bridge") || $0.contains("stop") || $0.contains("restart") },
+                    "\(state) offered a bridge control")
+        }
     }
 
     /// Every bridge state renders a whole menu. A state that drops an item is the other way to make a
