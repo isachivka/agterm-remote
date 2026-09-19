@@ -97,149 +97,15 @@ final class PairingWindow: NSObject, NSWindowDelegate {
 
     // MARK: - The states
 
+    /// The one rendering, shared with the setup window's last pane.
+    private lazy var panel: PairingPanelView = {
+        let panel = PairingPanelView()
+        panel.onAskForAnotherCode = { [weak self] in self?.onAskForAnotherCode?() }
+        panel.onDone = { [weak self] in self?.close() }
+        return panel
+    }()
+
     private func view(for state: PairingPanelState) -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-
-        stack.addArrangedSubview(caption("This phone will connect to"))
-        stack.addArrangedSubview(addressLabel(address))
-
-        switch state {
-        case .closed:
-            // Reachable only for the instant between a dismissal and the window going away. It says
-            // the ordinary thing rather than rendering an empty rectangle.
-            stack.addArrangedSubview(heading("No code is on screen"))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
-
-        case .asking:
-            // Normally a millisecond. It is a state rather than a blank rectangle because the socket
-            // call is off the main thread now, and against a bridge that accepts and then stalls this
-            // is what is on screen for the client's whole timeout.
-            stack.addArrangedSubview(heading("Asking the bridge for a code"))
-            stack.addArrangedSubview(body(state.sentence ?? ""))
-
-        case .showing(let payload, let expiresAt):
-            stack.addArrangedSubview(code(for: payload))
-            stack.addArrangedSubview(
-                body("Point the phone at this code. Check the address above matches what the phone "
-                    + "shows before you confirm — the fingerprint is the same in every code this "
-                    + "laptop makes, so the address is the part that can be wrong."))
-            stack.addArrangedSubview(caption("This code stops working at \(Self.clock(expiresAt))"))
-            // **The paste fallback, and it is the same string the picture carries.** A camera that
-            // will not read the code is the failure this exists for, and a second encoding of the
-            // payload would be a second thing to go wrong.
-            stack.addArrangedSubview(caption("If the camera will not read it, type or paste this instead"))
-            stack.addArrangedSubview(payloadField(payload))
-
-        case .expired, .refused, .withdrawn:
-            stack.addArrangedSubview(heading("That code no longer works"))
-            stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
-
-        case .paired(_, _):
-            stack.addArrangedSubview(heading("Paired"))
-            stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Done", #selector(done)))
-
-        case .unavailable:
-            stack.addArrangedSubview(heading("There is no code"))
-            stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
-        }
-
-        if let warning {
-            stack.addArrangedSubview(caption("What the bridge saw"))
-            stack.addArrangedSubview(body(warning))
-        }
-
-        return stack
-    }
-
-    @objc private func askForAnotherCode() { onAskForAnotherCode?() }
-
-    @objc private func done() { close() }
-
-    /// The expiry as a wall clock, not as a countdown. A number ticking down on a screen is something
-    /// people watch instead of holding up their phone; an instant is something they can compare with
-    /// the clock in the corner and forget about.
-    private static func clock(_ instant: Date) -> String {
-        instant.formatted(date: .omitted, time: .shortened)
-    }
-
-    // MARK: - Pieces
-
-    private func heading(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.font = .boldSystemFont(ofSize: 15)
-        return field
-    }
-
-    private func caption(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.font = .systemFont(ofSize: 11)
-        field.textColor = .secondaryLabelColor
-        return field
-    }
-
-    /// Monospaced and selectable, and **never truncated**: `example.invalid` and
-    /// `agterm.example.invalid` are one label apart and one is a suffix of the other, so an ellipsis
-    /// in the wrong place turns two destinations into the same string.
-    private func addressLabel(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-        field.isSelectable = true
-        field.lineBreakMode = .byWordWrapping
-        field.maximumNumberOfLines = 3
-        field.preferredMaxLayoutWidth = 420
-        return field
-    }
-
-    private func body(_ text: String) -> NSTextField {
-        let field = NSTextField(wrappingLabelWithString: text)
-        field.font = .systemFont(ofSize: 12)
-        field.textColor = .secondaryLabelColor
-        field.preferredMaxLayoutWidth = 420
-        return field
-    }
-
-    private func button(_ title: String, _ action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
-        return button
-    }
-
-    /// The payload as text, selectable and wrapped. Not truncated and not shortened: it is the whole
-    /// of what the picture carries, and a middle-elided version of it is not a code.
-    private func payloadField(_ payload: String) -> NSTextField {
-        let field = NSTextField(wrappingLabelWithString: payload)
-        field.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        field.isSelectable = true
-        field.preferredMaxLayoutWidth = 420
-        return field
-    }
-
-    /// The code, big enough to scan from a phone held in front of the screen.
-    ///
-    /// If the payload cannot be drawn the window says so rather than showing an empty square — a blank
-    /// where a code should be is the worst of both: it looks like it worked and cannot be scanned.
-    private func code(for payload: String) -> NSView {
-        guard let rendered = QRRender.image(for: payload, size: 380) else {
-            return body("The bridge sent a code this app could not draw. The text below is the same "
-                + "code; the phone will accept it typed or pasted.")
-        }
-        let image = NSImage(cgImage: rendered, size: NSSize(width: 380, height: 380))
-        let view = NSImageView(image: image)
-        // Never interpolated. The modules are whole pixels and smoothing them is how a code becomes
-        // one a camera reads slowly or not at all.
-        view.imageScaling = .scaleNone
-        view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: 380),
-            view.heightAnchor.constraint(equalToConstant: 380),
-        ])
-        return view
+        panel.make(state: state, address: address, warning: warning)
     }
 }

@@ -77,6 +77,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func panelChanged(to state: PairingPanelState) {
         pairing.warning = panel.warning
         pairing.refreshIfOpen(state)
+        onboarding.refreshCodeIfShowing(state, warning: panel.warning)
         // A phone that walked through the window has proven the address it dialled. This is the
         // moment that fact becomes true, and the menu says it.
         if case .paired = state {
@@ -288,18 +289,44 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             self?.restartTheBridgeIfItIsRunning()
         }
         onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }
+        onboarding.onAskForAnotherCode = { [weak self] in self?.askForACode() }
+        // The enrolment window at the bridge must not outlive the pane that opened it - unless the
+        // separate pairing window is also up and holding the same code.
+        onboarding.onClose = { [weak self] wasShowingCode in
+            guard let self, wasShowingCode, !pairing.isOpen else { return }
+            closePairing()
+        }
         onboarding.onRecheck = { [weak self] in
             guard let self else { return }
-            let again = onboardingNow()
-            onboarding.show(again, field: AddressField(AddressPreference.read()))
+            showOnboardingPane(onboardingNow(), field: AddressField(AddressPreference.read()))
             rebuildMenu()
         }
         describeTheBridge(to: onboarding)
         if asSettings {
             onboarding.showSettings(now, field: AddressField(AddressPreference.read()))
         } else {
-            onboarding.show(now, field: AddressField(AddressPreference.read()))
+            showOnboardingPane(now, field: AddressField(AddressPreference.read()))
         }
+    }
+
+    /// Show a pane of the ladder - and if it is the last one, put a code on it.
+    ///
+    /// The mint happens here rather than inside the window because only the app can start the
+    /// bridge, open the enrolment window and run the clock that takes a dead code off the screen.
+    /// A code already up is left alone: "Look again" must not spend a fresh window on every press.
+    private func showOnboardingPane(_ now: Onboarding, field: AddressField) {
+        onboarding.show(now, field: field)
+        guard onboarding.showsCode else { return }
+        if !panel.state.isShowingACode { askForACode() }
+        startThePanelClock()
+    }
+
+    /// Draw the panel's state wherever the code is being shown: the setup pane, the pairing window,
+    /// or both.
+    private func drawPanel(_ state: PairingPanelState) {
+        if pairing.isOpen { pairing.show(state) }
+        onboarding.refreshCodeIfShowing(state, warning: panel.warning)
+        if !pairing.isOpen, !onboarding.showsCode { pairing.show(state) }
     }
 
     /// What the settings pane says about the bridge, from the supervisor's own state.
@@ -458,7 +485,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func askForACode() {
         guard let bridge, bridge.state == .stopped || bridge.state.hasFailed else { return mintACode() }
         codeIsWaitingForTheBridge = true
-        pairing.show(.unavailable("Starting the bridge, then asking it for a code…"))
+        drawPanel(.unavailable("Starting the bridge, then asking it for a code…"))
         startBridge()
     }
 
@@ -481,7 +508,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // proxy in front of this Mac while the bridge is running, and the bridge is not restarted
         // when they do.
         panel.open(advertising: address, frontDoor: AddressPreference.frontDoor())
-        pairing.show(panel.state)
+        drawPanel(panel.state)
     }
 
     /// **The panel's clock**, and it stops the moment there is nothing left to watch.
@@ -497,7 +524,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // The window may have gone since the last tick. Stopping the clock from the held
                 // reference rather than from the callback's own argument keeps this on the main actor,
                 // which is where every other line of this closure already is.
-                guard let self, self.pairing.isOpen else { return self?.stopThePanelClock() ?? () }
+                guard let self, self.pairing.isOpen || self.onboarding.showsCode else {
+                    return self?.stopThePanelClock() ?? ()
+                }
                 // Returns at once. The round trip is on the socket queue and the redraw arrives
                 // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
                 // nothing at all.
@@ -522,6 +551,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         lastWarning = now
         pairing.warning = now
         pairing.refreshIfOpen(panel.state)
+        onboarding.refreshCodeIfShowing(panel.state, warning: now)
     }
 
     private func stopThePanelClock() {
@@ -638,16 +668,17 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // The address they just typed may have been the second onboarding step, and a pane that
         // stayed on "type an address" after one was saved would be showing a state that has stopped
         // being true.
-        if onboarding.isOpen { onboarding.show(onboardingNow(), field: field) }
         // **A code on screen for an address that has just changed underneath it is worse than no
         // code**: it is scannable, it pairs, and it points the phone at the previous destination. The
-        // window it was minted against is closed and the panel goes back to offering a fresh one,
-        // rather than being left showing a picture of somewhere the owner no longer lives.
-        if case .saved(let address) = outcome, pairing.isOpen {
+        // window it was minted against is closed first, so that redrawing the ladder below mints a
+        // fresh one for the new address rather than keeping a picture of somewhere the owner no
+        // longer lives.
+        if case .saved(let address) = outcome {
             pairing.address = address.displayed
-            panel.close()
-            pairing.show(panel.state)
+            if panel.state.isShowingACode { panel.close() }
+            if pairing.isOpen { pairing.show(panel.state) }
         }
+        if onboarding.isOpen { showOnboardingPane(onboardingNow(), field: field) }
         // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
         // port it names and advertises what the phone will dial, and a bridge already up is holding
         // the previous answer to both.

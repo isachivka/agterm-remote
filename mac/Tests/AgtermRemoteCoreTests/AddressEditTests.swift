@@ -54,6 +54,7 @@ struct AddressEditTests {
         for refusal: AddressEdit.Refusal in [
             .blank, .hasWhitespace, .looksLikeAURL("x"), .noPort("x.invalid"), .portNotANumber("x"),
             .portOutOfRange(0), .ambiguousWithoutBrackets("a:b:c"), .unclosedBracket("[x"),
+            .hostHasForbiddenCharacter(host: "x\u{416}", character: "\u{416}"),
         ] {
             #expect(!AddressEdit.isConfirmable(refusal), "\(refusal) can be typed around")
         }
@@ -152,6 +153,11 @@ struct AddressEditTests {
         #expect(why.explanation.contains("host:port"), "it does not say what shape to type")
     }
 
+    @Test func aWrongLayoutColonIsRefusedThroughTheEditorToo() throws {
+        #expect(try refusal("agterm.example-homelab.invalid\u{416}:8443")
+            == .hostHasForbiddenCharacter(host: "agterm.example-homelab.invalid\u{416}", character: "\u{416}"))
+    }
+
     @Test func aPortThatIsNotAPortIsRefusedByName() throws {
         #expect(try refusal("agterm.example-homelab.invalid:eight") == .portNotANumber("eight"))
         #expect(try refusal("agterm.example-homelab.invalid:0") == .portOutOfRange(0))
@@ -164,6 +170,7 @@ struct AddressEditTests {
         let refusals: [AddressEdit.Refusal] = [
             .blank, .hasWhitespace, .looksLikeAURL("x"), .bareSuffix("x.invalid"), .noPort("x.invalid"),
             .portNotANumber("x"), .portOutOfRange(0), .ambiguousWithoutBrackets("a:b:c"), .unclosedBracket("[x"),
+            .hostHasForbiddenCharacter(host: "x\u{416}", character: "\u{416}"),
         ]
 
         for refusal in refusals {

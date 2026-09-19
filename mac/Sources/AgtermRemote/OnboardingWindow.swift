@@ -41,6 +41,39 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// enrolment. Nothing here reaches the network. See the note on the address pane.
     var onRecheck: (() -> Void)?
 
+    /// Ask the bridge for a code, or for another one. The app decides how - starting the bridge
+    /// first if it is down - and hands the result back through [refreshCodeIfShowing].
+    var onAskForAnotherCode: (() -> Void)?
+
+    /// Told when the window goes away, with whether it was showing a code at the time - because an
+    /// enrolment window at the bridge must not outlive the pane that opened it.
+    var onClose: ((_ wasShowingCode: Bool) -> Void)?
+
+    /// The code and what happened to it, drawn on the last pane. Supplied by the app from the panel
+    /// model; this window never talks to the bridge.
+    var panelState: PairingPanelState = .closed
+    var panelWarning: String?
+
+    /// True while the last pane - the one with the code on it - is what is on screen.
+    var showsCode: Bool { isOpen && !settingsMode && lastPane == .pairing }
+    private var lastPane: OnboardingStep = .agtermMissing
+
+    /// Redraw the code pane with what the panel now says. Does nothing when that pane is not up: a
+    /// timer that could conjure a window would put a code on screen after the owner closed it.
+    func refreshCodeIfShowing(_ state: PairingPanelState, warning: String?) {
+        guard showsCode else { return }
+        panelState = state
+        panelWarning = warning
+        show(current, field: field)
+    }
+
+    private lazy var codePanel: PairingPanelView = {
+        let panel = PairingPanelView()
+        panel.onAskForAnotherCode = { [weak self] in self?.onAskForAnotherCode?() }
+        panel.onDone = { [weak self] in self?.close() }
+        return panel
+    }()
+
     /// What the bridge is doing, in the app's own words. Supplied by the app from the supervisor's
     /// state - this window never asks a process anything.
     var bridgeLine = ""
@@ -97,6 +130,7 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         self.field = field
         current = onboarding
         let pane = self.pane(for: onboarding)
+        lastPane = pane
         let window = self.window ?? make()
         window.contentView = view(for: onboarding, pane: pane)
         window.title = settingsMode ? "Agterm Remote Settings" : "Set up Agterm Remote"
@@ -140,10 +174,13 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_: Notification) {
+        let wasShowingCode = showsCode
         window = nil
         // Closing ends settings mode, so the next automatic open is the ladder again if the ladder is
         // what the facts call for.
         settingsMode = false
+        panelState = .closed
+        onClose?(wasShowingCode)
     }
 
     // MARK: - The panes
@@ -289,35 +326,31 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
                 : "agterm is not running. The bridge shows no sessions until it is."))
     }
 
-    /// **Step 3. The code, and the warning that rides on it.**
+    /// **Step 3. The code itself, and the warning that rides on it.**
+    ///
+    /// The code is drawn here, not behind a button. This pane used to be a heading promising a code,
+    /// three paragraphs, and a button that opened a second window - on the grounds that minting a code
+    /// opens a five-minute enrolment window and should not happen by navigation. But somebody on the
+    /// last pane of setup is standing there to pair a phone; the window opening at that moment is
+    /// exactly what they came for. The first person to reach this pane asked why the code was not
+    /// simply on it, and there was no good answer.
+    ///
+    /// The way back is here too. Setup used to be a one-way ladder: an address with a wrong-layout
+    /// letter in it reached this pane and could not be corrected from anywhere in the app.
     private func pairingPane(into stack: NSStackView, address: Address?) {
-        stack.addArrangedSubview(heading("Show the code, then scan it with your phone"))
-        if let address {
-            stack.addArrangedSubview(caption("Your phone will connect to"))
-            stack.addArrangedSubview(addressLabel(address.dial.displayed))
-        }
+        stack.addArrangedSubview(heading("Scan this code with your phone"))
         stack.addArrangedSubview(
-            body("The code carries this address and this Mac's certificate. Check that what the phone "
-                + "shows matches the address above before you confirm on the phone — every code this "
+            body("The code carries the address below and this Mac's certificate. Check that what the "
+                + "phone shows matches this address before you confirm on the phone - every code this "
                 + "Mac makes carries the same fingerprint, so the address is the part that can be "
-                + "wrong."))
+                + "wrong. Until a phone comes through, the address is unproven; the scan is what "
+                + "proves it."))
         stack.addArrangedSubview(
-            body("Until a phone comes through, this address is unproven: nothing on this Mac can tell "
-                + "you whether it reaches you from outside. The scan is what proves it."))
-        // **Why the code is not already on this screen.** Showing it is not a display decision: it
-        // mints a single-use token and opens a five-minute window during which a phone with no
-        // certificate can enrol. A pane that opened that window merely by being navigated to would
-        // leave it open on every setup somebody walked away from. So it is minted when it is asked
-        // for - and the heading now says so, because the first person to reach this pane read
-        // "Scan the code" and looked for a code that was deliberately not there yet.
-        stack.addArrangedSubview(
-            body("The code appears when you ask for it: showing it opens a five-minute window during "
-                + "which a phone can pair, so it is not left sitting on this screen."))
+            codePanel.make(state: panelState, address: address?.dial.displayed ?? "", warning: panelWarning))
 
-        let show = NSButton(title: "Show the code…", target: self, action: #selector(showCodeTapped))
-        show.bezelStyle = .rounded
-        show.keyEquivalent = "\r"
-        let row = NSStackView(views: [show, recheckButton("Look again")])
+        let change = NSButton(title: "Change the address…", target: self, action: #selector(changeAddressTapped))
+        change.bezelStyle = .rounded
+        let row = NSStackView(views: [change, recheckButton("Look again")])
         row.orientation = .horizontal
         row.spacing = 8
         stack.addArrangedSubview(row)
@@ -482,6 +515,13 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }
     @objc private func showCodeTapped() { onShowPairingCode?() }
+
+    /// Back to the fields, on the settings pane, with everything editable. The code pane is rebuilt
+    /// when they return.
+    @objc private func changeAddressTapped() {
+        settingsMode = true
+        show(current, field: field)
+    }
     @objc private func recheckTapped() { onRecheck?() }
 
     /// Walks past step 1. Nothing is stored and nothing is claimed about agterm — the pane simply

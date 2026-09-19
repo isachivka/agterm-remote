@@ -214,6 +214,11 @@ class PairingAddressTest {
             // same row.
             "agterm.example-homelab.invalid:99999999999999" to AddressRefusal.PortOutOfRange,
             "agterm.example-homelab.invalid:99999999999999999999999999" to AddressRefusal.PortNotANumber,
+            // A colon typed in a Cyrillic layout, which is the letter Zhe: the first real setup did
+            // exactly this. Escaped because the repository refuses Cyrillic in source, deliberately.
+            "agterm.example-homelab.invalid\u0416:8443" to AddressRefusal.HostHasForbiddenCharacter,
+            "caf\u00E9.invalid:8443" to AddressRefusal.HostHasForbiddenCharacter,
+            "a_b.invalid:8443" to AddressRefusal.HostHasForbiddenCharacter,
             // The commonest paste there is, and it has more than one colon - so without its own case
             // it was answered with the sentence about IPv6 brackets.
             "https://agterm.example-homelab.invalid:8443" to AddressRefusal.LooksLikeAUrl,

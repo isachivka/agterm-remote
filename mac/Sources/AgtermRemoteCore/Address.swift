@@ -22,6 +22,8 @@ public enum AddressError: Error, Equatable, Sendable {
     /// A port with nothing in front of it — `:8443`. Its own case because the string is not empty:
     /// the person typed something, and being told otherwise is a sentence they can see is wrong.
     case hostMissing
+    /// A character no host name can contain — a wrong-layout letter where the colon was meant to go.
+    case badHost
 }
 
 /// The address a phone dials, and — separately, and this is the whole point of the type — the address
@@ -86,6 +88,7 @@ public struct Address: Equatable, Sendable {
             // sentence, at the moment somebody is typing.
             case .noPort, .ambiguousWithoutBrackets, .unclosedBracket: .noPort
             case .portNotANumber, .portOutOfRange: .badPort
+            case .hostHasForbiddenCharacter: .badHost
             }
             return .failure(error)
         }
