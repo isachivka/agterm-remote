@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/isachivka/agterm-remote/compare/v0.2.0...v0.3.0) (2026-09-19)
+
+
+### Features
+
+* the bridge names the one misconfiguration it can see ([#83](https://github.com/isachivka/agterm-remote/issues/83)) ([a00de39](https://github.com/isachivka/agterm-remote/commit/a00de39fd0d577943b091fc24566196236a69012))
+
+
+### Bug Fixes
+
+* **mac:** setup ends with a code, not with an errand ([#81](https://github.com/isachivka/agterm-remote/issues/81)) ([3512fe0](https://github.com/isachivka/agterm-remote/commit/3512fe031341b762bc56fe1eb1d642ba6fbe17ed))
+
 ## [0.2.0](https://github.com/isachivka/agterm-remote/compare/v0.1.0...v0.2.0) (2026-09-18)
 
 
