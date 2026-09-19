@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/isachivka/agterm-remote/compare/v0.5.0...v0.5.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* the two silent dead ends the first whole-repository review found, and eight smaller things ([#93](https://github.com/isachivka/agterm-remote/issues/93)) ([f106475](https://github.com/isachivka/agterm-remote/commit/f106475d144923a56e7530e4dcf01530e677e617))
+
 ## [0.5.0](https://github.com/isachivka/agterm-remote/compare/v0.4.0...v0.5.0) (2026-09-19)
 
 

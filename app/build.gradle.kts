@@ -12,7 +12,7 @@ import java.util.Base64
 // It arrived from the private repository reading 0.34.0, which was that project's version and not
 // this one's. This repository's .release-please-manifest.json says 0.1.0, and the two must agree or
 // the first release here would be a downgrade on any phone that had installed a build of this tree.
-val appVersionName = "0.5.0" // x-release-please-version
+val appVersionName = "0.5.1" // x-release-please-version
 
 // Release signing material, resolved once from the environment.
 // null on an ordinary local build, which is left completely unsigned and unaffected.
