@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/isachivka/agterm-remote/compare/v0.3.1...v0.3.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* the code is on the last pane, the address can be changed, and a wrong-layout colon is refused ([#86](https://github.com/isachivka/agterm-remote/issues/86)) ([8e173c6](https://github.com/isachivka/agterm-remote/commit/8e173c6f6d8887bc58a62c059dd72bb9bb1e8cd7))
+
 ## [0.3.1](https://github.com/isachivka/agterm-remote/compare/v0.3.0...v0.3.1) (2026-09-19)
 
 
