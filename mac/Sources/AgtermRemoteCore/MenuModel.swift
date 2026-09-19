@@ -23,9 +23,6 @@ public enum MenuAction: String, CaseIterable, Sendable {
     /// box; the address now lives in the setup window with the explanation of what it is for, so the
     /// item is named for where it goes.
     case setUp
-    case startBridge
-    case stopBridge
-    case restartBridge
     case startAtLogin
     case quit
 }
@@ -127,15 +124,6 @@ public struct MenuModel: Sendable {
     private static func stateItems(
         paired: [PairedPhone], hasAddress: Bool, launchesAtLogin: Bool, bridge: BridgeState,
     ) -> [MenuItem] {
-        // **Three questions, and two of them were one bool.** Whether the bridge is up decides the
-        // glyph; whether something is up OR on its way decides whether Stop can be pressed; and
-        // whether a stop is already in flight decides whether ANYTHING about the bridge can be. That
-        // last one arrived with `.stopping`: the kill escalates and can take twice the grace period,
-        // and during it a second Stop signals a pid that is already being killed while a Start races
-        // an exit that has not landed.
-        let inFlight = bridge != .stopped && !bridge.hasFailed
-        let stopping = bridge == .stopping
-
         var items: [MenuItem] = [
             // Needs an address to encode. Offering it without one would mint a code for nothing.
             MenuItem(action: .pairPhone, title: "Pair a phone…", enabled: hasAddress),
@@ -150,20 +138,12 @@ public struct MenuModel: Sendable {
         items += [
             // ALWAYS available: it is the only way out of first run, and the only way to correct a
             // wrong address - which is the failure this whole app exists to make visible.
-            MenuItem(action: .setUp, title: "Set up…", enabled: true),
-            MenuItem(action: .startBridge, title: "Start the bridge", enabled: !inFlight),
-            MenuItem(
-                action: .stopBridge,
-                // The title says which of the two it is. A greyed *Stop the bridge* during a stop
-                // reads as an app that has hung; the word is what says the machine is part-way
-                // through what was asked of it.
-                title: stopping ? "Stopping the bridge…" : "Stop the bridge",
-                enabled: inFlight && !stopping,
-            ),
-            // Enabled even when it is down, because "restart" on a stopped bridge is "start it", and a
-            // pin without a restart pins nothing - main.go reads phone-cert.pem once at startup. Not
-            // during a stop, for the same reason Start is not: the child is on its way out.
-            MenuItem(action: .restartBridge, title: "Restart the bridge", enabled: !stopping),
+            MenuItem(action: .setUp, title: "Settings…", enabled: true),
+            // **No Start, no Stop, no Restart.** The bridge runs for as long as this app is open and
+            // an address exists - see `runTheBridge` in main.swift. Three items that asked the owner
+            // to manage a process were three ways to end up with a pairing code and nothing listening
+            // behind it, and the first install did exactly that. What the bridge is doing is still
+            // said, in the glyph, the tooltip and the settings pane; it is just not asked about.
             // The two titles are named constants rather than a ternary of string literals, and that
             // is not style. Written inline, the second literal would sit immediately after a colon
             // that follows the word this menu item is about - and scripts/check-no-credentials.sh

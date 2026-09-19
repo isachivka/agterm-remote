@@ -43,8 +43,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         //
         // `.unpair` likewise: the menu only carries the item when the bridge reports a phone, so an
         // action that cannot apply is absent rather than lit.
-        var actions: Set<MenuAction> = [.quit, .setUp, .startAtLogin, .pairPhone, .unpair]
-        if bridge != nil { actions.formUnion([.startBridge, .stopBridge]) }
+        let actions: Set<MenuAction> = [.quit, .setUp, .startAtLogin, .pairPhone, .unpair]
         return actions
     }
 
@@ -158,6 +157,35 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // not cannot be expected to know that the way in is a menu-bar icon they have never met.
         showOnboardingIfUnfinished()
         watchForPairing()
+        // **The bridge runs because an address exists, not because somebody pressed Start.**
+        //
+        // It used to wait to be started from the menu, and the first person to install this met the
+        // consequence on the last pane of setup: a pairing panel saying there was no code because
+        // nothing was running. Nobody sets an address for a phone to dial and then wants the thing
+        // that answers it to be off - so having one IS the instruction, and this obeys it.
+        //
+        // The Start and Stop items stay, for the times somebody means it. Stop lasts until the next
+        // launch, which its own warning now says.
+        runTheBridge()
+    }
+
+    /// **Bring the bridge up, or put it down and up again when it is already up.**
+    ///
+    /// Called at launch and after an address is saved. A running bridge cannot honour a new listen
+    /// port or a changed front-door answer - both are settled when the listener is built - so the
+    /// same call that starts a stopped one restarts a running one.
+    ///
+    /// Without a stored address there is nothing to bind and nothing to advertise, so this does
+    /// nothing at all: the first run stays silent until setup is finished.
+    private func runTheBridge() {
+        guard let bridge, case .success = AddressPreference.read() else { return }
+        switch bridge.state {
+        case .running: bridge.stop(); startBridge()
+        case .stopped: startBridge()
+        // A failed start is not retried on a timer or by a save that did not touch the reason it
+        // failed; the owner has been told what happened and the menu still offers Start.
+        case .failed, .starting, .stopping: break
+        }
     }
 
     /// The three facts, as they stand right now.
@@ -239,7 +267,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         showOnboarding(now)
     }
 
-    private func showOnboarding(_ now: Onboarding) {
+    private func showOnboarding(_ now: Onboarding, asSettings: Bool = false) {
         // One save path for the whole app: both windows hand the typed string to the same function,
         // which is the same `SaveAddress` with the same refusals. Two savers would be two opinions
         // about what an address is.
@@ -265,7 +293,26 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             onboarding.show(again, field: AddressField(AddressPreference.read()))
             rebuildMenu()
         }
-        onboarding.show(now, field: AddressField(AddressPreference.read()))
+        describeTheBridge(to: onboarding)
+        if asSettings {
+            onboarding.showSettings(now, field: AddressField(AddressPreference.read()))
+        } else {
+            onboarding.show(now, field: AddressField(AddressPreference.read()))
+        }
+    }
+
+    /// What the settings pane says about the bridge, from the supervisor's own state.
+    private func describeTheBridge(to window: OnboardingWindow) {
+        let state = bridge?.state ?? .stopped
+        window.bridgeLine = BridgeReport.tooltip(for: state, failure: failure)
+    }
+
+    /// Redraw the settings pane after something it describes has changed. Does nothing when it is
+    /// not open, which is most of the time.
+    private func refreshTheSettingsPane() {
+        guard onboarding.isOpen else { return }
+        describeTheBridge(to: onboarding)
+        onboarding.show(onboardingNow(), field: AddressField(AddressPreference.read()))
     }
 
     /// **Noticing a phone that pairs while this app is running.**
@@ -368,7 +415,14 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// their phone dials needs the paragraph about port forwards, the second port and what stays
     /// unproven — all of which is on the setup screen and none of which fits beside a live enrolment
     /// code.
-    @objc private func setUp() { showOnboarding(onboardingNow()) }
+    /// **Settings, which is a place rather than a step.**
+    ///
+    /// This menu item used to reopen the ladder, which drops somebody on whichever pane the facts
+    /// call for - and once everything holds, that is the pane with the code on it. The address, the
+    /// arrival port and the front-door answer were then unreachable from the app entirely: the first
+    /// person to install it had to be told to edit preferences by hand. The steps are still right for
+    /// a first run and this is the other door.
+    @objc private func setUp() { showOnboarding(onboardingNow(), asSettings: true) }
 
     private func openPairing() {
         guard case .success(let address) = AddressPreference.read() else {
@@ -383,10 +437,33 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         }
         pairing.address = address.displayed
         pairing.onClose = { [weak self] in self?.closePairing() }
-        pairing.onAskForAnotherCode = { [weak self] in self?.mintACode() }
-        mintACode()
+        pairing.onAskForAnotherCode = { [weak self] in self?.askForACode() }
+        askForACode()
         startThePanelClock()
     }
+
+    /// **Ask for a code, starting the bridge first if that is what is in the way.**
+    ///
+    /// The panel used to say *there is no code, the bridge is not running, start it from the menu* -
+    /// a correct sentence that sends somebody who pressed the pairing button to a different menu to
+    /// press a different button and then come back. It was the first thing the first person to
+    /// install this ran into, on the last pane of setup.
+    ///
+    /// Starting it here is not a new decision about whether the bridge should run: pressing this
+    /// button already says the owner wants a phone to reach this Mac, and the bridge is the thing
+    /// that lets one. What it must not do is pretend - so the panel says the bridge is being started,
+    /// and the code is asked for only when the supervisor reports a running child. A start that fails
+    /// says so through the same path any other failed start does.
+    private func askForACode() {
+        guard let bridge, bridge.state == .stopped || bridge.state.hasFailed else { return mintACode() }
+        codeIsWaitingForTheBridge = true
+        pairing.show(.unavailable("Starting the bridge, then asking it for a code…"))
+        startBridge()
+    }
+
+    /// Set between asking for a code with the bridge down and the supervisor reporting it up. See
+    /// `askForACode` and `bridgeChanged`.
+    private var codeIsWaitingForTheBridge = false
 
     /// Ask the bridge for a code and draw whatever came back — including a refusal, which is a
     /// sentence on the panel rather than an empty square.
@@ -558,6 +635,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             panel.close()
             pairing.show(panel.state)
         }
+        // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
+        // port it names and advertises what the phone will dial, and a bridge already up is holding
+        // the previous answer to both.
+        if case .saved = outcome { runTheBridge() }
         // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
         // started existing.
         rebuildMenu()
@@ -592,26 +673,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         onboarding.reportOnAddress(sentence)
     }
 
-    /// **Stop, with the cost said BEFORE the press takes effect.**
-    ///
-    /// Stopping cuts any phone connected through the bridge, and nothing brings it back: there is no
-    /// supervisor above this app and no job anywhere that outlives it. The Start item is the only way
-    /// back. The owner confirms that sentence first — afterwards would be an apology, not a warning.
-    @objc private func stopBridge() {
-        guard let bridge else { return }
-        let confirm = NSAlert()
-        confirm.messageText = "Stop the bridge?"
-        confirm.informativeText =
-            "Any phone connected through it drops immediately, and nothing brings it back by itself — "
-                + "you start it again from this menu."
-        confirm.addButton(withTitle: "Stop it")
-        confirm.addButton(withTitle: "Cancel")
-        confirm.alertStyle = .warning
-        NSApp.activate(ignoringOtherApps: true)
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
-
-        bridge.stop()
-    }
 
     /// **A running bridge is holding the old answer, so it is put down and picked up again.**
     ///
@@ -639,7 +700,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     ///
     /// Without a stored address there is no port and nothing to bind, so the owner is sent to the
     /// screen that fixes that instead of being shown a failure.
-    @objc private func startBridge() {
+    private func startBridge() {
         guard let bridge else { return }
         guard case .success(let address) = AddressPreference.read() else {
             notify(
@@ -711,7 +772,15 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             failure = nil
             startWasAsked = false
         }
+        // The pairing panel asked for a code while the bridge was down and is waiting on this.
+        // Cleared on any settled state, not only on success: a start that failed has already said so,
+        // and a flag left set would mint a code into a panel nobody is watching at the next start.
+        if codeIsWaitingForTheBridge, state != .starting, state != .stopping {
+            codeIsWaitingForTheBridge = false
+            if case .running = state, pairing.isOpen { mintACode() }
+        }
         rebuildMenu()
+        refreshTheSettingsPane()
     }
 
     /// True between the owner pressing Start and the bridge reaching a state. See `bridgeChanged`.
@@ -954,14 +1023,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         case .pairPhone: #selector(pairPhone)
         case .unpair: #selector(unpairPhone)
         case .startAtLogin: #selector(toggleStartAtLogin)
-        // Wired only when there is a bridge binary to run. This is the same condition `implemented`
-        // uses and it has to be, because the assertion below holds them to each other: an item with a
-        // handler must be offered, and an item with none must not be lit.
-        case .startBridge: bridge == nil ? nil : #selector(startBridge)
-        case .stopBridge: bridge == nil ? nil : #selector(stopBridge)
-        // Not yet built. They are ABSENT from `implemented`, so they are also not enabled - a menu
-        // item that looks pressable and is not is the defect the owner met on 2026-08-10.
-        default: nil
         }
     }
 

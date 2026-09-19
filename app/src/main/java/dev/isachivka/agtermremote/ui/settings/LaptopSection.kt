@@ -70,6 +70,7 @@ fun LaptopSection(
     settings: LaptopSettings,
     store: PairedLaptop,
     modifier: Modifier = Modifier,
+    onPaired: () -> Unit = {},
 ) {
     val laptop = settings.laptop
     if (laptop == null) {
@@ -83,7 +84,7 @@ fun LaptopSection(
             // irreversible acts in the application were the two that reported nothing.
             settings.note?.let { note -> Panel { Note(note) } }
             CameraBlockedNote()
-            PairingHost(store = store)
+            PairingHost(store = store, onPaired = onPaired)
         }
         return
     }

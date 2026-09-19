@@ -100,19 +100,4 @@ struct MenuReachabilityTests {
         #expect(items.first { $0.action == .pairPhone }?.enabled == false)
     }
 
-    /// Start and Stop are opposites; Restart is available either way, because a pin without a restart
-    /// pins nothing and "restart" on a stopped bridge is simply "start it".
-    @Test func startAndStopFollowTheBridgeAndRestartAlwaysWorks() {
-        let whenUp = MenuModel.items(
-            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .running(pid: 4242))
-        let whenDown = MenuModel.items(
-            paired: [], hasAddress: true, launchesAtLogin: false, bridge: .stopped)
-
-        #expect(whenUp.first { $0.action == .startBridge }?.enabled == false)
-        #expect(whenUp.first { $0.action == .stopBridge }?.enabled == true)
-        #expect(whenDown.first { $0.action == .startBridge }?.enabled == true)
-        #expect(whenDown.first { $0.action == .stopBridge }?.enabled == false)
-        #expect(whenUp.first { $0.action == .restartBridge }?.enabled == true)
-        #expect(whenDown.first { $0.action == .restartBridge }?.enabled == true)
-    }
 }
