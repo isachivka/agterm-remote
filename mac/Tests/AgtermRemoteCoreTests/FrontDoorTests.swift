@@ -91,14 +91,16 @@ import Testing
         #expect(!second.lowercased().contains("browser"))
     }
 
-    /// Absent means the simplest deployment, and an unreadable stored value means the same rather
-    /// than an error: it is the shape a downgrade leaves behind, and the remedy is identical.
-    @Test func anUnsetOrUnreadableChoiceIsTheSimplestDeployment() {
+    /// Absent means the answer that works in the most deployments - HTTPS both ways, which is what
+    /// two real setups behind a proxying router needed - and an unreadable stored value means the
+    /// same rather than an error: it is the shape a downgrade leaves behind, and the remedy is
+    /// identical.
+    @Test func anUnsetOrUnreadableChoiceIsTheAnswerThatWorksBehindARouter() {
         let defaults = UserDefaults(suiteName: "front-door-\(UUID().uuidString)")!
-        #expect(AddressPreference.frontDoor(from: defaults) == .direct)
+        #expect(AddressPreference.frontDoor(from: defaults) == .httpsBothWays)
 
         defaults.set("something a later version wrote", forKey: AddressPreference.frontDoorKey)
-        #expect(AddressPreference.frontDoor(from: defaults) == .direct)
+        #expect(AddressPreference.frontDoor(from: defaults) == .httpsBothWays)
     }
 
     @Test func theChoiceSurvivesBeingWrittenAndReadBack() {
