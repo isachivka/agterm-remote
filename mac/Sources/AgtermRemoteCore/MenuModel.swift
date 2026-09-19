@@ -150,7 +150,7 @@ public struct MenuModel: Sendable {
         items += [
             // ALWAYS available: it is the only way out of first run, and the only way to correct a
             // wrong address - which is the failure this whole app exists to make visible.
-            MenuItem(action: .setUp, title: "Set up…", enabled: true),
+            MenuItem(action: .setUp, title: "Settings…", enabled: true),
             MenuItem(action: .startBridge, title: "Start the bridge", enabled: !inFlight),
             MenuItem(
                 action: .stopBridge,

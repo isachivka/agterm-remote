@@ -41,6 +41,29 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// enrolment. Nothing here reaches the network. See the note on the address pane.
     var onRecheck: (() -> Void)?
 
+    /// Start and stop it from the settings pane. The menu keeps its own items; these are the same
+    /// two actions offered where somebody is already looking at what the bridge is doing.
+    var onStartBridge: (() -> Void)?
+    var onStopBridge: (() -> Void)?
+
+    /// What the bridge is doing, in the app's own words, and whether each button applies. Supplied by
+    /// the app from the supervisor's state - this window never asks a process anything.
+    var bridgeLine = ""
+    var bridgeCanStart = true
+    var bridgeCanStop = false
+
+    /// **Settings mode: every field at once, reachable whenever somebody wants it.**
+    ///
+    /// The ladder below is right for a first run and wrong forever after. Setting up through it once,
+    /// the first person to install this ended with an address, a wrong answer to the front-door
+    /// question and no way back to either: the pane that holds those boxes is passed on the way to the
+    /// code and never offered again. Correcting them meant editing preferences by hand.
+    ///
+    /// So the steps stay, for the run where they are true, and this is the other door: one pane with
+    /// the address, the arrival port, the front-door answer, the bridge and the code on it. Setup is a
+    /// sequence; settings are a place.
+    private var settingsMode = false
+
     private var field = AddressField()
     private var addressBox: NSTextField?
     private var portBox: NSTextField?
@@ -71,12 +94,19 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
     /// setup on the far side of it.
     private var pastAgterm = false
 
+    /// Open the settings pane, whatever the ladder thinks.
+    func showSettings(_ onboarding: Onboarding, field: AddressField) {
+        settingsMode = true
+        show(onboarding, field: field)
+    }
+
     func show(_ onboarding: Onboarding, field: AddressField) {
         self.field = field
         current = onboarding
         let pane = self.pane(for: onboarding)
         let window = self.window ?? make()
         window.contentView = view(for: onboarding, pane: pane)
+        window.title = settingsMode ? "Agterm Remote Settings" : "Set up Agterm Remote"
         window.delegate = self
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -118,6 +148,9 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_: Notification) {
         window = nil
+        // Closing ends settings mode, so the next automatic open is the ladder again if the ladder is
+        // what the facts call for.
+        settingsMode = false
     }
 
     // MARK: - The panes
@@ -128,6 +161,10 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        if settingsMode {
+            settingsPane(into: stack, onboarding: onboarding)
+            return stack
+        }
         stack.addArrangedSubview(caption(Self.position(of: pane)))
 
         switch pane {
@@ -225,6 +262,47 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
         // deliberately - and the bridge opens it on every network this Mac joins regardless. It is
         // disclosure rather than an alarm: the pinned certificate is what stands in front of it.
         stack.addArrangedSubview(body(OnboardingCopy.addressExposure))
+    }
+
+    /// **Everything, on one pane, in the order somebody would want to change it.**
+    ///
+    /// Not a fourth step and not a copy of the others: the same editor the address step draws, with
+    /// the things around it that a person coming back would be coming back FOR - what the bridge is
+    /// doing, and the code.
+    private func settingsPane(into stack: NSStackView, onboarding: Onboarding) {
+        stack.addArrangedSubview(heading(OnboardingCopy.addressHeading))
+        stack.addArrangedSubview(body(OnboardingCopy.addressExplanation))
+        stack.addArrangedSubview(addressEditor())
+
+        stack.addArrangedSubview(caption("The bridge"))
+        stack.addArrangedSubview(body(bridgeLine))
+        // Both buttons, always present, each enabled by what the bridge is actually doing. A single
+        // button that changes its verb makes somebody read it before every press.
+        let start = NSButton(title: "Start", target: self, action: #selector(startBridgeTapped))
+        start.bezelStyle = .rounded
+        start.isEnabled = bridgeCanStart
+        let stop = NSButton(title: "Stop", target: self, action: #selector(stopBridgeTapped))
+        stop.bezelStyle = .rounded
+        stop.isEnabled = bridgeCanStop
+        let buttons = NSStackView(views: [start, stop, recheckButton("Look again")])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        stack.addArrangedSubview(buttons)
+
+        stack.addArrangedSubview(caption("Your phone"))
+        if let address = onboarding.address {
+            stack.addArrangedSubview(body("A code carries \(address.dial.displayed) and this Mac's certificate."))
+        }
+        let show = NSButton(title: "Show the code…", target: self, action: #selector(showCodeTapped))
+        show.bezelStyle = .rounded
+        stack.addArrangedSubview(show)
+
+        // agterm is a fact rather than a gate here: somebody changing an address does not need to be
+        // stopped because their terminal is not running at that moment.
+        stack.addArrangedSubview(
+            body(onboarding.agtermIsThere
+                ? "agterm is running."
+                : "agterm is not running. The bridge shows no sessions until it is."))
     }
 
     /// **Step 3. The code, and the warning that rides on it.**
@@ -420,6 +498,8 @@ final class OnboardingWindow: NSObject, NSWindowDelegate {
 
     @objc private func saveTapped() { onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "") }
     @objc private func showCodeTapped() { onShowPairingCode?() }
+    @objc private func startBridgeTapped() { onStartBridge?() }
+    @objc private func stopBridgeTapped() { onStopBridge?() }
     @objc private func recheckTapped() { onRecheck?() }
 
     /// Walks past step 1. Nothing is stored and nothing is claimed about agterm — the pane simply

@@ -268,7 +268,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         showOnboarding(now)
     }
 
-    private func showOnboarding(_ now: Onboarding) {
+    private func showOnboarding(_ now: Onboarding, asSettings: Bool = false) {
         // One save path for the whole app: both windows hand the typed string to the same function,
         // which is the same `SaveAddress` with the same refusals. Two savers would be two opinions
         // about what an address is.
@@ -294,7 +294,39 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             onboarding.show(again, field: AddressField(AddressPreference.read()))
             rebuildMenu()
         }
-        onboarding.show(now, field: AddressField(AddressPreference.read()))
+        onboarding.onStartBridge = { [weak self] in
+            self?.startBridge()
+            self?.refreshTheSettingsPane()
+        }
+        onboarding.onStopBridge = { [weak self] in
+            self?.stopBridge()
+            self?.refreshTheSettingsPane()
+        }
+        describeTheBridge(to: onboarding)
+        if asSettings {
+            onboarding.showSettings(now, field: AddressField(AddressPreference.read()))
+        } else {
+            onboarding.show(now, field: AddressField(AddressPreference.read()))
+        }
+    }
+
+    /// What the settings pane says about the bridge, from the supervisor's own state.
+    private func describeTheBridge(to window: OnboardingWindow) {
+        let state = bridge?.state ?? .stopped
+        window.bridgeLine = BridgeReport.tooltip(for: state, failure: failure)
+        // The same rule the menu uses, for the same reason: a start racing an exit that has not
+        // landed, and a second stop signalling a pid already being killed.
+        let inFlight = state != .stopped && !state.hasFailed
+        window.bridgeCanStart = bridge != nil && !inFlight
+        window.bridgeCanStop = bridge != nil && inFlight && state != .stopping
+    }
+
+    /// Redraw the settings pane after something it describes has changed. Does nothing when it is
+    /// not open, which is most of the time.
+    private func refreshTheSettingsPane() {
+        guard onboarding.isOpen else { return }
+        describeTheBridge(to: onboarding)
+        onboarding.show(onboardingNow(), field: AddressField(AddressPreference.read()))
     }
 
     /// **Noticing a phone that pairs while this app is running.**
@@ -397,7 +429,14 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// their phone dials needs the paragraph about port forwards, the second port and what stays
     /// unproven — all of which is on the setup screen and none of which fits beside a live enrolment
     /// code.
-    @objc private func setUp() { showOnboarding(onboardingNow()) }
+    /// **Settings, which is a place rather than a step.**
+    ///
+    /// This menu item used to reopen the ladder, which drops somebody on whichever pane the facts
+    /// call for - and once everything holds, that is the pane with the code on it. The address, the
+    /// arrival port and the front-door answer were then unreachable from the app entirely: the first
+    /// person to install it had to be told to edit preferences by hand. The steps are still right for
+    /// a first run and this is the other door.
+    @objc private func setUp() { showOnboarding(onboardingNow(), asSettings: true) }
 
     private func openPairing() {
         guard case .success(let address) = AddressPreference.read() else {
@@ -775,6 +814,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             if case .running = state, pairing.isOpen { mintACode() }
         }
         rebuildMenu()
+        refreshTheSettingsPane()
     }
 
     /// True between the owner pressing Start and the bridge reaching a state. See `bridgeChanged`.
