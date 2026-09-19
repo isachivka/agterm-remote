@@ -87,6 +87,19 @@ fun AgtermHost(
     // re-fetch either, because the predicate does not change across one.
     val listOnScreen = showsList(state)
     LaunchedEffect(listOnScreen) { if (listOnScreen) sessions.refresh() }
+
+    // **Coming back to this screen re-asks the one question only the settings screen can change.**
+    //
+    // `NotPaired` is deliberately not a list - refreshing under a screen with a button on it would
+    // fight the button - so the effect above never fires for it. But the only way out of NotPaired is
+    // the settings screen, and the owner arrives here FROM it: they unpaired, paired again, the phone
+    // came back to the terminal, and the terminal still said no laptop was paired until the process
+    // was killed. Measured on real hardware on the first day this was installed.
+    //
+    // Keyed on Unit: this composable is disposed while settings are up and rebuilt on return, so
+    // "once per composition" is exactly "once per arrival". The refresh reads the store through the
+    // ViewModel's `connect`, so a laptop stored a second ago is the one it connects to.
+    LaunchedEffect(Unit) { if (state is AgtermUiState.NotPaired) sessions.refresh() }
     val renaming by sessions.renaming.collectAsStateWithLifecycle()
 
     // The platform's picker, as with pairing: no permission, no dependency, and the owner already knows
