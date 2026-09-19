@@ -1,5 +1,7 @@
 package dev.isachivka.agtermremote.pairing
 
+import dev.isachivka.agtermremote.wire.WireFailure
+import dev.isachivka.agtermremote.wire.WireException
 import dev.isachivka.agtermremote.wire.ByteStream
 import okhttp3.tls.HeldCertificate
 import org.json.JSONObject
@@ -361,6 +363,43 @@ class EnrollmentTest {
             assertFalse("dialled ${payload.host}:${payload.port}", dialled)
             assertTrue(result is EnrollResult.Unreachable)
         }
+    }
+
+    /**
+     * `wss://` is tried first and, when the far end answers it with plain HTTP, `ws://` once - and
+     * the dress that worked is what the laptop is stored with. Nobody is asked which.
+     */
+    @Test
+    fun `a laptop that speaks plain http is reached on the second try and remembered as plain`() {
+        val store = store()
+        val live = start(accepted())
+        val urls = mutableListOf<String>()
+        val result = Enrollment.enroll(
+            payload = payloadFor(live),
+            identity = phone.certificate,
+            deviceName = "a phone",
+            store = store,
+        ) { url ->
+            urls += url
+            if (url.startsWith("wss://")) {
+                throw WireException(WireFailure.NotTls, javax.net.ssl.SSLException("plaintext where TLS was expected"))
+            }
+            SocketStream(url)
+        }
+
+        assertTrue("$result", result is EnrollResult.Paired)
+        assertEquals(listOf("wss://127.0.0.1:${live.port}/", "ws://127.0.0.1:${live.port}/"), urls)
+        assertEquals(StreamKind.DirectTcp, store.read()?.kind)
+    }
+
+    /** A laptop that answers TLS is stored as TLS, whatever the payload's hint said. */
+    @Test
+    fun `a laptop that speaks tls is remembered as tls`() {
+        val store = store()
+        val live = start(accepted())
+        val result = enrol(payloadFor(live), store = store)
+        assertTrue("$result", result is EnrollResult.Paired)
+        assertEquals(StreamKind.DirectTls, store.read()?.kind)
     }
 
     /** A laptop that is not there is unreachable, and nothing is stored. */

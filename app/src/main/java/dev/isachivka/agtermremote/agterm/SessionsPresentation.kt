@@ -37,6 +37,8 @@ fun copyFor(failure: WireFailure): Int = when (failure) {
     // "Not answering" and nothing about why. Three causes, one symptom, no way to tell them apart
     // from a phone.
     WireFailure.CannotReach -> R.string.agterm_failure_cannot_reach
+    // Reachable only if the one retry also failed; then it is the same advice as not reaching.
+    WireFailure.NotTls -> R.string.agterm_failure_cannot_reach
 
     // This one MAY be specific, because it was observed: the router replied and the thing behind it
     // did not. That is the shape a port mismatch takes, and calling it a network problem would send
@@ -71,6 +73,7 @@ fun isIdentityFailure(failure: WireFailure): Boolean = when (failure) {
     WireFailure.IdentityUnusable,
     -> true
     WireFailure.CannotReach,
+    WireFailure.NotTls,
     WireFailure.BridgeNotListening,
     WireFailure.ReaderFellBehind,
     WireFailure.Malformed,

@@ -47,6 +47,9 @@ object Reconnect {
     fun isTransient(failure: WireFailure): Boolean = when (failure) {
         // A bridge that is restarting. Refused, reset, or a router with nothing behind it.
         WireFailure.CannotReach, WireFailure.BridgeNotListening -> true
+        // The connect path already tried the other dress once; a second NotTls means the far end
+        // speaks neither, which is a network the owner has to look at.
+        WireFailure.NotTls -> false
 
         // The identity is wrong and the owner must act. No amount of waiting changes it.
         WireFailure.NotPinned, WireFailure.CertificateExpired, WireFailure.IdentityUnusable -> false

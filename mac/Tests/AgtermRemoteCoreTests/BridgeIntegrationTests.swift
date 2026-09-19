@@ -102,7 +102,7 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound, frontDoor: .direct)
+        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound)
         let code = try EnrolmentPayload(base64: minted.payload)
         let status = try bridge.control.status()
 
@@ -110,7 +110,7 @@ struct BridgeIntegrationTests {
         // holds that - and is never written.
         #expect(code.version == 2)
         // A bridge with nothing in front of it, so the code says a plain connection.
-        #expect(code.scheme == 1)
+        #expect(code.scheme == 2)
         #expect("\(code.host):\(code.port)" == bridge.bound)
         #expect(Int(code.expiry) == Int(minted.expiresAt.timeIntervalSince1970))
         #expect(Int(code.expiry) == Int(status.window.expiresAt?.timeIntervalSince1970 ?? -1))
@@ -125,7 +125,7 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound, frontDoor: .direct)
+        let minted = try bridge.control.openPairing(ttl: PairingPanelModel.ttl, advertise: bridge.bound)
         let image = try #require(QRRender.image(for: minted.payload, size: 380))
 
         let detector = CIDetector(
@@ -161,7 +161,7 @@ struct BridgeIntegrationTests {
         guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        _ = try bridge.control.openPairing(ttl: 1, advertise: bridge.bound, frontDoor: .direct)
+        _ = try bridge.control.openPairing(ttl: 1, advertise: bridge.bound)
         Thread.sleep(forTimeInterval: 1.5)
 
         let after = try bridge.control.status()
@@ -181,55 +181,26 @@ struct BridgeIntegrationTests {
         }
     }
 
-    /// **The chain the owner actually has, and the one nothing in this repository was testing.**
-    ///
-    /// ```
-    /// phone -> TLS to the router -> router -> TLS to the bridge -> HTTP Upgrade -> pinned mTLS
-    /// ```
-    ///
-    /// The router proxies rather than forwards: it terminates its own TLS at the edge and opens a
-    /// SECOND TLS connection to this Mac over the LAN. Against a plaintext listener that second
-    /// connection fails - the bridge sees a ClientHello it cannot answer - and the router hands the
-    /// phone a 502. Every unit test in this repository passed while that was true.
-    ///
-    /// What stands in for the router here is a local reverse proxy built out of `NWListener` and
-    /// `NWConnection`. **Where it differs from the real thing, stated rather than glossed:** it does
-    /// not run on the owner's router, it does not do NAT or hairpin, and it does not validate the
-    /// bridge's certificate - which is not a shortcut, because the real router cannot validate it
-    /// either and the wrapper's own comment says so. What it reproduces is the only property under
-    /// test: something terminates TLS in front and speaks TLS to the bridge.
-    ///
-    /// The phone's half is not here - it is Kotlin - so what this proves is that the chain carries
-    /// bytes end to end and that the code minted through it says `wss`. The phone reading that code
-    /// is proven by the shared vectors, and the phone completing an enrolment is proven on the
-    /// emulator against a bridge started the same way.
-    @Test func aProxyThatTerminatesTlsAndSpeaksTlsToTheBridgeCanReachIt() throws {
-        guard let bridge = try LiveBridge.startOrSkip(frontDoor: .httpsBothWays) else { return }
+    /// **One port, both dresses, nobody asked.** A router that insists on speaking HTTPS to its
+    /// backend completes a TLS handshake against this port; a tunnel that speaks plain HTTP gets the
+    /// front door's own refusal line back on the same port. This used to be a flag with three
+    /// answers, and two real setups in two days picked the wrong one.
+    @Test func theOnePortAnswersATlsCallerAndAPlainCallerAlike() throws {
+        guard let bridge = try LiveBridge.startOrSkip() else { return }
         defer { bridge.stop() }
 
-        // The router's own hop. It has to complete, and completing it is exactly what a plaintext
-        // bridge cannot do.
-        let reached = try TLSHop.reach(bridge.bound)
-        #expect(reached, "a proxy speaking TLS to the backend could not reach the bridge")
+        #expect(try TLSHop.reach(bridge.bound), "a proxy speaking TLS to the backend could not reach the bridge")
+        #expect(
+            try PlainHop.firstLine(bridge.bound)?.hasPrefix("HTTP/1.1 400") == true,
+            "a plain caller on the same port did not get the front door's refusal")
 
-        // And the code minted for that deployment tells the phone to open the outer hop with TLS.
+        // And the code minted tells the phone to try TLS first - a hint, which the phone confirms or
+        // corrects for itself on the first connection.
         let minted = try bridge.control.openPairing(
-            ttl: PairingPanelModel.ttl, advertise: "agterm.example-homelab.invalid:443",
-            frontDoor: .httpsBothWays)
+            ttl: PairingPanelModel.ttl, advertise: "agterm.example-homelab.invalid:443")
         let payload = try EnrolmentPayload(base64: minted.payload)
         #expect(payload.version == 2)
-        #expect(payload.scheme == 2, "a proxied deployment must mint a code the phone opens with TLS")
-    }
-
-    /// The same bridge without the flag, which is what the owner's deployment met. The hop the router
-    /// needs is not there.
-    @Test func withoutTheFlagTheSameProxyCannotReachTheBridge() throws {
-        guard let bridge = try LiveBridge.startOrSkip(frontDoor: .httpsInFront) else { return }
-        defer { bridge.stop() }
-
-        #expect(
-            try TLSHop.reach(bridge.bound) == false,
-            "a plaintext listener cannot answer a ClientHello, which is the 502 the phone reported")
+        #expect(payload.scheme == 2, "the hint the bridge mints is TLS first")
     }
 
     /// And a bridge that is not there is an ordinary answer with a sentence on it, not a crash.
@@ -338,7 +309,7 @@ final class LiveBridge {
     /// - Returns: a running bridge, or nil when there is no binary to run **and this is not CI**.
     ///   In CI a missing binary is a failure: a test that silently stops running is worse than one
     ///   that was never written, because the green tick claims it ran.
-    static func startOrSkip(frontDoor: FrontDoor = .direct) throws -> LiveBridge? {
+    static func startOrSkip() throws -> LiveBridge? {
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment[binaryVariable], !path.isEmpty else {
             if environment["CI"] != nil {
@@ -352,10 +323,10 @@ final class LiveBridge {
             Issue.record("\(binaryVariable) points at \(path), which is not an executable file")
             return nil
         }
-        return try LiveBridge(binary: path, frontDoor: frontDoor)
+        return try LiveBridge(binary: path)
     }
 
-    private init(binary: String, frontDoor: FrontDoor = .direct) throws {
+    private init(binary: String) throws {
         // **Short, because a unix socket path has a 104-byte ceiling in the kernel** and the bridge
         // refuses to serve one that would exceed it. A test's usual temporary directory is well past
         // it on macOS, which is a failure that names neither the path nor the length.
@@ -374,11 +345,7 @@ final class LiveBridge {
             "--listen", bound,
             "--state-dir", stateDirectory.path,
             "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
-            "--advertise-scheme", frontDoor.advertiseScheme,
         ]
-        if frontDoor.servesOnLinkTLS {
-            process.arguments?.append("--on-link-tls")
-        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -505,5 +472,32 @@ enum TLSHop {
         init(_ value: Bool) { self.value = value }
         func set(_ new: Bool) { lock.withLock { value = new } }
         func get() -> Bool { lock.withLock { value } }
+    }
+}
+
+/// The plain half of the same question: connect, send a bare request, read the first line back.
+enum PlainHop {
+    static func firstLine(_ address: String, timeout: TimeInterval = 10) throws -> String? {
+        let parts = address.split(separator: ":")
+        guard parts.count == 2, let port = UInt16(parts[1]) else { return nil }
+        let host = String(parts[0])
+
+        var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM, ai_protocol: IPPROTO_TCP,
+                             ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var info: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, String(port), &hints, &info) == 0, let first = info else { return nil }
+        defer { freeaddrinfo(info) }
+        let fd = socket(first.pointee.ai_family, first.pointee.ai_socktype, first.pointee.ai_protocol)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var tv = timeval(tv_sec: Int(timeout), tv_usec: 0)
+        _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard connect(fd, first.pointee.ai_addr, first.pointee.ai_addrlen) == 0 else { return nil }
+        let request = Array("GET / HTTP/1.1\r\nHost: x\r\n\r\n".utf8)
+        guard send(fd, request, request.count, 0) == request.count else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 512)
+        let n = recv(fd, &buffer, buffer.count, 0)
+        guard n > 0 else { return nil }
+        return String(decoding: buffer[0..<n], as: UTF8.self).split(separator: "\r\n", maxSplits: 1).first.map(String.init)
     }
 }

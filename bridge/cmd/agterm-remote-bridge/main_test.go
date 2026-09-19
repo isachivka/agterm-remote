@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isachivka/agterm-remote/bridge/internal/enroll"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 )
 
@@ -286,7 +286,7 @@ func TestTheReadyLineIsPrintedOnceTheListenerIsBound(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", enroll.SchemePlain, "", "", false, 0)
+		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "", "", "", 0)
 	}()
 
 	deadline := time.Now().Add(20 * time.Second)
@@ -391,7 +391,7 @@ func TestTheOnLinkHopAnswersATlsClientWhenGivenACertificate(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "",
-			enroll.SchemeTLS, certPath, keyPath, false, 0)
+			certPath, keyPath, 0)
 	}()
 
 	deadline := time.Now().Add(20 * time.Second)
@@ -444,7 +444,7 @@ func TestOnLinkTlsMintsItsOwnCertificateWhenGivenNoFiles(t *testing.T) {
 
 	go func() {
 		_ = run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), stateDir, "",
-			enroll.SchemeTLS, "", "", true, 0)
+			"", "", 0)
 	}()
 
 	deadline := time.Now().Add(20 * time.Second)
@@ -488,9 +488,10 @@ func TestOnLinkTlsMintsItsOwnCertificateWhenGivenNoFiles(t *testing.T) {
 	}
 }
 
-// The negative, and the reason the flag exists at all: without a certificate this port is plaintext,
-// so the same TLS client gets nothing. It is what the owner's deployment met.
-func TestWithoutACertificateTheOnLinkHopIsPlaintext(t *testing.T) {
+// Without a certificate of the owner's, one is minted - and the port answers BOTH dresses: a TLS
+// client completes its handshake and a plain client gets the front door's own refusal line. This
+// used to be the negative ("without the flag the port is plaintext"), and the flag is gone.
+func TestWithoutACertificateTheOnLinkHopIsMintedAndAnswersBoth(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -506,7 +507,7 @@ func TestWithoutACertificateTheOnLinkHopIsPlaintext(t *testing.T) {
 
 	go func() {
 		_ = run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), "",
-			enroll.SchemePlain, "", "", false, 0)
+			"", "", 0)
 	}()
 
 	deadline := time.Now().Add(20 * time.Second)
@@ -517,10 +518,24 @@ func TestWithoutACertificateTheOnLinkHopIsPlaintext(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
-	if err == nil {
-		conn.Close()
-		t.Fatal("a plaintext listener answered a TLS handshake, which it cannot do")
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // opportunistic hop
+	if err != nil {
+		t.Fatalf("the minted on-link certificate did not answer a TLS handshake: %v", err)
+	}
+	conn.Close()
+
+	plain, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	_ = plain.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := plain.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(plain).ReadString('\n')
+	if err != nil || !strings.HasPrefix(line, "HTTP/1.1 400") {
+		t.Fatalf("a plain caller on the same port got %q, %v; want the front door's refusal", line, err)
 	}
 }
 
@@ -551,36 +566,24 @@ func writeOnLinkPair(t *testing.T, dir string) (certPath, keyPath string) {
 // is a bridge nothing can reach, and a type that cannot say it beats a rule that rejects it. That
 // argument holds for the Mac and stops at this binary's flags, which are a second way in - and a
 // type forbidding a state is worth nothing if the flags beside it permit the same state.
-func TestTheFlagsRefuseAHopNothingCanReach(t *testing.T) {
+func TestALanCertificateComesWithItsKeyOrNotAtAll(t *testing.T) {
 	for _, c := range []struct {
 		name      string
-		scheme    enroll.Scheme
-		onLinkTLS bool
 		cert, key string
 		refused   bool
 	}{
-		{name: "the straight-through case", scheme: enroll.SchemePlain},
-		{name: "a proxy in front, plain to this port", scheme: enroll.SchemeTLS},
-		{name: "a proxy that expects TLS back", scheme: enroll.SchemeTLS, onLinkTLS: true},
-		{name: "the same with explicit files", scheme: enroll.SchemeTLS, cert: "c.pem", key: "k.pem"},
-		{
-			name: "plain outer hop with TLS on this port", scheme: enroll.SchemePlain,
-			onLinkTLS: true, refused: true,
-		},
-		{
-			name: "the same by naming files", scheme: enroll.SchemePlain,
-			cert: "c.pem", key: "k.pem", refused: true,
-		},
-		{name: "a certificate with no key", scheme: enroll.SchemeTLS, cert: "c.pem", refused: true},
-		{name: "a key with no certificate", scheme: enroll.SchemeTLS, key: "k.pem", refused: true},
+		{name: "neither, the minted pair"},
+		{name: "both, the owner's own", cert: "c.pem", key: "k.pem"},
+		{name: "a certificate with no key", cert: "c.pem", refused: true},
+		{name: "a key with no certificate", key: "k.pem", refused: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			err := checkHopFlags(c.scheme, c.onLinkTLS, c.cert, c.key)
+			err := checkLanFlags(c.cert, c.key)
 			if c.refused && err == nil {
-				t.Fatal("this combination describes a bridge nothing can reach and must be refused")
+				t.Fatal("a half-supplied on-link pair must be refused")
 			}
 			if !c.refused && err != nil {
-				t.Fatalf("a legitimate deployment was refused: %v", err)
+				t.Fatalf("a legitimate pair was refused: %v", err)
 			}
 		})
 	}

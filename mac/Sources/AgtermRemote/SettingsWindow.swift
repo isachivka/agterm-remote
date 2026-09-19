@@ -31,7 +31,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     var field = AddressField()
     var arrivalPortText = ""
-    var frontDoor = FrontDoor.unset
     var agtermIsThere = false
     /// What the bridge is doing, in the app's words.
     var bridgeLine = ""
@@ -42,12 +41,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     var hasAddress = false
     /// The code and what happened to it.
     var panelState: PairingPanelState = .closed
-    var panelWarning: String?
 
     // MARK: What the owner did
 
     var onSave: ((_ typed: String, _ port: String) -> Void)?
-    var onFrontDoor: ((FrontDoor) -> Void)?
     var onUnpair: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -141,20 +138,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         portBox = port
         stack.addArrangedSubview(port)
 
-        // What stands in front. One popup, one line under it saying what the chosen answer means.
-        stack.addArrangedSubview(label(FrontDoorCopy.heading))
-        let door = NSPopUpButton(frame: .zero, pullsDown: false)
-        for choice in FrontDoor.allCases {
-            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
-            door.lastItem?.representedObject = choice.rawValue
-        }
-        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
-        door.target = self
-        door.action = #selector(frontDoorChanged(_:))
-        door.translatesAutoresizingMaskIntoConstraints = false
-        door.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        stack.addArrangedSubview(door)
-        stack.addArrangedSubview(caption(FrontDoorCopy.detail(for: frontDoor)))
+        // Nothing here asks how the phone reaches this Mac. It used to - three answers, and two real
+        // setups in two days picked the wrong one. The bridge now serves TLS and plain HTTP on its
+        // one port, decided per connection, and the phone tries TLS first and remembers what worked.
 
         if !addressMessage.isEmpty { stack.addArrangedSubview(body(addressMessage)) }
 
@@ -170,7 +156,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         } else if !hasAddress {
             stack.addArrangedSubview(body("Save an address to get a pairing code."))
         } else {
-            stack.addArrangedSubview(codePanel.make(state: panelState, address: field.text, warning: panelWarning))
+            stack.addArrangedSubview(codePanel.make(state: panelState, address: field.text))
         }
 
         if !bridgeLine.isEmpty { stack.addArrangedSubview(caption(bridgeLine)) }
@@ -179,14 +165,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     @objc private func saveTapped() {
         onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
-    }
-
-    @objc private func frontDoorChanged(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String, let chosen = FrontDoor(rawValue: raw)
-        else { return }
-        frontDoor = chosen
-        onFrontDoor?(chosen)
-        refreshIfOpen()
     }
 
     @objc private func unpairTapped() { onUnpair?() }

@@ -168,7 +168,7 @@ class WebSocketStream private constructor(
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        failure.compareAndSet(null, classify(response))
+                        failure.compareAndSet(null, classify(t, response))
                         opened.offer(false)
                         incoming.offer(Chunk.End)
                     }
@@ -207,11 +207,13 @@ class WebSocketStream private constructor(
          *
          * If a genuine distinction is ever available, it earns a case by producing a different value.
          */
-        private fun classify(response: Response?): WireFailure =
-            if (response != null && response.code in 500..599) {
-                WireFailure.BridgeNotListening
-            } else {
-                WireFailure.CannotReach
+        private fun classify(t: Throwable, response: Response?): WireFailure =
+            when {
+                response != null && response.code in 500..599 -> WireFailure.BridgeNotListening
+                // The phone validates no outer certificate, so the only way the outer TLS can fail
+                // once something answered is the far end not speaking TLS at all. See NotTls.
+                generateSequence(t) { it.cause }.any { it is javax.net.ssl.SSLException } -> WireFailure.NotTls
+                else -> WireFailure.CannotReach
             }
     }
 }

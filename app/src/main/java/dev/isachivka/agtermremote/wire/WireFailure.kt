@@ -46,6 +46,18 @@ sealed interface WireFailure {
     data object CannotReach : WireFailure
 
     /**
+     * Something answered, and it spoke plain HTTP where TLS was expected.
+     *
+     * The phone opens every address with `wss://` first, because that is the right answer for every
+     * real deployment but one: a proxy that terminates nothing and speaks plain HTTP on the outside.
+     * That one answers a ClientHello with an HTTP response, the TLS layer refuses it, and this is the
+     * refusal - the only outer-hop TLS failure that can exist, since the phone validates no outer
+     * certificate. The caller retries once with `ws://` and remembers the answer for this laptop.
+     * Nobody is asked.
+     */
+    data object NotTls : WireFailure
+
+    /**
      * The router answered but the bridge behind it did not.
      *
      * Distinguishable because it is the shape a port mismatch takes — the proxy returns an error of

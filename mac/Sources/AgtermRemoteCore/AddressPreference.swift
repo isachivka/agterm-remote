@@ -49,13 +49,6 @@ public enum AddressPreference {
     /// and the person it went stale for would be the person with the simplest setup.
     public static let listenPortKey = "listenPort"
 
-    /// What stands between the phone and this Mac. See [FrontDoor].
-    ///
-    /// **Absent means [FrontDoor.unset]**, the answer that works in the most deployments. It is a default rather
-    /// than an answer, and the setup screen asks before a code is ever minted - the value is a fact
-    /// about somebody's own network and this Mac cannot observe it.
-    public static let frontDoorKey = "frontDoor"
-
     /// When a phone last completed enrolment through the address stored now.
     ///
     /// **Nil is the ordinary state and it is not an error.** It says the address is unproven, which
@@ -93,69 +86,6 @@ public enum AddressPreference {
         guard defaults.object(forKey: listenPortKey) != nil else { return nil }
         let stored = defaults.integer(forKey: listenPortKey)
         return (1...65535).contains(stored) ? stored : nil
-    }
-
-    /// What stands in front, or the default when nobody has said.
-    ///
-    /// An unrecognised stored value reads as the default rather than as an error: it is the shape a
-    /// downgrade leaves behind, and the remedy - pick again on the setup screen - is the same as
-    /// having never picked. There is nothing here worth a failure case.
-    public static func frontDoor(from defaults: UserDefaults = .standard) -> FrontDoor {
-        guard let stored = defaults.string(forKey: frontDoorKey) else { return .unset }
-        return FrontDoor(rawValue: stored) ?? .unset
-    }
-
-    /// Whether anybody has ever answered the front-door question, as opposed to being given the
-    /// default.
-    ///
-    /// **[frontDoor] cannot answer this**, and that is the whole reason this exists: it folds *absent*
-    /// and *chosen `.direct`* into the same value, which is right for building a pairing code and
-    /// wrong for deciding whether to ask. An owner who paired before the question existed holds an
-    /// address, a paired phone, and no answer — and no way to reach the question, because the setup
-    /// window opens only for what is unfinished and their setup looked finished.
-    ///
-    /// It reads the key directly for nil, which is the one thing `string(forKey:)` reports and
-    /// `FrontDoor(rawValue:)` throws away.
-    public static func frontDoorAnswered(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.string(forKey: frontDoorKey) != nil
-    }
-
-    /// Records the answer that is already on screen, **only if nobody has answered yet.**
-    ///
-    /// Called when an address is saved, and it is what keeps the upgrade path narrow. The setup
-    /// screen shows the popup beside the address box, seeded with [frontDoor]'s answer; somebody whose
-    /// deployment is the simplest one leaves it alone and never fires [writeFrontDoor], so without
-    /// this they would finish setup with the key still absent and be asked again afterwards by a pane
-    /// written for people who were never asked at all.
-    ///
-    /// It cannot overwrite a real answer: the guard is *absent*, not *default*. And it changes no
-    /// behaviour when it does write — the value it stores is the one every code was already being
-    /// built from — so it needs no bridge restart.
-    public static func confirmFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) {
-        guard !frontDoorAnswered(in: defaults) else { return }
-        writeFrontDoor(door, to: defaults)
-    }
-
-    /// Records what stands in front, and **says whether that changed anything.**
-    ///
-    /// **Changing it does not clear the proof an address has earned**, unlike changing the address
-    /// itself. That is deliberate and it is the honest reading: the proof is about whether a phone
-    /// reached this Mac through that address, and a pairing that has already happened happened. What
-    /// a wrong answer here breaks is the NEXT code, which is why the setup screen asks before minting
-    /// one rather than after.
-    ///
-    /// - Returns: whether the EFFECTIVE answer moved. The write always happens — recording the answer
-    ///   is the whole point of the migration pane, and an answer that is absent is a question that
-    ///   gets asked again — but *absent* already reads as `.unset`, which is `.httpsBothWays`, so confirming
-    ///   the default changes nothing any code is built from. The caller restarts the bridge on this,
-    ///   and the migration pane's confirm button is pressed by somebody whose answer is usually the
-    ///   one already in effect: without this it tore down a running bridge to store the value it was
-    ///   already serving.
-    @discardableResult
-    public static func writeFrontDoor(_ door: FrontDoor, to defaults: UserDefaults = .standard) -> Bool {
-        let before = frontDoor(from: defaults)
-        defaults.set(door.rawValue, forKey: frontDoorKey)
-        return before != door
     }
 
     /// Sets the arrival port, or clears it back to following the dial port.
