@@ -22,8 +22,8 @@ import AppKit
 final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     private var item: NSStatusItem?
-    private let pairing = PairingWindow()
-    private let onboarding = OnboardingWindow()
+    /// The one window. See `SettingsWindow`.
+    private let settings = SettingsWindow()
 
     /// **The single source of what is pressable and what is wired.** An action absent here gets no
     /// handler AND no enabled item, because `MenuModel.items` is given the same set. They cannot come
@@ -75,13 +75,16 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
 
     /// What the panel showed last, so a redraw is not asked for on a state that has not moved.
     private func panelChanged(to state: PairingPanelState) {
-        pairing.warning = panel.warning
-        pairing.refreshIfOpen(state)
-        onboarding.refreshCodeIfShowing(state, warning: panel.warning)
+        settings.panelState = state
+        settings.panelWarning = panel.warning
+        settings.refreshIfOpen()
         // A phone that walked through the window has proven the address it dialled. This is the
-        // moment that fact becomes true, and the menu says it.
+        // moment that fact becomes true, and the menu and the window say it.
         if case .paired = state {
-            refreshProvenance()
+            refreshProvenance { [weak self] in
+                self?.rebuildMenu()
+                self?.refreshSettings()
+            }
             rebuildMenu()
         }
     }
@@ -157,7 +160,8 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // **The one window that opens without being asked for**, and only while the three things do
         // not all hold. A person who has finished setting up never sees it again; a person who has
         // not cannot be expected to know that the way in is a menu-bar icon they have never met.
-        showOnboardingIfUnfinished()
+        wireSettings()
+        showSettingsIfUnfinished()
         watchForPairing()
         // **The bridge runs because an address exists, not because somebody pressed Start.**
         //
@@ -260,97 +264,87 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// **Opened for what is left to SET UP, never for agterm being down.**
     ///
     /// agterm is quit and started all day and none of it changes what is configured. Gating this
-    /// window on it meant a finished owner whose Mac starts this app at login — before agterm is up —
-    /// got a setup window over their work every morning, for a fact that resolves itself. That fact
-    /// belongs in the menu, and it is there.
-    private func showOnboardingIfUnfinished() {
-        let now = onboardingNow()
-        guard now.setup != .done else { return }
-        showOnboarding(now)
+    /// window on it meant a finished owner whose Mac starts this app at login - before agterm is up -
+    /// got a window over their work every morning, for a fact that resolves itself. That fact is a
+    /// line in the menu and a line at the top of the window.
+    private func showSettingsIfUnfinished() {
+        guard onboardingNow().setup != .done else { return }
+        showSettings()
     }
 
-    private func showOnboarding(_ now: Onboarding, asSettings: Bool = false) {
-        // One save path for the whole app: both windows hand the typed string to the same function,
-        // which is the same `SaveAddress` with the same refusals. Two savers would be two opinions
-        // about what an address is.
-        onboarding.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
-        onboarding.arrivalPortText = Self.arrivalPortText()
-        onboarding.frontDoor = AddressPreference.frontDoor()
-        // **Stored, and then the bridge is restarted if it is running.** One of the two flags it
-        // decides is settled when the listener is built, so a bridge that is already up is serving
-        // the old answer - and the symptom of that is a pairing code that cannot work, which is the
-        // failure this whole question exists to end.
-        onboarding.onFrontDoor = { [weak self] chosen in
-            // The restart is conditional on the answer actually moving. The migration pane's confirm
-            // button writes whether or not anything changed - that is what ends the question for
-            // good - and for the commonest case it confirms the answer already in effect, which used
-            // to mean tearing down a running bridge to store the value it was already serving.
+    /// The window's callbacks, wired once. Everything the window can report lands here.
+    private func wireSettings() {
+        // One save path for the whole app: `SaveAddress` with its refusals. A second saver would be a
+        // second opinion about what an address is.
+        settings.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
+        // **Stored, and then the bridge is restarted.** Whether this port serves TLS is settled when
+        // the listener is built, so a bridge already up is serving the old answer. The restart is
+        // conditional on the answer actually moving.
+        settings.onFrontDoor = { [weak self] chosen in
             guard AddressPreference.writeFrontDoor(chosen) else { return }
             guard let self else { return }
-            // **A code on screen carries the OLD answer.** The scheme travels in the payload, so a
-            // code minted under the previous answer points the phone the wrong way. It used to be
-            // left up until the restart killed its window, and the panel then said "that code no
-            // longer works" and asked for a press. Now the code is asked for again the moment the
-            // bridge is back - the same wait the pairing button uses when the bridge is down.
-            if panel.state.isShowingACode || onboarding.showsCode || pairing.isOpen {
-                panel.close()
-                codeIsWaitingForTheBridge = true
-            }
+            // A code on screen carries the OLD answer - the scheme travels in the payload - so it is
+            // withdrawn and asked for again the moment the bridge is back.
+            if panel.state.isShowingACode { panel.close() }
+            codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty
             runTheBridge()
         }
-        onboarding.onShowPairingCode = { [weak self] in self?.openPairing() }
-        onboarding.onAskForAnotherCode = { [weak self] in self?.askForACode() }
-        // The enrolment window at the bridge must not outlive the pane that opened it - unless the
-        // separate pairing window is also up and holding the same code.
-        onboarding.onClose = { [weak self] wasShowingCode in
-            guard let self, wasShowingCode, !pairing.isOpen else { return }
-            closePairing()
-        }
-        onboarding.onRecheck = { [weak self] in
+        settings.onUnpair = { [weak self] in self?.unpairPhone() }
+        // The enrolment window at the bridge must not outlive the window that shows its code.
+        settings.onClose = { [weak self] in
             guard let self else { return }
-            showOnboardingPane(onboardingNow(), field: AddressField(AddressPreference.read()))
-            rebuildMenu()
-        }
-        describeTheBridge(to: onboarding)
-        if asSettings {
-            onboarding.showSettings(now, field: AddressField(AddressPreference.read()))
-        } else {
-            showOnboardingPane(now, field: AddressField(AddressPreference.read()))
+            stopThePanelClock()
+            panel.close()
+            refreshProvenance { [weak self] in self?.rebuildMenu() }
         }
     }
 
-    /// Show a pane of the ladder - and if it is the last one, put a code on it.
+    /// Open the window with what is stored, and put a code on it if there is anything to encode.
+    private func showSettings() {
+        fillSettings()
+        settings.field = AddressField(AddressPreference.read())
+        settings.arrivalPortText = Self.arrivalPortText()
+        settings.addressMessage = ""
+        settings.show()
+        keepTheCodeAlive()
+    }
+
+    /// Everything the window shows that is not the owner's own typing.
+    private func fillSettings() {
+        settings.frontDoor = AddressPreference.frontDoor()
+        settings.agtermIsThere = AgtermPresence.isRunning()
+        settings.bridgeLine = BridgeReport.tooltip(for: bridge?.state ?? .stopped, failure: failure)
+        settings.paired = pairedPhones.last
+        settings.hasAddress = AddressPreference.read().isSuccess
+        settings.panelState = panel.state
+        settings.panelWarning = panel.warning
+    }
+
+    /// Redraw the open window after something it describes moved. Keeps what is in the boxes.
+    private func refreshSettings() {
+        guard settings.isOpen else { return }
+        fillSettings()
+        settings.refreshIfOpen()
+    }
+
+    /// **The code is on screen for as long as the window is open and no phone is paired.**
     ///
-    /// The mint happens here rather than inside the window because only the app can start the
-    /// bridge, open the enrolment window and run the clock that takes a dead code off the screen.
-    /// A code already up is left alone: "Look again" must not spend a fresh window on every press.
-    private func showOnboardingPane(_ now: Onboarding, field: AddressField) {
-        onboarding.show(now, field: field)
-        guard onboarding.showsCode else { return }
-        if !panel.state.isShowingACode { askForACode() }
+    /// No button asks for it: an owner who saved an address and is looking at this window wants a
+    /// phone to reach this Mac, and the code is how. The panel's clock keeps it honest - an expired
+    /// code is replaced, a paired phone replaces the code with itself, and a closed window closes the
+    /// enrolment window at the bridge. A code the bridge shut after five wrong tokens is NOT replaced
+    /// by itself: that brake is the point of it, and the window has to be closed and reopened.
+    private func keepTheCodeAlive() {
+        guard settings.isOpen, AddressPreference.read().isSuccess, pairedPhones.isEmpty else {
+            stopThePanelClock()
+            if panel.state.isShowingACode { panel.close() }
+            return
+        }
+        if !panel.state.isShowingACode, !codeIsWaitingForTheBridge {
+            if case .refused = panel.state { return }
+            askForACode()
+        }
         startThePanelClock()
-    }
-
-    /// Draw the panel's state wherever the code is being shown: the setup pane, the pairing window,
-    /// or both.
-    private func drawPanel(_ state: PairingPanelState) {
-        if pairing.isOpen { pairing.show(state) }
-        onboarding.refreshCodeIfShowing(state, warning: panel.warning)
-        if !pairing.isOpen, !onboarding.showsCode { pairing.show(state) }
-    }
-
-    /// What the settings pane says about the bridge, from the supervisor's own state.
-    private func describeTheBridge(to window: OnboardingWindow) {
-        let state = bridge?.state ?? .stopped
-        window.bridgeLine = BridgeReport.tooltip(for: state, failure: failure)
-    }
-
-    /// Redraw the settings pane after something it describes has changed. Does nothing when it is
-    /// not open, which is most of the time.
-    private func refreshTheSettingsPane() {
-        guard onboarding.isOpen else { return }
-        describeTheBridge(to: onboarding)
-        onboarding.show(onboardingNow(), field: AddressField(AddressPreference.read()))
     }
 
     /// **Noticing a phone that pairs while this app is running.**
@@ -374,11 +368,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                     // what the menu's Unpair item is made of.
                     guard AddressPreference.provenAt() != before || self.pairedPhones != phones else { return }
                     self.rebuildMenu()
-                    // The pane on screen is about to be wrong for the same reason the menu was.
-                    if self.onboarding.isOpen {
-                        self.onboarding.show(
-                            self.onboardingNow(), field: AddressField(AddressPreference.read()))
-                    }
+                    // The window on screen is about to be wrong for the same reason the menu was.
+                    self.refreshSettings()
+                    self.keepTheCodeAlive()
                 }
             }
         }
@@ -437,48 +429,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         bridge?.stopAndWait()
     }
 
-    /// **The code comes from this app's own bridge, over its own control socket.**
-    ///
-    /// It used to come from a certificate helper in a *different project's* directory in the owner's
-    /// home — the installation they are still running, in parallel with this one. Nothing in this
-    /// repository builds that binary and nothing here owns its output, so the app was borrowing a
-    /// tool from somebody else's setup and calling the result its own. That is gone, and so is the
-    /// PNG on the Desktop it wrote: the code now lives exactly as long as the panel showing it.
-    @objc private func pairPhone() { openPairing() }
-
-    /// Setting the address is **setup**, and setup is one screen with the explanation on it.
-    ///
-    /// This was *Set the address…*, and it opened the pairing window with the cursor in a box. That
-    /// made sense while the pairing window held the address; it does not now. A person changing where
-    /// their phone dials needs the paragraph about port forwards, the second port and what stays
-    /// unproven — all of which is on the setup screen and none of which fits beside a live enrolment
-    /// code.
-    /// **Settings, which is a place rather than a step.**
-    ///
-    /// This menu item used to reopen the ladder, which drops somebody on whichever pane the facts
-    /// call for - and once everything holds, that is the pane with the code on it. The address, the
-    /// arrival port and the front-door answer were then unreachable from the app entirely: the first
-    /// person to install it had to be told to edit preferences by hand. The steps are still right for
-    /// a first run and this is the other door.
-    @objc private func setUp() { showOnboarding(onboardingNow(), asSettings: true) }
-
-    private func openPairing() {
-        guard case .success(let address) = AddressPreference.read() else {
-            // Nothing to encode. The way out is the setup screen, and the owner is sent there rather
-            // than shown a panel apologising — the menu item is greyed without an address anyway, so
-            // this is the belt to that braces.
-            notify(
-                "There is no address yet.",
-                "The pairing code carries the address your phone will dial, so it has to exist first. "
-                    + "Set it up, then come back.")
-            return setUp()
-        }
-        pairing.address = address.displayed
-        pairing.onClose = { [weak self] in self?.closePairing() }
-        pairing.onAskForAnotherCode = { [weak self] in self?.askForACode() }
-        askForACode()
-        startThePanelClock()
-    }
+    /// Both menu items open the one window: the code is on it, beside the address it encodes.
+    @objc private func pairPhone() { showSettings() }
+    @objc private func setUp() { showSettings() }
 
     /// **Ask for a code, starting the bridge first if that is what is in the way.**
     ///
@@ -493,10 +446,20 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// and the code is asked for only when the supervisor reports a running child. A start that fails
     /// says so through the same path any other failed start does.
     private func askForACode() {
-        guard let bridge, bridge.state == .stopped || bridge.state.hasFailed else { return mintACode() }
-        codeIsWaitingForTheBridge = true
-        drawPanel(.unavailable("Starting the bridge, then asking it for a code…"))
-        startBridge()
+        guard let bridge else { return mintACode() }
+        switch bridge.state {
+        case .running:
+            mintACode()
+        case .starting, .stopping:
+            // On its way. `bridgeChanged` mints when it lands; asking now would hit a socket that is
+            // not there yet and put "there is no code" on a window that is about to have one.
+            codeIsWaitingForTheBridge = true
+            drawPanel(.unavailable("Starting the bridge, then asking it for a code…"))
+        case .stopped, .failed:
+            codeIsWaitingForTheBridge = true
+            drawPanel(.unavailable("Starting the bridge, then asking it for a code…"))
+            startBridge()
+        }
     }
 
     /// Set between asking for a code with the bridge down and the supervisor reporting it up. See
@@ -511,9 +474,15 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// the owner saves a new address. That was the whole of the second half of this defect: the app
     /// said *your phone will dial X* and the code beside it said Y, with nothing anywhere restarting
     /// the bridge to reconcile them.
+    /// Draw a panel state on the window, before the model has one of its own to report.
+    private func drawPanel(_ state: PairingPanelState) {
+        settings.panelState = state
+        settings.panelWarning = panel.warning
+        settings.refreshIfOpen()
+    }
+
     private func mintACode() {
         let address = (try? AddressPreference.read().get())?.displayed ?? ""
-        pairing.address = address
         // Read at the press, exactly like the address and for the same reason: the owner can put a
         // proxy in front of this Mac while the bridge is running, and the bridge is not restarted
         // when they do.
@@ -534,14 +503,16 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // The window may have gone since the last tick. Stopping the clock from the held
                 // reference rather than from the callback's own argument keeps this on the main actor,
                 // which is where every other line of this closure already is.
-                guard let self, self.pairing.isOpen || self.onboarding.showsCode else {
-                    return self?.stopThePanelClock() ?? ()
-                }
+                guard let self, self.settings.isOpen else { return self?.stopThePanelClock() ?? () }
                 // Returns at once. The round trip is on the socket queue and the redraw arrives
                 // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
                 // nothing at all.
                 self.panel.tick()
                 self.surfaceWhatTheBridgeSaw()
+                // **An expired code is replaced, not announced.** Nobody used it; the window is still
+                // open; the owner still wants a phone to reach this Mac. Only expiry renews itself -
+                // see `keepTheCodeAlive` for the brake that does not.
+                if case .expired = self.panel.state, self.pairedPhones.isEmpty { self.mintACode() }
             }
         }
         // Menus and modal alerts run their own run-loop mode; without this the code on screen would
@@ -559,21 +530,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         let now = panel.warning
         guard now != lastWarning else { return }
         lastWarning = now
-        pairing.warning = now
-        pairing.refreshIfOpen(panel.state)
-        onboarding.refreshCodeIfShowing(panel.state, warning: now)
+        settings.panelWarning = now
+        settings.refreshIfOpen()
     }
 
     private func stopThePanelClock() {
         panelClock?.invalidate()
         panelClock = nil
-    }
-
-    /// The panel is gone, so the enrolment window goes with it.
-    private func closePairing() {
-        stopThePanelClock()
-        panel.close()
-        refreshProvenance { [weak self] in self?.rebuildMenu() }
     }
 
     /// **Unpairing, with the cost said before the press takes effect.**
@@ -612,12 +575,15 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                         return self.rebuildMenu()
                     }
                     self.pairedPhones = []
-                    // The address stops being proven in the same act. See `refreshProvenance`.
-                    self.refreshProvenance { self.rebuildMenu() }
+                    // The address stops being proven in the same act. See `refreshProvenance`. The
+                    // window then shows a code again in the phone's place - no announcement needed,
+                    // the code IS the next step.
+                    self.refreshProvenance {
+                        self.rebuildMenu()
+                        self.refreshSettings()
+                        self.keepTheCodeAlive()
+                    }
                     self.rebuildMenu()
-                    self.notify(
-                        "That phone is unpaired.",
-                        "It can no longer connect. Pair it again from this menu when you want it back.")
                 }
             }
         }
@@ -642,7 +608,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // the migration pane afterwards, written for people who were never asked. It cannot overwrite
         // a real answer and it changes no behaviour: the value it stores is the one every code was
         // already being built from.
-        AddressPreference.confirmFrontDoor(onboarding.frontDoor)
+        AddressPreference.confirmFrontDoor(settings.frontDoor)
 
         switch outcome {
         case .saved(let address):
@@ -674,25 +640,20 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // about to add the missing label to the front of it.
         case .refused, .notWritten, .needsConfirmation: AddressField(text: typed)
         }
-        onboarding.arrivalPortText = Self.arrivalPortText()
-        // The address they just typed may have been the second onboarding step, and a pane that
-        // stayed on "type an address" after one was saved would be showing a state that has stopped
-        // being true.
+        settings.field = field
+        settings.arrivalPortText = Self.arrivalPortText()
         // **A code on screen for an address that has just changed underneath it is worse than no
-        // code**: it is scannable, it pairs, and it points the phone at the previous destination. The
-        // window it was minted against is closed first, so that redrawing the ladder below mints a
-        // fresh one for the new address rather than keeping a picture of somewhere the owner no
-        // longer lives.
-        if case .saved(let address) = outcome {
-            pairing.address = address.displayed
-            if panel.state.isShowingACode { panel.close() }
-            if pairing.isOpen { pairing.show(panel.state) }
-        }
-        if onboarding.isOpen { showOnboardingPane(onboardingNow(), field: field) }
+        // code**: it is scannable, it pairs, and it points the phone at the previous destination. It
+        // is withdrawn, and a fresh one is minted for the new address once the bridge is back up.
+        if case .saved = outcome, panel.state.isShowingACode { panel.close() }
+        refreshSettings()
         // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
         // port it names and advertises what the phone will dial, and a bridge already up is holding
-        // the previous answer to both.
-        if case .saved = outcome { runTheBridge() }
+        // the previous answer to both. The code follows the bridge.
+        if case .saved = outcome {
+            codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty
+            runTheBridge()
+        }
         // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
         // started existing.
         rebuildMenu()
@@ -724,24 +685,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// One sentence, put in front of whoever is looking. There is one address editor now — the setup
     /// screen — so this is the one place its outcome is said.
     private func report(_ sentence: String) {
-        onboarding.reportOnAddress(sentence)
+        settings.addressMessage = sentence
     }
 
-
-    /// **A running bridge is holding the old answer, so it is put down and picked up again.**
-    ///
-    /// One of the two flags the choice decides - whether this port serves TLS - is settled when the
-    /// listener is built, so a bridge already up cannot honour a change. Silently leaving it would
-    /// produce exactly the failure the question exists to end: a screen saying one thing and a
-    /// listener doing another, with the phone reporting a laptop that will not answer.
-    ///
-    /// No confirmation, unlike the Stop item, because this is not stopping the bridge - it is
-    /// applying a setting, and it comes straight back up. A bridge that was already down stays down.
-    private func restartTheBridgeIfItIsRunning() {
-        guard let bridge, bridge.state != .stopped else { return }
-        bridge.stop()
-        startBridge()
-    }
 
     /// Start it.
     ///
@@ -831,10 +777,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         // and a flag left set would mint a code into a panel nobody is watching at the next start.
         if codeIsWaitingForTheBridge, state != .starting, state != .stopping {
             codeIsWaitingForTheBridge = false
-            if case .running = state, pairing.isOpen || onboarding.showsCode { mintACode() }
+            if case .running = state, settings.isOpen, pairedPhones.isEmpty {
+                mintACode()
+                startThePanelClock()
+            }
         }
         rebuildMenu()
-        refreshTheSettingsPane()
+        refreshSettings()
     }
 
     /// True between the owner pressing Start and the bridge reaching a state. See `bridgeChanged`.

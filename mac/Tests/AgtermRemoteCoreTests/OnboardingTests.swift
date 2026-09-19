@@ -270,7 +270,7 @@ struct AddressPaneTests {
         // The walk, asserted before its verdict is trusted: a detector reading an empty list reports
         // every file clean.
         #expect(sources.count > 8, "the walk found \(sources.count) sources")
-        #expect(sources.contains { $0.name.hasSuffix("PairingWindow.swift") }, "the walk misses a window")
+        #expect(sources.contains { $0.name.hasSuffix("SettingsWindow.swift") }, "the walk misses the window")
 
         for file in sources {
             #expect(Self.offersToTestTheAddress(file) == nil, "\(file.name) offers to test the address")
@@ -302,18 +302,17 @@ struct AddressPaneTests {
         #expect(Self.offersToTestTheAddress(argued) == nil, "the detector fires on its own reasoning")
     }
 
-    /// The pane renders the library's copy rather than a second version of it. Two copies of a
-    /// paragraph is two paragraphs the moment one of them is edited.
+    /// The window renders the library's copy rather than a second version of it. Two copies of a
+    /// sentence is two sentences the moment one of them is edited. The list is short because the
+    /// window is: the owner's verdict on the address pane was that nobody reads that much text.
     @Test func theWindowRendersTheCopyRatherThanRepeatingIt() throws {
-        let window = try source("Sources/AgtermRemote/OnboardingWindow.swift")
+        let window = try source("Sources/AgtermRemote/SettingsWindow.swift")
 
         for reference in [
-            "OnboardingCopy.addressHeading", "OnboardingCopy.addressExplanation",
-            "OnboardingCopy.addressRoutes", "OnboardingCopy.addressIsUnprovenUntilAPhoneArrives",
-            "OnboardingCopy.addressExposure", "OnboardingCopy.arrivalPortHeading",
-            "OnboardingCopy.arrivalPortExplanation",
+            "OnboardingCopy.addressPlaceholder", "FrontDoorCopy.heading", "FrontDoorCopy.label(for:",
+            "FrontDoorCopy.detail(for:",
         ] {
-            #expect(window.contains(reference), "the address pane does not render \(reference)")
+            #expect(window.contains(reference), "the window does not render \(reference)")
         }
     }
 }

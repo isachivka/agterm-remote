@@ -374,9 +374,11 @@ struct SavingAnAddressUnderALiveCodeTests {
             AppSources.all().first { $0.name.hasSuffix("Sources/AgtermRemote/main.swift") })
 
         // The save path reaches for the panel's own close, which is what sends `pair-close` to the
-        // bridge, and it replaces the address the panel shows in the same act.
+        // bridge, and it replaces the address the window shows in the same act - the field is read
+        // back from the store, and the window is redrawn from it.
         #expect(main.code.contains("panel.close()"), "a saved address leaves the old code minted")
-        #expect(main.code.contains("pairing.address = address.displayed"))
+        #expect(main.code.contains("settings.field = field"), "the window keeps showing the old address")
+        #expect(main.code.contains("refreshSettings()"), "the window is not redrawn after a save")
     }
 }
 
