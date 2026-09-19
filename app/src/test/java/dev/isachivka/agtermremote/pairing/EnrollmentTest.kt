@@ -228,6 +228,7 @@ class EnrollmentTest {
         val closed = start(accepted())
         val port = closed.port
         closed.close()
+        awaitRefusal(port)
 
         val result = enrol(payloadFor(closed, port = port), store = store)
 
@@ -369,11 +370,35 @@ class EnrollmentTest {
         val closed = start(accepted())
         val port = closed.port
         closed.close()
+        awaitRefusal(port)
 
         val result = enrol(payloadFor(closed, port = port), store = store)
 
         assertTrue(result is EnrollResult.Unreachable)
         assertNull(store.read())
+    }
+
+    /**
+     * A port nothing answers on, proven rather than assumed.
+     *
+     * Closing a server frees its ephemeral port, and the OS may hand that port to the next listener
+     * that asks - which on a shared CI runner it did: the "laptop that does not answer" answered,
+     * the result was not Unreachable, and a release was blocked by a Mac-only pull request. So the
+     * refusal is checked with a raw connect before the enrolment dials, and the test fails with a
+     * sentence naming the port if something is holding it.
+     */
+    private fun awaitRefusal(port: Int) {
+        repeat(20) {
+            try {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 200) }
+            } catch (e: java.net.ConnectException) {
+                return
+            } catch (e: java.net.SocketTimeoutException) {
+                return
+            }
+            Thread.sleep(25)
+        }
+        throw AssertionError("something is answering on 127.0.0.1:$port, so the test cannot dial a dead port")
     }
 
     private fun start(reply: (JSONObject) -> String): FakeBridge =
