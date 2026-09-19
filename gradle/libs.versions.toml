@@ -3,7 +3,7 @@
 agp = "9.4.1"
 # Kotlin is not chosen independently: AGP 9.3.1 ships built-in Kotlin at 2.2.10, and the
 # Compose compiler plugin must match the Kotlin version in use.
-kotlin = "2.2.10"
+kotlin = "2.4.20"
 coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
