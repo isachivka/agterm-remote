@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/isachivka/agterm-remote/compare/v0.3.2...v0.4.0) (2026-09-19)
+
+
+### Features
+
+* **mac:** the front-door default is the answer that works behind a router ([#88](https://github.com/isachivka/agterm-remote/issues/88)) ([640834a](https://github.com/isachivka/agterm-remote/commit/640834a88011de8195dd285c12546d33c8951e53))
+
 ## [0.3.2](https://github.com/isachivka/agterm-remote/compare/v0.3.1...v0.3.2) (2026-09-19)
 
 
