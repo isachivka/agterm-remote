@@ -318,16 +318,17 @@ struct AddressProvenanceTests {
         #expect(AddressPreference.frontDoorAnswered(in: store.defaults) == false)
         #expect(AddressPreference.frontDoor(from: store.defaults) == .unset)
 
-        AddressPreference.writeFrontDoor(.direct, to: store.defaults)
+        AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults)
 
         #expect(AddressPreference.frontDoorAnswered(in: store.defaults))
-        #expect(AddressPreference.frontDoor(from: store.defaults) == .direct)
+        #expect(AddressPreference.frontDoor(from: store.defaults) == .httpsBothWays)
     }
 
-    /// The default IS `.direct`, so the two states above are indistinguishable by value. Stated as
-    /// its own assertion because it is the premise of the one above.
+    /// The default IS `.httpsBothWays` - the answer two real setups behind a proxying router needed
+    /// and did not get while it was `.direct` - so the two states above are indistinguishable by
+    /// value. Stated as its own assertion because it is the premise of the one above.
     @Test func theDefaultIsTheAnswerThatCannotBeToldApartByValue() {
-        #expect(FrontDoor.unset == .direct)
+        #expect(FrontDoor.unset == .httpsBothWays)
     }
 
     @Test func confirmingRecordsTheAnswerThatWasOnScreen() {
@@ -345,19 +346,19 @@ struct AddressProvenanceTests {
     /// The caller restarts the bridge on this answer. The migration pane's confirm button writes
     /// whether or not the value moved - that is what ends the question for good - and the commonest
     /// press of it confirms the answer already in effect, which used to tear down a running bridge to
-    /// store the value it was already serving. *Absent* reads as `.unset`, which IS `.direct`, so
-    /// that case has to report no change as well.
+    /// store the value it was already serving. *Absent* reads as `.unset`, which IS
+    /// `.httpsBothWays`, so that case has to report no change as well.
     @Test func writingReportsWhetherTheEffectiveAnswerMoved() {
         let store = scratch()
         defer { store.discard() }
 
-        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults) == false)
+        #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults) == false)
         #expect(AddressPreference.frontDoorAnswered(in: store.defaults), "it still has to record it")
 
-        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults) == false)
-        #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults))
         #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults) == false)
         #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults))
+        #expect(AddressPreference.writeFrontDoor(.direct, to: store.defaults) == false)
+        #expect(AddressPreference.writeFrontDoor(.httpsBothWays, to: store.defaults))
     }
 
     /// **It cannot overwrite a real answer.** The guard is *absent*, not *default*: somebody who

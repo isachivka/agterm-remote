@@ -245,12 +245,12 @@ struct BridgeProcessTests {
         }
     }
 
-    /// The simplest deployment asks for nothing extra, so a bridge started by an owner who has never
-    /// seen the question behaves exactly as it did before the question existed.
-    @Test func theSimplestDeploymentAddsNoOnLinkTls() throws {
+    /// The direct deployment asks for nothing extra: a plain port and a plain scheme. Named
+    /// explicitly, because the DEFAULT is no longer this one - see `FrontDoor.unset`.
+    @Test func theDirectDeploymentAddsNoOnLinkTls() throws {
         let launcher = RecordingLauncher()
 
-        try bridge(launcher).start(listen: "0.0.0.0:8443", socket: nil)
+        try bridge(launcher).start(listen: "0.0.0.0:8443", socket: nil, frontDoor: .direct)
 
         #expect(!launcher.arguments.contains("--on-link-tls"))
         #expect(launcher.arguments.contains("plain"))
