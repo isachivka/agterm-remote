@@ -171,7 +171,7 @@ sealed interface TypedAddress {
  *
  * **One sentence per reason, and each names an action.** The same house rule as [PairingOutcome], for
  * the same reason: the failure this project meets most often is a screen reporting something the
- * owner cannot act on. `AddressRefusalTest` asserts the property rather than the wording.
+ * owner cannot act on. `PairingAddressTest` asserts the property rather than the wording.
  *
  * The cases are `DialAddress.ParseFailure` on the Mac, one for one. That is the contract: the two
  * cannot be linked, so the *case table* is what holds them together, and a reader here that accepted

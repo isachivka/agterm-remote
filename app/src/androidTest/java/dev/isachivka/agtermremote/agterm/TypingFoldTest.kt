@@ -3,8 +3,8 @@ package dev.isachivka.agtermremote.agterm
 import androidx.compose.ui.test.assertIsDisplayed
 // No import for assertDoesNotExist: it is a MEMBER of SemanticsNodeInteraction, not an extension in
 // this package, so importing it is an unresolved reference rather than a redundant line. Importing it
-// is what failed compileDebugAndroidTestKotlin here on 2026-08-21; HomeScreenUiTest calls it with no
-// import at all, which is the working shape.
+// is what failed compileDebugAndroidTestKotlin here on 2026-08-21. Calling it with no import at all
+// is the working shape (a test class that once demonstrated this is gone; the rule is not).
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick

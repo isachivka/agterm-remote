@@ -4,8 +4,9 @@ import Testing
 
 /// Two properties this source must keep, checked by reading the source rather than by trusting it.
 ///
-/// The same shape as `NothingPersistedTest` on the Android side, control included: **a check that
-/// cannot fail is not a check**, so each test plants a violation and asserts the detector sees it.
+/// The same shape `NothingPersistedTest` had on the Android side before it was deleted, control
+/// included: **a check that cannot fail is not a check**, so each test plants a violation and asserts
+/// the detector sees it.
 struct NoAggregateVerdictTests {
 
     private func sources() throws -> [(name: String, text: String)] {

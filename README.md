@@ -55,7 +55,7 @@ cd mac && ./scripts/bundle.sh
 account. There is no public listing yet.
 
 ```
-cd app && ./gradlew installDebug   # or build it yourself
+./gradlew installDebug   # or build it yourself
 ```
 
 ## Arrange an address
@@ -67,19 +67,21 @@ for the address the phone should dial and whether something terminates TLS in fr
 
 ## Pair
 
-Open the Mac app, start the bridge, and choose **Show pairing code**. On the phone, scan it. That is
-the whole of it: one code, one direction, no file to move across and no second scan. The code carries
-the address, the bridge's certificate fingerprint and a single-use token that expires in five
-minutes.
+Open the Mac app. It opens its one window on first run; save the address, and the code appears
+beneath it. On the phone, scan it. That is the whole of it: one code, one direction, no file to move
+across and no second scan. The code carries the address, the bridge's certificate fingerprint and a
+single-use token that expires in five minutes.
 
-[docs/pairing.md](docs/pairing.md) has the payload format, the ALPN split that keeps a
-certificate-less connection away from the API, and the measured scanning distance.
+[docs/pairing.md](docs/pairing.md) records what has and has not been proved about the camera — the
+read on real hardware is still outstanding. The payload format is in [wire/README.md](wire/README.md),
+and the ALPN split that keeps a certificate-less connection away from the API is argued in
+`bridge/internal/enroll/alpn.go`.
 
 ## Build and test
 
 ```
 cd bridge && go test ./...          # the Go bridge, no third-party dependencies
-cd app    && ./gradlew test         # Android unit tests
+./gradlew testDebugUnitTest         # Android unit tests, from the root
 cd mac    && swift test             # the Mac app, including bridge integration tests
 ./scripts/check-*.sh                # the guards CI requires on every pull request
 ```

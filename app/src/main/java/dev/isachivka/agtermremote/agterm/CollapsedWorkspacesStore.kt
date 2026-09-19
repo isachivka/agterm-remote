@@ -29,8 +29,9 @@ class CollapsedWorkspacesStore internal constructor(private val file: File) {
      * What the app uses. **The `File` stays inside this class on purpose.**
      *
      * `AgtermViewModel` constructed the path itself in the first draft, which would have made it a
-     * second file in this package touching `java.io.File` — and therefore a second exemption in
-     * `NothingPersistedTest`. Two doors is not the arrangement that was argued for. One class knows
+     * second file in this package touching `java.io.File` — a second door to the disk. Two doors is
+     * not the arrangement that was argued for (a guard once enforced it; the guard is gone, the
+     * arrangement is kept for its own sake). One class knows
      * where the file is, and everything else knows only that ids go in and ids come out.
      *
      * **A directory path rather than a `Context`, and that is not fussiness.** The guard forbids this
@@ -88,9 +89,10 @@ class CollapsedWorkspacesStore internal constructor(private val file: File) {
          * filter from the WRITE left an identical one in the READ, so a guard looking for the filter
          * anywhere in the file still found it and passed. The detector was matching the wrong copy.
          *
-         * Now the write is one line, `writeBytes(idsOnly(...))`, and `NothingPersistedTest` asserts
-         * that THAT line names this function. Removing it from the write is now visible on the line
-         * the guard reads.
+         * Now the write is one line, `writeBytes(idsOnly(...))`, so removing the filter from the
+         * write is visible on that one line. The source-walk guard that read it was deleted with the
+         * rule it enforced; `CollapsedWorkspacesStoreTest` keeps the behaviour - a name handed to the
+         * door never reaches the disk.
          */
         fun idsOnly(values: Iterable<String>): List<String> =
             values.filter { looksLikeAnId(it) }.sorted()

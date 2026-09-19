@@ -93,9 +93,12 @@ type Listener struct {
 	slots    chan struct{}
 	refusals *counter
 	// hellos counts callers who opened TLS against this plain port. See [Listener.TLSHellos].
-	hellos   *hint
-	closeOne sync.Once
-	done     chan struct{}
+	hellos *hint
+	// acceptErr is why the accept loop stopped, when it stopped for a reason other than Close. Written
+	// before done is closed and read only after, so the channel close is what orders it.
+	acceptErr error
+	closeOne  sync.Once
+	done      chan struct{}
 	// stopped is closed by the accept loop on its way out, after the refusal count has been
 	// written. See [Listener.Close] for what rests on that ordering.
 	stopped chan struct{}
@@ -122,13 +125,48 @@ func (l *Listener) accept() {
 	// everything it was going to say.
 	defer close(l.stopped)
 	defer l.refusals.flush()
+	// **An error from Accept is three different things, and this used to treat all of them as
+	// "we are closing".** Only net.ErrClosed means that. A temporary one - EMFILE or ENFILE under a
+	// connection flood on a port the owner deliberately exposes, which Go's poller hands up rather
+	// than retrying - used to end this goroutine for good: the process stayed alive, the log still
+	// said ready, the Mac app's supervisor still said running, the control socket still answered,
+	// and no phone could reach this port again until the app was relaunched. Silent loss of service
+	// for the rest of the run, found by the first whole-repository review.
+	//
+	// So: closed is closed; temporary backs off and continues, the way net/http's Serve does; and
+	// anything else is fatal and SAID - done is closed with the error kept, Accept returns it, and
+	// main dies loudly, which is what internal/listener already does with its own accept loop.
+	var delay time.Duration
 	for {
 		conn, err := l.inner.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if isTemporary(err) {
+				if delay == 0 {
+					delay = 5 * time.Millisecond
+				} else if delay *= 2; delay > time.Second {
+					delay = time.Second
+				}
+				time.Sleep(delay)
+				continue
+			}
+			l.acceptErr = err
+			l.closeOne.Do(func() { close(l.done) })
 			return
 		}
+		delay = 0
 		go l.handle(conn)
 	}
+}
+
+// isTemporary reports whether an accept error is worth retrying. net.Error's Temporary is deprecated
+// for being ill-defined in general; for accept specifically it is exactly the question, and it is
+// what net/http asks too.
+func isTemporary(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Temporary() //nolint:staticcheck // the one place the question is well-defined
 }
 
 // handle is where rules 1 and 2 live.
@@ -234,11 +272,17 @@ func (h *hint) read() (int, time.Time) {
 	return h.count, h.last
 }
 
+// Accept returns the next upgraded connection. After Close it returns net.ErrClosed; after the accept
+// loop has died of an error it returns THAT error, so the caller can tell a listener it closed from
+// one that stopped serving on its own.
 func (l *Listener) Accept() (net.Conn, error) {
 	select {
 	case c := <-l.upgraded:
 		return c, nil
 	case <-l.done:
+		if l.acceptErr != nil {
+			return nil, l.acceptErr
+		}
 		return nil, net.ErrClosed
 	}
 }

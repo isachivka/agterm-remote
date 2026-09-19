@@ -176,7 +176,13 @@ class WebSocketStream private constructor(
             )
 
             val ok = opened.poll(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                ?: throw WireException(WireFailure.TimedOut(WireFailure.TimedOut.Stage.Connecting))
+                ?: run {
+                    // A peer that completed TCP and never finished the upgrade has left this socket
+                    // open with its callbacks armed. The client has no call timeout and its read
+                    // timeout is off, so without this every retry against such a peer leaks one more.
+                    socket.cancel()
+                    throw WireException(WireFailure.TimedOut(WireFailure.TimedOut.Stage.Connecting))
+                }
             if (!ok) throw WireException(failure.get() ?: WireFailure.CannotReach)
 
             return WebSocketStream(socket, incoming, failure)
