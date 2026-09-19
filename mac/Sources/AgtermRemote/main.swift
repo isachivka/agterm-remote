@@ -201,9 +201,19 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         switch bridge.state {
         case .running: bridge.stop(); startBridge(); return true
         case .stopped, .failed: startBridge(); return true
-        case .starting, .stopping: return true
+        case .starting, .stopping:
+            // **A bridge on its way is carrying the OLD answer.** `BridgeProcess.start` snapshotted
+            // the listen port, the advertised address and the front-door flags when it was called;
+            // a save that lands while it is starting - which it is on every launch and through its
+            // whole retry backoff - would otherwise be honoured by the code and ignored by the
+            // listener. So the save is remembered, and `bridgeChanged` restarts once it has landed.
+            restartWhenTheBridgeLands = true
+            return true
         }
     }
+
+    /// A save arrived while the bridge was starting or stopping. See `runTheBridge`.
+    private var restartWhenTheBridgeLands = false
 
     /// The three facts, as they stand right now.
     ///
@@ -787,6 +797,13 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         } else if case .running = state {
             failure = nil
             startWasAsked = false
+        }
+        // The save that arrived mid-start is applied now that the start has landed - on a running
+        // bridge by restarting it, on a failed one by starting it again with the new answer.
+        if restartWhenTheBridgeLands, state != .starting, state != .stopping {
+            restartWhenTheBridgeLands = false
+            if runTheBridge() { codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty }
+            return
         }
         // The pairing panel asked for a code while the bridge was down and is waiting on this.
         // Cleared on any settled state, not only on success: a start that failed has already said so,
