@@ -1,0 +1,230 @@
+import AgtermRemoteCore
+import AppKit
+
+/// **The one window.** Address, port, how the phone gets here, and the code - together.
+///
+/// It replaces a three-step ladder and a separate pairing window. The first person to set this up
+/// met, in order: a last step promising a code it did not show, a button opening a second window, no
+/// way back to the address, a "Look again" button nobody could explain, and more text on the address
+/// pane than they were willing to read. Their verdict was that every one of those was cognitive load
+/// on somebody who wants to type an address and hold up a phone - and that the code should simply
+/// appear once the address is saved. This is that.
+///
+/// ### What it does not decide
+///
+/// Nothing. It draws what the app hands it and reports what was typed or pressed. Saving, minting,
+/// starting the bridge and asking the bridge what happened are the app's, so every rule about them
+/// lives in one place and is testable without a window.
+///
+/// ### It keeps the owner's typing
+///
+/// The app redraws this window whenever the bridge changes state or the code moves, which can be
+/// every few seconds. A redraw that rebuilt the boxes from the store would take a half-typed address
+/// away under somebody's cursor, so a redraw reads the boxes first and puts the same text back.
+@MainActor
+final class SettingsWindow: NSObject, NSWindowDelegate {
+
+    private var window: NSWindow?
+    var isOpen: Bool { window != nil }
+
+    // MARK: What the app hands in
+
+    var field = AddressField()
+    var arrivalPortText = ""
+    var frontDoor = FrontDoor.unset
+    var agtermIsThere = false
+    /// What the bridge is doing, in the app's words.
+    var bridgeLine = ""
+    /// The save's outcome - a refusal, or what was written. Cleared by the app on the next save.
+    var addressMessage = ""
+    /// The phone this bridge holds, if one. Shown instead of a code.
+    var paired: PairedPhone?
+    var hasAddress = false
+    /// The code and what happened to it.
+    var panelState: PairingPanelState = .closed
+    var panelWarning: String?
+
+    // MARK: What the owner did
+
+    var onSave: ((_ typed: String, _ port: String) -> Void)?
+    var onFrontDoor: ((FrontDoor) -> Void)?
+    var onUnpair: (() -> Void)?
+    var onClose: (() -> Void)?
+
+    private var addressBox: NSTextField?
+    private var portBox: NSTextField?
+    private let codePanel = PairingPanelView()
+
+    func show() {
+        let window = self.window ?? make()
+        window.contentView = view()
+        window.delegate = self
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        if self.window == nil {
+            window.center()
+            if !hasAddress, let addressBox { window.makeFirstResponder(addressBox) }
+        }
+        self.window = window
+    }
+
+    /// Redraw what is open, keeping whatever is in the boxes. Never opens a window: a timer that
+    /// could conjure one would put a code in front of somebody who closed it.
+    func refreshIfOpen() {
+        guard isOpen else { return }
+        if let addressBox { field = AddressField(text: addressBox.stringValue) }
+        if let portBox { arrivalPortText = portBox.stringValue }
+        let editing = window?.firstResponder is NSTextView
+        let wasAddress = editing && addressBox.map { $0.currentEditor() != nil } == true
+        let wasPort = editing && portBox.map { $0.currentEditor() != nil } == true
+        show()
+        if wasAddress, let addressBox { window?.makeFirstResponder(addressBox) }
+        if wasPort, let portBox { window?.makeFirstResponder(portBox) }
+    }
+
+    func close() { window?.close() }
+
+    private func make() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false,
+        )
+        window.title = "Agterm Remote"
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
+    func windowWillClose(_: Notification) {
+        window = nil
+        addressBox = nil
+        portBox = nil
+        onClose?()
+    }
+
+    // MARK: - The view
+
+    private func view() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 18, left: 20, bottom: 18, right: 20)
+
+        stack.addArrangedSubview(
+            caption(agtermIsThere ? "agterm is running." : "agterm is not running - a phone can connect but has nothing to drive."))
+
+        // The address, and Save beside it.
+        stack.addArrangedSubview(label("Address your phone dials"))
+        let box = NSTextField(string: field.text)
+        box.placeholderString = OnboardingCopy.addressPlaceholder
+        box.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        addressBox = box
+        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
+        save.bezelStyle = .rounded
+        save.keyEquivalent = "\r"
+        let row = NSStackView(views: [box, save])
+        row.orientation = .horizontal
+        row.spacing = 8
+        stack.addArrangedSubview(row)
+
+        // The port traffic arrives on. Blank follows the address, which is the port-forward case.
+        stack.addArrangedSubview(label("Port this Mac listens on"))
+        let port = NSTextField(string: arrivalPortText)
+        port.placeholderString = "same as the address"
+        port.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        port.translatesAutoresizingMaskIntoConstraints = false
+        port.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        portBox = port
+        stack.addArrangedSubview(port)
+
+        // What stands in front. One popup, one line under it saying what the chosen answer means.
+        stack.addArrangedSubview(label(FrontDoorCopy.heading))
+        let door = NSPopUpButton(frame: .zero, pullsDown: false)
+        for choice in FrontDoor.allCases {
+            door.addItem(withTitle: FrontDoorCopy.label(for: choice))
+            door.lastItem?.representedObject = choice.rawValue
+        }
+        door.selectItem(at: FrontDoor.allCases.firstIndex(of: frontDoor) ?? 0)
+        door.target = self
+        door.action = #selector(frontDoorChanged(_:))
+        door.translatesAutoresizingMaskIntoConstraints = false
+        door.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        stack.addArrangedSubview(door)
+        stack.addArrangedSubview(caption(FrontDoorCopy.detail(for: frontDoor)))
+
+        if !addressMessage.isEmpty { stack.addArrangedSubview(body(addressMessage)) }
+
+        stack.addArrangedSubview(separator())
+
+        // The code, or the phone, or the one sentence that says why neither.
+        if let paired {
+            stack.addArrangedSubview(heading("Paired with \(MenuModel.describe(paired))"))
+            stack.addArrangedSubview(caption("Fingerprint \(paired.fingerprint) - the phone shows the same one."))
+            let unpair = NSButton(title: "Unpair", target: self, action: #selector(unpairTapped))
+            unpair.bezelStyle = .rounded
+            stack.addArrangedSubview(unpair)
+        } else if !hasAddress {
+            stack.addArrangedSubview(body("Save an address to get a pairing code."))
+        } else {
+            stack.addArrangedSubview(codePanel.make(state: panelState, address: field.text, warning: panelWarning))
+        }
+
+        if !bridgeLine.isEmpty { stack.addArrangedSubview(caption(bridgeLine)) }
+        return stack
+    }
+
+    @objc private func saveTapped() {
+        onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
+    }
+
+    @objc private func frontDoorChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String, let chosen = FrontDoor(rawValue: raw)
+        else { return }
+        frontDoor = chosen
+        onFrontDoor?(chosen)
+        refreshIfOpen()
+    }
+
+    @objc private func unpairTapped() { onUnpair?() }
+
+    // MARK: - Pieces
+
+    private func heading(_ text: String) -> NSTextField {
+        let f = NSTextField(labelWithString: text)
+        f.font = .boldSystemFont(ofSize: 15)
+        return f
+    }
+
+    private func label(_ text: String) -> NSTextField {
+        let f = NSTextField(labelWithString: text)
+        f.font = .systemFont(ofSize: 12, weight: .semibold)
+        return f
+    }
+
+    private func caption(_ text: String) -> NSTextField {
+        let f = NSTextField(wrappingLabelWithString: text)
+        f.font = .systemFont(ofSize: 11)
+        f.textColor = .secondaryLabelColor
+        f.preferredMaxLayoutWidth = 470
+        return f
+    }
+
+    private func body(_ text: String) -> NSTextField {
+        let f = NSTextField(wrappingLabelWithString: text)
+        f.font = .systemFont(ofSize: 12)
+        f.preferredMaxLayoutWidth = 470
+        return f
+    }
+
+    private func separator() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: 470).isActive = true
+        return line
+    }
+}

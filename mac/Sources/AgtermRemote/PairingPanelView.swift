@@ -21,13 +21,6 @@ import AppKit
 @MainActor
 final class PairingPanelView: NSObject {
 
-    /// Ask for another code. Offered on every ending, because every ending leaves somebody who came
-    /// here to pair a phone still holding one.
-    var onAskForAnotherCode: (() -> Void)?
-
-    /// The owner is finished: pressed Done on the receipt.
-    var onDone: (() -> Void)?
-
     func make(state: PairingPanelState, address: String, warning: String?) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -35,15 +28,16 @@ final class PairingPanelView: NSObject {
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
 
-        stack.addArrangedSubview(caption("This phone will connect to"))
-        stack.addArrangedSubview(addressLabel(address))
+        if !address.isEmpty {
+            stack.addArrangedSubview(caption("The phone will connect to"))
+            stack.addArrangedSubview(addressLabel(address))
+        }
 
         switch state {
         case .closed:
             // Reachable only for the instant between a dismissal and the window going away. It says
             // the ordinary thing rather than rendering an empty rectangle.
-            stack.addArrangedSubview(heading("No code is on screen"))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
+            stack.addArrangedSubview(heading("Getting a code…"))
 
         case .asking:
             // Normally a millisecond. It is a state rather than a blank rectangle because the socket
@@ -55,30 +49,26 @@ final class PairingPanelView: NSObject {
         case .showing(let payload, let expiresAt):
             stack.addArrangedSubview(code(for: payload))
             stack.addArrangedSubview(
-                body("Point the phone at this code. Check the address above matches what the phone "
-                    + "shows before you confirm — the fingerprint is the same in every code this "
-                    + "laptop makes, so the address is the part that can be wrong."))
+                body("Scan this with the phone. Before confirming there, check the address it shows is "
+                    + "the one above."))
             stack.addArrangedSubview(caption("This code stops working at \(Self.clock(expiresAt))"))
             // **The paste fallback, and it is the same string the picture carries.** A camera that
             // will not read the code is the failure this exists for, and a second encoding of the
             // payload would be a second thing to go wrong.
-            stack.addArrangedSubview(caption("If the camera will not read it, type or paste this instead"))
+            stack.addArrangedSubview(caption("If the camera will not read it, paste this on the phone instead"))
             stack.addArrangedSubview(payloadField(payload))
 
         case .expired, .refused, .withdrawn:
             stack.addArrangedSubview(heading("That code no longer works"))
             stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
 
         case .paired(_, _):
             stack.addArrangedSubview(heading("Paired"))
             stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Done", #selector(done)))
 
         case .unavailable:
             stack.addArrangedSubview(heading("There is no code"))
             stack.addArrangedSubview(body(state.sentence ?? ""))
-            stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
         }
 
         if let warning {
@@ -88,10 +78,6 @@ final class PairingPanelView: NSObject {
 
         return stack
     }
-
-    @objc private func askForAnotherCode() { onAskForAnotherCode?() }
-
-    @objc private func done() { onDone?() }
 
     /// The expiry as a wall clock, not as a countdown. A number ticking down on a screen is something
     /// people watch instead of holding up their phone; an instant is something they can compare with
@@ -134,12 +120,6 @@ final class PairingPanelView: NSObject {
         field.textColor = .secondaryLabelColor
         field.preferredMaxLayoutWidth = 420
         return field
-    }
-
-    private func button(_ title: String, _ action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
-        return button
     }
 
     /// The payload as text, selectable and wrapped. Not truncated and not shortened: it is the whole
