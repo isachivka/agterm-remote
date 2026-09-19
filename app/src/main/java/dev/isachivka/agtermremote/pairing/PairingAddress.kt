@@ -114,6 +114,15 @@ object PairingAddress {
         }
 
         if (host.isEmpty()) return TypedAddress.Refused(AddressRefusal.Empty)
+        // **A character no host name can contain** - the same rule as `DialAddress.forbiddenCharacter`
+        // on the Mac, in the same place. The first real setup typed a colon in a Cyrillic layout and
+        // both parsers accepted the letter it produced; a code was minted for a host that does not
+        // exist. ASCII letters, digits, dots and hyphens for a name; hex, colons, dots and a zone
+        // suffix inside brackets. Nothing outside ASCII in either.
+        val bracketed = trimmed.startsWith("[")
+        if (host.any { c -> forbiddenInHost(c, bracketed) }) {
+            return TypedAddress.Refused(AddressRefusal.HostHasForbiddenCharacter)
+        }
         if (portText.isEmpty()) return TypedAddress.Refused(AddressRefusal.NoPort)
         // **`toLongOrNull` and not `toIntOrNull`, to agree with the Mac at the same boundary.**
         //
@@ -130,6 +139,17 @@ object PairingAddress {
         if (port !in 1..65535) return TypedAddress.Refused(AddressRefusal.PortOutOfRange)
         return TypedAddress.Read(host, port.toInt())
     }
+    /** Whether [c] may appear in a host. See the check in [parse]. */
+    private fun forbiddenInHost(c: Char, bracketed: Boolean): Boolean {
+        if (c.code > 0x7F) return true
+        val asciiLetterOrDigit = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
+        return if (bracketed) {
+            !(asciiLetterOrDigit || c == ':' || c == '.' || c == '%')
+        } else {
+            !(asciiLetterOrDigit || c == '.' || c == '-')
+        }
+    }
+
 }
 
 /**
@@ -178,6 +198,17 @@ enum class AddressRefusal(val sentence: String) {
     ),
 
     PortNotANumber("What follows the colon is not a number. Write the port in digits, as host:port."),
+
+    /**
+     * A character no host name can contain. In practice a letter from the wrong keyboard layout,
+     * typed where the colon was meant to go - which the first real setup did, on the Mac, and both
+     * parsers let through until this case existed.
+     */
+    HostHasForbiddenCharacter(
+        "The host contains a character no host name can hold. Check the character just before the " +
+            "port - a colon typed in the wrong keyboard layout is the usual cause - and use only " +
+            "letters a-z, digits, dots and hyphens.",
+    ),
 
     PortOutOfRange("A port has to be between 1 and 65535. Check the port on your Mac and type it again."),
 

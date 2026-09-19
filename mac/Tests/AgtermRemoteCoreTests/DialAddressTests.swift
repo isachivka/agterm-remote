@@ -26,6 +26,22 @@ struct DialAddressTests {
         ("a-long.subdomain.example-homelab.invalid", 65535, "a-long.subdomain.example-homelab.invalid:65535"),
     ]
 
+    /// **A colon typed in the wrong keyboard layout is refused, by name, pointing at the character.**
+    /// The first real setup typed exactly this; the parser accepted it and a code was minted with a
+    /// host that does not exist. `\u{416}` is the letter that key produces in a Cyrillic layout.
+    @Test func aHostWithACharacterNoHostCanContainIsRefusedByName() {
+        let typed = "agterm.example-homelab.invalid\u{416}:8443"
+        #expect(DialAddress.parse(typed) == .failure(
+            .hostHasForbiddenCharacter(host: "agterm.example-homelab.invalid\u{416}", character: "\u{416}")))
+        // Any non-ASCII, not only that one; and an ASCII character a name cannot hold.
+        #expect(DialAddress.parse("caf\u{E9}.invalid:8443") == .failure(
+            .hostHasForbiddenCharacter(host: "caf\u{E9}.invalid", character: "\u{E9}")))
+        #expect(DialAddress.parse("a_b.invalid:8443") == .failure(
+            .hostHasForbiddenCharacter(host: "a_b.invalid", character: "_")))
+        // A bracketed literal keeps its own alphabet, zone suffix included.
+        #expect(DialAddress.parse("[fe80::1%en0]:8443") == .success(DialAddress(host: "fe80::1%en0", port: 8443)))
+    }
+
     /// **Format, then parse, and get the same value back** — for every row. A parser that disagrees
     /// with the formatter turns one destination into two, and the editor now round-trips through both.
     @Test func everyRowSurvivesFormatThenParse() throws {

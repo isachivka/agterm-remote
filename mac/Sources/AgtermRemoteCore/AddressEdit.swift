@@ -41,6 +41,8 @@ public enum AddressEdit {
         case portOutOfRange(Int)
         case ambiguousWithoutBrackets(String)
         case unclosedBracket(String)
+        /// A character no host name can contain. See `DialAddress.ParseFailure`.
+        case hostHasForbiddenCharacter(host: String, character: Character)
 
         public var explanation: String {
             switch self {
@@ -69,6 +71,10 @@ public enum AddressEdit {
             case .unclosedBracket(let text):
                 "\"\(text)\" opens a bracket and never closes it. A bracketed address looks like "
                     + "\"[fe80::1]:8443\"."
+            case .hostHasForbiddenCharacter(let host, let character):
+                "\"\(host)\" contains \"\(character)\", which cannot be part of a host name. Host names "
+                    + "use only letters a-z, digits, dots and hyphens. The usual cause is a colon typed "
+                    + "in the wrong keyboard layout - check the character just before the port."
             }
         }
     }
@@ -179,6 +185,8 @@ private extension AddressEdit.Refusal {
         case .portOutOfRange(let port): .portOutOfRange(port)
         case .ambiguousWithoutBrackets(let text): .ambiguousWithoutBrackets(text)
         case .unclosedBracket(let text): .unclosedBracket(text)
+        case .hostHasForbiddenCharacter(let host, let character):
+            .hostHasForbiddenCharacter(host: host, character: character)
         }
     }
 }

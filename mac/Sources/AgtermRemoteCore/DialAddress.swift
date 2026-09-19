@@ -67,6 +67,24 @@ public struct DialAddress: Equatable, Sendable {
         /// colon is the separator. **This is the whole reason brackets exist.**
         case ambiguousWithoutBrackets(String)
         case unclosedBracket(String)
+        /// A character that cannot be part of a host name - in practice a letter from the wrong
+        /// keyboard layout, typed where the colon was meant to go. **The first person to set this
+        /// up did exactly that**, the parser accepted it, a code was minted with it, and the phone
+        /// went looking for a name that does not exist. Carries the host and the character, so the
+        /// sentence can point at it.
+        case hostHasForbiddenCharacter(host: String, character: Character)
+    }
+
+    /// What a host name may contain. ASCII letters, digits, dots and hyphens for a name or an IPv4
+    /// literal; hex, colons, dots and a zone suffix for a bracketed IPv6 literal. Nothing outside
+    /// ASCII in either: DNS names on the wire are ASCII, and a non-ASCII character here is never a
+    /// name somebody meant.
+    static func forbiddenCharacter(in host: String, bracketed: Bool) -> Character? {
+        host.first { c in
+            guard c.isASCII else { return true }
+            if bracketed { return !(c.isHexDigit || c == ":" || c == "." || c == "%" || c.isLetter || c.isNumber) }
+            return !(c.isLetter || c.isNumber || c == "." || c == "-")
+        }
     }
 
     /// Parses `host:port`, or `[literal]:port`. Whitespace around the outside is removed — it cannot
@@ -94,6 +112,9 @@ public struct DialAddress: Equatable, Sendable {
         }
 
         guard !host.isEmpty else { return .failure(.empty) }
+        if let bad = forbiddenCharacter(in: host, bracketed: trimmed.hasPrefix("[")) {
+            return .failure(.hostHasForbiddenCharacter(host: host, character: bad))
+        }
         guard !portText.isEmpty else { return .failure(.noPort(trimmed)) }
         guard let port = Int(portText) else { return .failure(.portNotANumber(portText)) }
         guard (1...65535).contains(port) else { return .failure(.portOutOfRange(port)) }
