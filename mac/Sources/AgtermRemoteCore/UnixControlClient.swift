@@ -97,6 +97,11 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
         }
         let window = reply["window"] as? [String: Any] ?? [:]
         let expiry = window["expires_at"] as? Int
+        let hello = reply["tls_on_plain_hop"] as? [String: Any]
+        let hint = hello.flatMap { h -> PlainHopTLSHint? in
+            guard let count = h["count"] as? Int, count > 0 else { return nil }
+            return PlainHopTLSHint(count: count, ago: TimeInterval(h["ago_seconds"] as? Int ?? 0))
+        }
         return (
             listening: listening,
             paired: peers,
@@ -107,7 +112,8 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
                 // put 1970 on the panel and expire every code the instant it was drawn.
                 expiresAt: expiry.map { Date(timeIntervalSince1970: TimeInterval($0)) },
                 attemptsLeft: window["attempts_left"] as? Int ?? 0,
-                ended: PairingEnding(wire: window["ended"] as? String ?? ""))
+                ended: PairingEnding(wire: window["ended"] as? String ?? ""),
+                tlsOnPlainHop: hint)
         )
     }
 

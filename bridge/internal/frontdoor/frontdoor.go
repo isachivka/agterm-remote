@@ -92,6 +92,8 @@ type Listener struct {
 	upgraded chan net.Conn
 	slots    chan struct{}
 	refusals *counter
+	// hellos counts callers who opened TLS against this plain port. See [Listener.TLSHellos].
+	hellos   *hint
 	closeOne sync.Once
 	done     chan struct{}
 	// stopped is closed by the accept loop on its way out, after the refusal count has been
@@ -106,6 +108,7 @@ func Listen(inner net.Listener) *Listener {
 		upgraded: make(chan net.Conn),
 		slots:    make(chan struct{}, maxConcurrentUpgrades),
 		refusals: newCounter(),
+		hellos:   &hint{},
 		done:     make(chan struct{}),
 		stopped:  make(chan struct{}),
 	}
@@ -147,7 +150,28 @@ func (l *Listener) handle(raw net.Conn) {
 	}
 
 	_ = raw.SetDeadline(time.Now().Add(upgradeTimeout))
-	key, ok := readUpgrade(bufio.NewReader(raw))
+	r := bufio.NewReader(raw)
+	// **A TLS ClientHello on a plain port is the one misconfiguration this listener can see.**
+	//
+	// A router that terminates HTTPS and insists on an HTTPS backend opens TLS to this port; against
+	// a plain listener the handshake cannot happen, the router answers the phone with a 502, and the
+	// phone reports a Mac that does not answer. Nothing in that chain says why. The first person to
+	// set this up lost an hour to exactly that, with the wrong answer to the front-door question
+	// sitting in a preference nobody could see.
+	//
+	// The first two bytes of a TLS record are the content type (0x16, handshake) and the major
+	// version (0x03, every TLS since SSL 3), and no HTTP request starts that way. It is refused at
+	// once through [refuse] - the same bytes every refusal gets, so a caller learns nothing from the
+	// answer - rather than being fed to [readUpgrade], which would wait the whole upgrade timeout
+	// for a line ending that a TLS record never contains. What changes is a count the owner's own
+	// app can ask for over the control socket, which is where the sentence naming the fix belongs.
+	if b, err := r.Peek(2); err == nil && b[0] == 0x16 && b[1] == 0x03 {
+		l.hellos.record()
+		refuse(raw, l.refusals)
+		release()
+		return
+	}
+	key, ok := readUpgrade(r)
 	if !ok {
 		refuse(raw, l.refusals)
 		release()
@@ -182,6 +206,32 @@ func refuse(conn net.Conn, refusals *counter) {
 	_, _ = conn.Write(refusalResponse)
 	conn.Close()
 	refusals.record()
+}
+
+// TLSHellos reports how many callers opened TLS against this plain port, and when the last one did.
+// Zero and the zero time when none has. It is a hint about the thing in front of this port, and the
+// only consumer is the owner's own app.
+func (l *Listener) TLSHellos() (count int, last time.Time) { return l.hellos.read() }
+
+// hint is a count and a timestamp, and nothing is ever logged from it: like every other fact an
+// anonymous caller can move, it is bounded to a number.
+type hint struct {
+	mu    sync.Mutex
+	count int
+	last  time.Time
+}
+
+func (h *hint) record() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.count++
+	h.last = time.Now()
+}
+
+func (h *hint) read() (int, time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.count, h.last
 }
 
 func (l *Listener) Accept() (net.Conn, error) {

@@ -44,6 +44,10 @@ final class PairingWindow: NSObject, NSWindowDelegate {
     /// The address the code encodes, in the same rendering the phone will show.
     var address = ""
 
+    /// The bridge's account of why a pairing is not arriving, or nil. Drawn under whatever state is
+    /// on screen, because it is true of the port rather than of the code.
+    var warning: String?
+
     /// Opens, or redraws what is already open.
     func show(_ state: PairingPanelState) {
         let window = self.window ?? make()
@@ -144,6 +148,11 @@ final class PairingWindow: NSObject, NSWindowDelegate {
             stack.addArrangedSubview(heading("There is no code"))
             stack.addArrangedSubview(body(state.sentence ?? ""))
             stack.addArrangedSubview(button("Show a code", #selector(askForAnotherCode)))
+        }
+
+        if let warning {
+            stack.addArrangedSubview(caption("What the bridge saw"))
+            stack.addArrangedSubview(body(warning))
         }
 
         return stack

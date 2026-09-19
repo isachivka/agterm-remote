@@ -486,6 +486,9 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, advert
 		Certificate: leaf,
 		// The handler's own probe rather than a second opinion about what "reachable" means.
 		Agterm: handler.AgtermReachable,
+		// The front door's count of TLS opened against a plain port. With on-link TLS the
+		// wrapper below the door consumes every ClientHello, so this stays at zero by construction.
+		TLSOnPlainHop: ln.TLSHellos,
 	}
 	if door, err := control.Listen(ctx, stateDir, handler, pairing); err != nil {
 		log.Printf("control socket unavailable: %v", err)
