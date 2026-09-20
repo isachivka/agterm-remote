@@ -322,6 +322,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         settings.paired = pairedPhones.last
         settings.hasAddress = AddressPreference.read().isSuccess
         settings.panelState = panel.state
+        settings.lastRefusal = panel.lastRefusal
     }
 
     /// Redraw the open window after something it describes moved. Keeps what is in the boxes.
@@ -488,6 +489,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// Draw a panel state on the window, before the model has one of its own to report.
     private func drawPanel(_ state: PairingPanelState) {
         settings.panelState = state
+        settings.lastRefusal = panel.lastRefusal
         settings.refreshIfOpen()
     }
 
@@ -518,6 +520,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
                 // through `panelChanged`, so a bridge that accepts and then stalls costs this timer
                 // nothing at all.
                 self.panel.tick()
+                if self.panel.lastRefusal != self.settings.lastRefusal {
+                    self.settings.lastRefusal = self.panel.lastRefusal
+                    self.settings.refreshIfOpen()
+                }
                 // **An expired code is replaced, not announced.** Nobody used it; the window is still
                 // open; the owner still wants a phone to reach this Mac. Only expiry renews itself -
                 // see `keepTheCodeAlive` for the brake that does not.

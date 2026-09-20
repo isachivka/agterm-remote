@@ -190,8 +190,13 @@ object PhoneIdentity {
     }
 
     private fun generate(): X509Certificate {
-        val notBefore = Date()
-        val notAfter = Date(notBefore.time + VALIDITY_YEARS * 365L * 24 * 60 * 60 * 1000)
+        // **Backdated by a day.** The Mac refuses to pin a certificate that is not yet valid by ITS
+        // clock, and a phone a few seconds ahead of the Mac - which is ordinary - minted one that was
+        // "not yet valid" for the length of that skew, at exactly the moment enrolment checked it. A
+        // self-signed certificate that starts yesterday is what every CA does for the same reason.
+        val now = Date()
+        val notBefore = Date(now.time - 24L * 60 * 60 * 1000)
+        val notAfter = Date(now.time + VALIDITY_YEARS * 365L * 24 * 60 * 60 * 1000)
 
         val spec = KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN)
             .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))

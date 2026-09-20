@@ -273,8 +273,10 @@ func (h *Handler) Serve(conn net.Conn) {
 		// somebody is knocking, which is worth knowing; they do not learn it once per knock.
 		h.refusals.record()
 	default:
-		// A spent attempt, or a spent window. Bounded by the window, which a person opened.
+		// A spent attempt, or a spent window. Bounded by the window, which a person opened - and
+		// kept for the owner's window as well as the log, because the log is where nobody looks.
 		log.Printf("enrolment refused: %s", causeText(cause))
+		h.window.NoteRefusal(causeText(cause))
 	}
 	// The reply is written on every path, including the ones that failed before anything was
 	// understood. A caller that is refused must be refused in words rather than by a dropped
@@ -538,7 +540,12 @@ func (h *Handler) enrol(conn net.Conn) (Reply, error) {
 		return refusal(), errors.New("the certificate carries a public key of an algorithm this build cannot use")
 	}
 	now := time.Now()
-	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+	// **A phone a few minutes ahead of this Mac is not a phone with an unusable certificate.** The
+	// check used to be against this Mac's clock exactly, and an ordinary skew - seconds - refused a
+	// certificate minted seconds earlier, with the token already spent and the owner told only "that
+	// code did not work". NotBefore is allowed up to clockSkew in the future; NotAfter stays strict,
+	// because a certificate that has already run out will be refused by every later handshake too.
+	if now.Add(clockSkew).Before(cert.NotBefore) || now.After(cert.NotAfter) {
 		// Checked at the moment of enrolment, against the certificate the caller is asking to have
 		// pinned. pinnedPeers checks this again on every handshake - it has to, because time passes -
 		// but a certificate that is ALREADY outside its window can never be accepted by it, so pinning
@@ -580,6 +587,7 @@ func (h *Handler) enrol(conn net.Conn) (Reply, error) {
 	if err := h.store.Replace(peer); err != nil {
 		return refusal(), fmt.Errorf("the trust store could not be written: %w", err)
 	}
+	h.window.ClearRefusal()
 	if h.paired != nil {
 		// The Mac app's menu. Called with the peer as stored, after the write, so what the menu
 		// shows is what the bridge will accept and not what it was asked to accept.
@@ -616,6 +624,11 @@ func peerName(name string) (string, error) {
 	}
 	return keys.Label(name)
 }
+
+// clockSkew is how far ahead of this Mac a phone's clock may be before its freshly minted
+// certificate reads as not yet valid. Fifteen minutes is generous for phones, which keep time from
+// the network, and small against a certificate that lasts years.
+const clockSkew = 15 * time.Minute
 
 // readLine reads one newline-terminated line, and stops at max rather than at the newline.
 //

@@ -41,6 +41,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     var hasAddress = false
     /// The code and what happened to it.
     var panelState: PairingPanelState = .closed
+    /// The bridge's sentence for the last phone it turned away - shown until a phone is pinned, so
+    /// a code that "did not work" on the phone has its reason on the Mac.
+    var lastRefusal: String?
 
     // MARK: What the owner did
 
@@ -171,6 +174,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
             stack.addArrangedSubview(body("Save an address to get a pairing code."))
         } else {
             stack.addArrangedSubview(codePanel.make(state: panelState, address: field.text))
+            if let lastRefusal {
+                stack.addArrangedSubview(caption("The last phone that tried was turned away: \(lastRefusal)"))
+            }
         }
 
         if !bridgeLine.isEmpty { stack.addArrangedSubview(caption(bridgeLine)) }

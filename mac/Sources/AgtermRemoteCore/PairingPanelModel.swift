@@ -69,7 +69,11 @@ public struct PairingWindowReport: Equatable, Sendable {
     public let attemptsLeft: Int
     public let ended: PairingEnding
 
-    public init(open: Bool, expiresAt: Date?, attemptsLeft: Int, ended: PairingEnding) {
+    /// The bridge's sentence for the last refusal, kept until a phone is pinned. Nil when none.
+    public let lastRefusal: String?
+
+    public init(open: Bool, expiresAt: Date?, attemptsLeft: Int, ended: PairingEnding, lastRefusal: String? = nil) {
+        self.lastRefusal = lastRefusal
         self.open = open
         self.expiresAt = expiresAt
         self.attemptsLeft = attemptsLeft
@@ -249,6 +253,11 @@ public final class PairingPanelModel: @unchecked Sendable {
 
     public var state: PairingPanelState { lock.withLock { _state } }
 
+    /// What the bridge said about the last phone it turned away, read on every tick. Nil until
+    /// there is one, and nil again once a phone is pinned.
+    public var lastRefusal: String? { lock.withLock { _lastRefusal } }
+    private var _lastRefusal: String?
+
     public init(
         control: ControlClient,
         now: @escaping () -> Date,
@@ -343,6 +352,7 @@ public final class PairingPanelModel: @unchecked Sendable {
             guard case .success(let report) = answer else {
                 return apply(.unavailable(Self.bridgeStoppedAnswering), from: mine, clearingWindow: true)
             }
+            lock.withLock { _lastRefusal = report.window.lastRefusal }
 
             switch report.window.ended {
             case .paired:
