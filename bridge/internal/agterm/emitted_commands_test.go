@@ -56,6 +56,18 @@ var emittable = map[string]string{
 	// the destructive siblings and are NOT here.
 	"zmx.list": "Styled screen, 2026-09-05: map a pane to its daemon. Read-only.",
 
+	// **THE KEYMAP PAIR, 2026-09-20.** The owner asked for the way out of a tall fit to be a palette
+	// command the Mac side installs, so it is there whether or not the phone is in his hand.
+	//
+	// `keymap.list` is read-only: the path of keymap.conf and the names of the custom commands it
+	// holds. `keymap.reload` re-reads that file. Against the three questions: it destroys nothing
+	// and re-targets nothing; what it CREATES is a palette entry, from ONE fenced block this bridge
+	// writes into his keymap and nothing outside it - see internal/palette, which refuses a file
+	// whose fences it cannot find rather than guessing. A reload also applies his own edits to the
+	// file, exactly as his own `agtermctl keymap reload` would.
+	"keymap.list":   "Tall fit, 2026-09-20: where keymap.conf is and what it holds. Read-only.",
+	"keymap.reload": "Tall fit, 2026-09-20: make the one fenced palette line the bridge wrote live.",
+
 	// **THE FIRST WRITE.** Authorised by the owner on 2026-07-29, at their own
 	// request, reaffirmed after the cost was put to them.
 	//
