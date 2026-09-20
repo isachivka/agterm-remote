@@ -1,5 +1,9 @@
 // Command agterm-remote-bridge serves the phone's verbs over pinned mutual TLS.
 //
+// It has one subcommand, `undo-fit`, which is the other end of the same program: run by agterm's
+// command palette on the Mac, it asks the running bridge over its control socket to put the window
+// and the pane back. See undofit.go.
+//
 // It has no pty of its own. Every session it can name belongs to agterm, and this process reaches
 // them the same way a person's own terminal does: over agterm's control socket, one command at a
 // time, from a closed set it constructs itself. Nothing a caller sends becomes an agterm command.
@@ -108,6 +112,12 @@ const (
 const readyLine = "ready: listening on"
 
 func main() {
+	// The one subcommand, decided on the bare first argument before the daemon's flags are parsed.
+	// See undofit.go.
+	if handled, code := subcommand(os.Args[1:], os.Stdout, os.Stderr, notify); handled {
+		os.Exit(code)
+	}
+
 	listen := flag.String("listen", "", "host:port to listen on (required)")
 	advertise := flag.String("advertise", "", "host:port a phone should dial; empty means the bound address")
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
