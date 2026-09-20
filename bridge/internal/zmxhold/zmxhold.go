@@ -3,11 +3,11 @@
 // # Why a second client, and why it has to be a client at all
 //
 // The pane's height cannot come from agterm: `window.resize` is clamped to the screen's visible
-// frame, so a window tall enough for two hundred rows is not a window macOS will give us. The zmx
+// frame, so a window tall enough for five hundred rows is not a window macOS will give us. The zmx
 // daemon behind a Live pane has no such limit. Its pty is sized by whichever client is its LEADER,
 // and leadership is not agterm's by right - it belongs to the last client that typed. A second client
 // that types nothing of consequence and then states a size is therefore enough, and the daemon does
-// the rest: Claude Code sees a 200-row terminal and renders two hundred rows.
+// the rest: Claude Code sees a 500-row terminal and renders five hundred rows.
 //
 // The desktop pane shows the same stream squeezed into its own viewport while this is on. The owner
 // accepted that; the palette command "Undo phone fit" is the way out, and Release is what it calls.

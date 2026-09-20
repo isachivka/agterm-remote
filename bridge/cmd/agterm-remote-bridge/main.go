@@ -457,7 +457,7 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 // putBackOnExit is the half of stop()'s promise that was never kept: "a window this bridge resized
 // is put back the way it was found". The listener and the control socket halves are the defers
 // above; this is the fit. It matters more since the tall fit than it did before, because a fit
-// now also holds a zmx daemon's pty at 200 rows, and a hold that dies with the process leaves the
+// now also holds a zmx daemon's pty at 500 rows, and a hold that dies with the process leaves the
 // pane squeezed with nothing listening for "Undo phone fit" - the next start's restore is the only
 // way back, and Quit is the exit every owner takes.
 //

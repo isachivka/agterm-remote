@@ -211,36 +211,41 @@ func escape(s string) (string, int) {
 // banner at the top, its composer at the bottom, and nothing in the hundreds of rows between - and
 // every one of those rows would travel on every poll and scroll under the owner's thumb. Trailing
 // air is already dropped by Clean; this is the air in the middle. A row is blank when nothing but
-// whitespace and SGR is on it. The SGR on collapsed rows is kept ahead of the first kept row, the
-// same way Tail keeps the state in force at a cut, so a colour set in the gap still reaches the
-// text after it. Only a tall read runs through this: at a pane's own height the gap is the owner's
-// layout, not the bridge's.
+// whitespace and SGR is on it.
+//
+// Styles carry across rows, so a dropped row may have set or reset one. After every gap the row
+// that follows is prefixed with a reset and the SGR state in force at that point of the ORIGINAL
+// stream - computed over everything before it, kept and dropped alike, the way Tail computes it over
+// everything before its cut. Over the dropped run alone it would wipe a colour set before the gap and
+// miss a reset inside it. Only a tall read runs through this: at a pane's own height the gap is the
+// owner's layout, not the bridge's.
 func Squeeze(clean string, keep int) string {
 	if keep < 0 {
 		keep = 0
 	}
 	rows := strings.Split(clean, "\n")
 	out := make([]string, 0, len(rows))
-	run := 0
-	var dropped strings.Builder
+	var seen strings.Builder // the original stream up to the current row
+	run, dropped := 0, false
 	for _, row := range rows {
-		if strings.TrimSpace(Strip(row)) == "" {
+		blank := strings.TrimSpace(Strip(row)) == ""
+		if blank {
 			run++
-			if run > keep {
-				dropped.WriteString(row)
-				dropped.WriteByte('\n')
-				continue
-			}
-			out = append(out, row)
+		} else {
+			run = 0
+		}
+		if blank && run > keep {
+			dropped = true
+			seen.WriteString(row)
+			seen.WriteByte('\n')
 			continue
 		}
-		if dropped.Len() > 0 {
-			if state := sgrState(dropped.String()); state != "" {
-				row = "\x1b[0m" + state + row
-			}
-			dropped.Reset()
+		if dropped && !blank {
+			row = "\x1b[0m" + sgrState(seen.String()) + row
+			dropped = false
 		}
-		run = 0
+		seen.WriteString(row)
+		seen.WriteByte('\n')
 		out = append(out, row)
 	}
 	return strings.Join(out, "\n")

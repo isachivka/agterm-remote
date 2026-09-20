@@ -23,9 +23,9 @@ import (
 //
 // The width fit resizes the owner's window, and the programs in it lay themselves out at the phone's
 // width. The height cannot be done the same way: agterm clamps `window.resize` to the screen, so a
-// window tall enough for two hundred rows does not exist. But a Live pane's pty belongs to a zmx
+// window tall enough for five hundred rows does not exist. But a Live pane's pty belongs to a zmx
 // daemon, and the daemon sizes it to whatever its leader client says. A second client that claims
-// leadership and states 200 rows gets a 200-row pty, Claude Code renders 200 rows, and the phone reads
+// leadership and states 500 rows gets a 500-row pty, Claude Code renders 500 rows, and the phone reads
 // them all. The desktop pane shows the same stream squeezed into its viewport until the fit is undone
 // - accepted by the owner; "Undo phone fit" in the palette is the way out.
 //

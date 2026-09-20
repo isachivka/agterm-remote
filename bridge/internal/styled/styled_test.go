@@ -127,12 +127,20 @@ func TestSqueezeCollapsesTheAirInsideATallScreen(t *testing.T) {
 	}
 }
 
-func TestSqueezeKeepsTheColourSetInTheGap(t *testing.T) {
-	// The colour is set on a blank row that gets dropped; the row after it must still be red.
-	in := "a\n\n\x1b[31m\n\n\nstill red\x1b[0m"
-	got := Squeeze(in, 1)
-	want := "a\n\n\x1b[0m\x1b[31mstill red\x1b[0m"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+func TestSqueezeKeepsTheStyleInForceAcrossAGap(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		// The colour is set on a blank row that gets dropped; the row after it must still be red.
+		{"set in the gap", "a\n\n\x1b[31m\n\n\nstill red\x1b[0m", "a\n\n\x1b[0m\x1b[31mstill red\x1b[0m"},
+		// Green before the gap, bold inside it: the row after is green AND bold, not bold alone.
+		{"set before and in the gap", "\x1b[32mgreen\n\n\x1b[1m\n\nnext", "\x1b[32mgreen\n\n\x1b[0m\x1b[32m\x1b[1mnext"},
+		// A reset inside the gap must reach the row after it: `next` is plain, not green.
+		{"reset in the gap", "\x1b[32mgreen\n\n\x1b[0m\n\nnext", "\x1b[32mgreen\n\n\x1b[0mnext"},
+		// Nothing dropped, nothing restated.
+		{"no gap", "\x1b[32ma\n\nb", "\x1b[32ma\n\nb"},
+	}
+	for _, c := range cases {
+		if got := Squeeze(c.in, 1); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
 	}
 }

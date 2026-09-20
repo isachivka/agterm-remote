@@ -472,7 +472,7 @@ class BridgeConnection private constructor(
             columns = reply.optInt("columns"),
             // **The held height is the one the LAPTOP reports**, the same rule as the column count:
             // the claim can fail - no daemon, leadership lost - and echoing the request back would
-            // tell this app 200 rows are held while the pane is still the size it was.
+            // tell this app 500 rows are held while the pane is still the size it was.
             rows = reply.optInt("rows"),
         )
     }

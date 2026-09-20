@@ -38,15 +38,15 @@ import (
 // a bad value never becomes a request. The ceiling is ours: a 500-line read of a 276-column terminal
 // is already far more than a phone can show, and an unbounded value would let one authenticated
 // request pull the entire scrollback of twenty sessions over a metered connection.
-// squeezeKeep is how many blank rows in a row survive inside a tall read. Two keeps a paragraph
-// break looking like one; anything longer is the pty's height, not the program's layout.
-const squeezeKeep = 2
-
 const (
 	MinLines     = 1
 	MaxLines     = 500
 	DefaultLines = 50
 )
+
+// squeezeKeep is how many blank rows in a row survive inside a tall read. Two keeps a paragraph
+// break looking like one; anything longer is the pty's height, not the program's layout.
+const squeezeKeep = 2
 
 // Request is what arrives from the phone.
 type Request struct {
@@ -819,7 +819,7 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 		// **A plain read of the held pane is the phone saying it no longer wants the height.** The
 		// colours-through-zmx setting is the only thing that asks for one, the phone reads with
 		// `styled` exactly while that setting is on, and switching it off sends no press - so this
-		// read is the first and only sign. Without it the bridge would go on re-claiming a 200-row
+		// read is the first and only sign. Without it the bridge would go on re-claiming a 500-row
 		// pane, against the owner typing at the Mac, for a feature he has just switched off.
 		h.dropHeight(ctx, claim, "the phone reads this pane without colours through zmx now")
 		held = false
@@ -832,6 +832,8 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 	}
 	if held && inv != nil && h.keepHeight(ctx, req.Session, string(pane), inv) {
 		h.dropHeight(ctx, claim, "the daemon behind the held pane changed")
+		// Not held any more, so this read is at the pane's own height and keeps its gaps.
+		held = false
 	}
 
 	// A styled read is tried first and abandoned silently: the phone said what it would PREFER, and
