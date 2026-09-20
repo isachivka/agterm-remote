@@ -1180,7 +1180,8 @@ func TestATallReadSqueezesTheAirAndAnOrdinaryReadKeepsIt(t *testing.T) {
 	f.press(t, tallRows)
 	f.daemon.AwaitFrames(t, 5)
 	held := f.screen(t, sessionA)
-	if held.Text == nil || *held.Text != "banner\n\n\nfooter" {
+	// The reset after the gap is the restated state - nothing was in force, so a reset alone.
+	if held.Text == nil || *held.Text != "banner\n\n\n\x1b[0mfooter" {
 		t.Fatalf("a tall read kept the air: %q", *held.Text)
 	}
 }

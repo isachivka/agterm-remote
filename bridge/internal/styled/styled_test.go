@@ -112,7 +112,7 @@ func TestHistoryReportsAFailedRun(t *testing.T) {
 func TestSqueezeCollapsesTheAirInsideATallScreen(t *testing.T) {
 	in := "banner\n\n\n\n\n\n   \n\x1b[0m \nfooter line\n\x1b[31mred\x1b[0m"
 	got := Squeeze(in, 2)
-	want := "banner\n\n\nfooter line\n\x1b[31mred\x1b[0m"
+	want := "banner\n\n\n\x1b[0mfooter line\n\x1b[31mred\x1b[0m"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -122,7 +122,7 @@ func TestSqueezeCollapsesTheAirInsideATallScreen(t *testing.T) {
 	}
 	// Two gaps, both squeezed; content between them intact.
 	in = "a\n\n\n\n\nb\n\n\n\nc"
-	if got := Squeeze(in, 1); got != "a\n\nb\n\nc" {
+	if got := Squeeze(in, 1); got != "a\n\n\x1b[0mb\n\n\x1b[0mc" {
 		t.Fatalf("got %q", got)
 	}
 }
