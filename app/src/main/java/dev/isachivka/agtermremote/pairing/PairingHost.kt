@@ -162,13 +162,6 @@ fun PairingHost(
     val scope = rememberCoroutineScope()
     val flow = remember(store) { PairingFlow(enrol) }
 
-    // Keyed on the state so it fires on the transition and not on every recomposition of a screen
-    // that stays Paired. The receipt with the fingerprint is not lost: the settings screen shows the
-    // pinned fingerprint whenever it is opened.
-    LaunchedEffect(flow.state) {
-        if (flow.state is PairingUi.Paired) onPaired()
-    }
-
     // Read rather than remembered: a permission revoked in Settings while this app sat in the
     // background must be observed the next time it matters, and a cached `true` is how an app tells
     // the owner something that stopped being true.
@@ -232,7 +225,17 @@ fun PairingHost(
 
     PairingSection(
         state = flow.state,
-        onCode = { text -> scope.launch { flow.onCode(text) } },
+        // **Told on the success path itself, not through an effect keyed on the state.** An effect
+        // launches after the recomposition that observed the change, and anything in that same
+        // recomposition can dispose this composable first - so the owner sat on the settings screen
+        // after a real pairing with nowhere to go. A callback that runs right after the enrolment
+        // returns has no composition to race.
+        onCode = { text ->
+            scope.launch {
+                flow.onCode(text)
+                if (flow.state is PairingUi.Paired) onPaired()
+            }
+        },
         onRetry = flow::retry,
         modifier = modifier,
         // The same callback the Pair button is given. The scanner has no path of its own.

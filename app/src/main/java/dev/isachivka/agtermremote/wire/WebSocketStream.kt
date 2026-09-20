@@ -116,10 +116,33 @@ class WebSocketStream private constructor(
          */
         @Throws(WireException::class)
         fun open(url: String): WebSocketStream {
+            // **The outer hop authenticates nobody, on purpose, and this is where that is made true.**
+            //
+            // The design has always said so: what identifies the laptop is the byte-pinned mTLS INSIDE
+            // the upgraded stream, and the token is sent only after that inner handshake. The outer
+            // TLS - to a router, a tunnel, or the bridge's own port - buys confidentiality on the
+            // hop and reachability through things that insist on HTTPS, and nothing else. But OkHttp's
+            // default is the platform's trust store plus hostname verification, which is right for a
+            // browser and wrong here: it accepted a router with a public certificate and refused the
+            // bridge's own minted one, so "TLS first" silently became "plain" on every direct
+            // connection. With the outer hop trusting whatever answers, `wss://` works everywhere the
+            // design says it does, and the plain fallback is left for the one proxy that speaks
+            // plain HTTP on the outside.
+            //
+            // A man in the middle on this hop gets exactly what a plain connection would give him:
+            // the outside of an mTLS handshake he cannot complete. See SECURITY.md's threat model.
+            val trustAnything = object : javax.net.ssl.X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+            }
+            val outer = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(trustAnything), null) }
             val client = OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS) // the stream is long-lived; bounds live above
                 .pingInterval(30, TimeUnit.SECONDS)
+                .sslSocketFactory(outer.socketFactory, trustAnything)
+                .hostnameVerifier { _, _ -> true }
                 .build()
 
             // Bounded. Not an attack surface behind the router's TLS, but an unbounded queue is a

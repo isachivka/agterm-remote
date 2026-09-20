@@ -22,7 +22,7 @@ import AppKit
 /// every few seconds. A redraw that rebuilt the boxes from the store would take a half-typed address
 /// away under somebody's cursor, so a redraw reads the boxes first and puts the same text back.
 @MainActor
-final class SettingsWindow: NSObject, NSWindowDelegate {
+final class SettingsWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate {
 
     private var window: NSWindow?
     var isOpen: Bool { window != nil }
@@ -44,7 +44,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     // MARK: What the owner did
 
-    var onSave: ((_ typed: String, _ port: String) -> Void)?
+    /// Every keystroke in either box, with both current values. The app saves what parses, says what
+    /// does not, and applies the result - bridge restart, fresh code - after a moment of quiet.
+    var onEdited: ((_ typed: String, _ port: String) -> Void)?
+    /// The one thing that still needs a press: a two-label host the parser will not take on faith.
+    var onConfirmSuffix: (() -> Void)?
+    /// Whether the message row should offer that press.
+    var offersSuffixConfirmation = false
     var onUnpair: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -112,21 +118,18 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(
             caption(agtermIsThere ? "agterm is running." : "agterm is not running - a phone can connect but has nothing to drive."))
 
-        // The address, and Save beside it.
+        // **No Save button.** The first person to set this up pressed it twice before both boxes
+        // took, and could not say which one had not. Whatever is typed is saved as it is typed, and
+        // the code below follows a moment after the typing stops. There is nothing to press.
         stack.addArrangedSubview(label("Address your phone dials"))
         let box = NSTextField(string: field.text)
         box.placeholderString = OnboardingCopy.addressPlaceholder
         box.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         box.translatesAutoresizingMaskIntoConstraints = false
-        box.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        box.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        box.delegate = self
         addressBox = box
-        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
-        save.bezelStyle = .rounded
-        save.keyEquivalent = "\r"
-        let row = NSStackView(views: [box, save])
-        row.orientation = .horizontal
-        row.spacing = 8
-        stack.addArrangedSubview(row)
+        stack.addArrangedSubview(box)
 
         // The port traffic arrives on. Blank follows the address, which is the port-forward case.
         stack.addArrangedSubview(label("Port this Mac listens on"))
@@ -135,6 +138,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         port.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         port.translatesAutoresizingMaskIntoConstraints = false
         port.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        port.delegate = self
         portBox = port
         stack.addArrangedSubview(port)
 
@@ -142,7 +146,17 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         // setups in two days picked the wrong one. The bridge now serves TLS and plain HTTP on its
         // one port, decided per connection, and the phone tries TLS first and remembers what worked.
 
-        if !addressMessage.isEmpty { stack.addArrangedSubview(body(addressMessage)) }
+        // The message row is updated in place by `sayAboutAddress`, so a keystroke never rebuilds the
+        // boxes it was typed into.
+        let message = body(addressMessage)
+        messageLabel = message
+        stack.addArrangedSubview(message)
+        message.isHidden = addressMessage.isEmpty
+        if offersSuffixConfirmation {
+            let confirm = NSButton(title: "Use it anyway", target: self, action: #selector(confirmSuffixTapped))
+            confirm.bezelStyle = .rounded
+            stack.addArrangedSubview(confirm)
+        }
 
         stack.addArrangedSubview(separator())
 
@@ -163,11 +177,27 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         return stack
     }
 
-    @objc private func saveTapped() {
-        onSave?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
+    private var messageLabel: NSTextField?
+
+    /// Replace the sentence under the boxes without touching the boxes.
+    func sayAboutAddress(_ sentence: String) {
+        addressMessage = sentence
+        guard let messageLabel else { return }
+        messageLabel.stringValue = sentence
+        messageLabel.isHidden = sentence.isEmpty
     }
 
+    @objc private func confirmSuffixTapped() { onConfirmSuffix?() }
+
     @objc private func unpairTapped() { onUnpair?() }
+
+    // MARK: - Typing
+
+    /// Both boxes report through here, on every change. `NSTextFieldDelegate` delivers the text
+    /// field's own notification, so this is not a key monitor and paste counts as typing.
+    func controlTextDidChange(_ note: Notification) {
+        onEdited?(addressBox?.stringValue ?? "", portBox?.stringValue ?? "")
+    }
 
     // MARK: - Pieces
 
