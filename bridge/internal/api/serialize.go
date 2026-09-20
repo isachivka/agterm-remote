@@ -78,14 +78,20 @@ func (h *Handler) publishFit() {
 	var (
 		inForce bool
 		columns int
+		rows    int
+		session string
+		pane    string
 	)
 	if h.store != nil && h.store.Active != nil {
 		inForce = true
 		columns = h.store.Active.Columns
+		rows = h.store.Active.Rows
+		session, pane = h.store.Active.Session, h.store.Active.Pane
 	}
 
 	h.stateMu.Lock()
 	h.fitInForce, h.fitColumns = inForce, columns
+	h.fitRows, h.heldSession, h.heldPane = rows, session, pane
 	// **A completed operation re-establishes the truth, so the old measurement is discarded rather
 	// than left to argue with it.** Whatever the pty showed a moment ago described a window that has
 	// just been resized; keeping it would let a stale reading suppress a fit that genuinely is in
@@ -156,13 +162,24 @@ func (h *Handler) fitNow() (inForce bool, columns int) {
 // (`AgtermScreen.kt`), so a count published alongside `false` is never shown — and the honest value
 // available here is a floor rather than a width, so substituting it would trade one small lie for
 // another in a field nobody reads.
-func (h *Handler) fitOnTheWire() (inForce bool, columns int) {
+//
+// The rows are reported as held whatever the width measurement says: a window the owner dragged
+// wider says nothing about a pty the daemon is still holding tall.
+func (h *Handler) fitOnTheWire() (inForce bool, columns, rows int) {
 	h.stateMu.RLock()
 	defer h.stateMu.RUnlock()
 	if fitOutgrown(h.measuredColumns, h.fitColumns) {
-		return false, h.fitColumns
+		return false, h.fitColumns, h.fitRows
 	}
-	return h.fitInForce, h.fitColumns
+	return h.fitInForce, h.fitColumns, h.fitRows
+}
+
+// holdsPane reports whether the fit in force holds a height on this pane - the one question the
+// screen path asks, off the published copy, so a poll never touches the store.
+func (h *Handler) holdsPane(session, pane string) bool {
+	h.stateMu.RLock()
+	defer h.stateMu.RUnlock()
+	return h.fitRows > 0 && h.heldSession == session && h.heldPane == pane
 }
 
 // The two locks. Kept here rather than beside the struct so that the reasoning above travels with them.
@@ -181,6 +198,10 @@ type locks struct {
 	// was anything measured to check it against.
 	fitInForce bool
 	fitColumns int
+	// fitRows, heldSession and heldPane are the tall fit's half of the same fact: the height held and
+	// the pane it is held on. Zero rows is "no height", never "zero rows".
+	fitRows               int
+	heldSession, heldPane string
 	// measuredColumns is what the pty last actually showed - the counterweight to the two above.
 	// Zero means nothing has been measured since the last operation, which is "no evidence", never
 	// "no columns". See noteMeasuredColumns and fitOutgrown.

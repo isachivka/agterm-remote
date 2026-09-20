@@ -50,6 +50,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/hop"
 	"github.com/isachivka/agterm-remote/bridge/internal/listener"
 	"github.com/isachivka/agterm-remote/bridge/internal/logfile"
+	"github.com/isachivka/agterm-remote/bridge/internal/palette"
 	"github.com/isachivka/agterm-remote/bridge/internal/parent"
 	"github.com/isachivka/agterm-remote/bridge/internal/pinning"
 	"github.com/isachivka/agterm-remote/bridge/internal/trust"
@@ -239,7 +240,8 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 	}
 	// The resize cache lives in the state directory, whose mode was set above. It holds a
 	// points-per-column line per display and the geometry to put back - no session name, no text.
-	handler := api.New(agterm.New(socketPath), stateDir)
+	client := agterm.New(socketPath)
+	handler := api.New(client, stateDir)
 
 	// The enrolment window.
 	//
@@ -373,6 +375,11 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 		})
 	}
 
+	// The owner's way out of a tall fit, put in agterm's palette before anything could need it.
+	// Best effort: agterm is often not up yet at login, and the fit path installs it again before
+	// every claim, so a miss here costs nothing that the first press does not repair.
+	installPalette(ctx, client, stateDir)
+
 	// If a previous run died with the owner's window resized, put it back. Logged and not fatal: a
 	// bridge that refuses to start because agterm is not up yet would be a worse outcome than a
 	// window that stays narrow until the next resize.
@@ -436,6 +443,28 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 		return err
 	}
 	return nil
+}
+
+// installPalette puts "Undo phone fit" in agterm's command palette, naming this binary where it is.
+//
+// The line names a path inside the app bundle, and the bundle moves with every install - which is
+// why the bridge writes the line rather than the owner. Nothing here is fatal: the phone's own Fit
+// button is the other way out, and it does not depend on a keymap.
+func installPalette(ctx context.Context, c *agterm.Client, stateDir string) {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("palette: this binary does not know its own path (%v); the undo command was not installed", err)
+		return
+	}
+	changed, err := palette.Ensure(ctx, c, exe, stateDir)
+	switch {
+	case err != nil:
+		log.Printf("palette: %v", err)
+	case changed:
+		log.Printf("palette: installed %q in agterm's keymap", palette.Name)
+	default:
+		log.Printf("palette: %q is in agterm's keymap", palette.Name)
+	}
 }
 
 // identity loads the bridge's own certificate and key from the state directory, minting them on the

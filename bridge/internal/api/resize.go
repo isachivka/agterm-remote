@@ -195,6 +195,10 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// asserted a column count; it no longer sends one at all, so the box width is what says whether
 	// this is a request to adapt or a request to stop.
 	if req.BoxWidthDp == 0 {
+		// The height first, and its failure never stops the width. The pty is the daemon's to put
+		// back and the window is agterm's; a daemon that has gone away must not leave the owner with
+		// a narrow window because the pty behind one pane could not be reached.
+		h.releaseHeight(ctx, h.store.Active)
 		if err := resize.RestoreWindow(ctx, term, h.store); err != nil {
 			// The restore is the path that fails when agterm refuses a resize outright - which is how
 			// a width-only request looked on 2026-07-31: five ok=false lines with nothing above them.
@@ -213,6 +217,9 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// something to aim at. The answer that comes back is what the laptop's terminal really rendered.
 	if req.CharacterWidthMilliDp <= 0 {
 		return refuse("width: REFUSED - the phone did not say how wide one character measures on its screen")
+	}
+	if req.Rows < 0 || req.Rows > resize.MaxRows {
+		return refuse("height: REFUSED - rows must be between 0 and %d, not %d", resize.MaxRows, req.Rows)
 	}
 	columns := columnsThatStrictlyFit(req.BoxWidthDp, req.CharacterWidthMilliDp)
 
@@ -241,6 +248,14 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		return refuse("width: REFUSED - %v", err)
 	}
 
+	// The fit in force BEFORE this press, copied: resize.To replaces Active with a fresh width, and
+	// the height that was held rides on the old one. See holdHeight for both uses.
+	var previous *resize.Fit
+	if h.store.Active != nil {
+		copied := *h.store.Active
+		previous = &copied
+	}
+
 	got, calibrated, err := resize.To(
 		ctx, term, h.store, h.stateDir, req.BoxWidthDp, req.MarginDp, req.CharacterWidthMilliDp,
 		columns, intent)
@@ -260,10 +275,16 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// replaces his terminal with a full-page error carrying that same sentence about probe widths.
 		// He cannot act on any of it and his session had done nothing wrong.
 		log.Printf("width: REFUSED - %v", err)
+		// The width is off and the store says so; a height still held would be a pty nothing on
+		// any reply admits to. Let it go with the width.
+		h.releaseHeight(ctx, previous)
 		return refuseContent(describe(err))
 	}
 	log.Printf("width: %s, %d columns now in effect",
 		map[bool]string{true: "calibrated", false: "applied from cache"}[calibrated], got)
+	// The height, at the columns the width fit just produced, and recorded into the same Active the
+	// width was. Before the save below, so the record on disk is the whole fit.
+	rows := h.holdHeight(ctx, req, got, previous)
 	// The setting is set inside resize.To, by the only code that holds the fit it came from.
 	// Saved after the work for the CALIBRATION only. The restore point does not wait for this and must
 	// not: resize.To writes it to disk itself, before the first window change, because a crash between
@@ -279,7 +300,7 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// disagreed, the owner's press sent the opposite of what they intended and the feature looked
 	// dead. Measured 2026-07-30: `enabled: false` on disk while they were pressing a button to turn
 	// it on.
-	return Response{OK: true, Columns: got, Calibrated: calibrated, FitEnabled: boolPtr(h.store.Active != nil)}
+	return Response{OK: true, Columns: got, Rows: rows, Calibrated: calibrated, FitEnabled: boolPtr(h.store.Active != nil)}
 }
 
 // paneShape describes what the fit is about to size, for the log and for nothing else.
@@ -477,6 +498,9 @@ func (h *Handler) RestorePending(ctx context.Context) error {
 	if h.store == nil || h.store.Pending == nil {
 		return nil
 	}
+	// The height before the window, as on the off press. No hold is live in a process that has just
+	// started, so this is the one-shot Restore against the daemon the record names.
+	h.releaseHeight(ctx, h.store.Active)
 	if err := resize.RestoreWindow(ctx, terminal{client: h.client}, h.store); err != nil {
 		// The record survives a failed restore - see RestoreWindow - so the owner's off press can
 		// still perform it once agterm is up. The setting is left alone for the same reason: the

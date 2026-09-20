@@ -157,7 +157,37 @@ type Fit struct {
 	// applied to a hidden sidebar costs the terminal nothing, so a fit measured with it showing does
 	// not hold with it hidden, and the detector compares this where it used to compare the width.
 	SidebarVisible bool `json:"sidebar_visible"`
+
+	// The tall fit: a HEIGHT held through the zmx daemon behind one pane, beside the width above.
+	//
+	// **These live on [Store.Active] only and never in the fits map.** A width is a calibration
+	// result, true of a display and a box for as long as the laptop's chrome holds still; a height
+	// is a claim on one daemon's pty that is in force right now, and it dies with the connection
+	// that holds it. Copying Active back into the map would store a session id and a socket as if
+	// they were geometry. Zero rows means no height is held, which is every fit written before this
+	// existed and every width-only press since.
+	Rows int `json:"rows,omitempty"`
+	// Session and Pane are which pane the daemon belongs to, so a screen read of THAT pane knows to
+	// check the hold and a read of any other pane costs nothing extra.
+	Session string `json:"session,omitempty"`
+	Pane    string `json:"pane,omitempty"`
+	// Daemon and SocketPath are the daemon, by name and by the socket agterm reported for it. The
+	// path is what a restart needs: the connection that held the pty died with the old process, and
+	// the only way to put the pty back is to dial the daemon again.
+	Daemon     string `json:"daemon,omitempty"`
+	SocketPath string `json:"socket_path,omitempty"`
+	// OriginalRows and OriginalCols are the pty's size before the hold - read off the pty itself,
+	// once, before the first claim - and they are what Release and Restore put back. Kept across
+	// re-claims: a pty read while it is held reports the held size, and recording that as the
+	// original would make the release a no-op that looks like a success.
+	OriginalRows int `json:"original_rows,omitempty"`
+	OriginalCols int `json:"original_cols,omitempty"`
 }
+
+// MaxRows caps the height the phone may ask for. Five hundred matches the screen verb's MaxLines: a
+// pty taller than the phone can read is rows the daemon renders for nobody, and an unbounded value
+// would let one request make a program lay out a terminal of any height at all.
+const MaxRows = 500
 
 // fitKey is (display, measured box width, measured character width). **A different measurement is a
 // different question, so it gets a different key and a fresh calibration - and that invalidation is a
