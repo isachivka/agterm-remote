@@ -78,7 +78,7 @@ func (d *Daemon) read(i int, conn net.Conn) {
 		d.closed[i] = true
 		d.mu.Unlock()
 	}()
-	header := make([]byte, 5)
+	header := make([]byte, 8) // @sizeOf(ipc.Header): a packed u8+u32 is a u40, which Zig sizes at 8
 	for {
 		if _, err := io.ReadFull(conn, header); err != nil {
 			return
@@ -132,7 +132,7 @@ func (d *Daemon) Send(t *testing.T, i int, tag byte, payload []byte) {
 	}
 	conn := d.conns[i]
 	d.mu.Unlock()
-	b := make([]byte, 5, 5+len(payload))
+	b := make([]byte, 8, 8+len(payload))
 	b[0] = tag
 	binary.LittleEndian.PutUint32(b[1:5], uint32(len(payload)))
 	if _, err := conn.Write(append(b, payload...)); err != nil {

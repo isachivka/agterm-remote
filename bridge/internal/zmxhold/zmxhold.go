@@ -253,7 +253,7 @@ func (h *Hold) write(frames []byte) error {
 // us, and the daemon's loop is single-threaded.
 func (h *Hold) read() {
 	defer close(h.done)
-	header := make([]byte, 5)
+	header := make([]byte, headerLen)
 	for {
 		if _, err := io.ReadFull(h.conn, header); err != nil {
 			h.readErr = err
@@ -292,13 +292,22 @@ func (h *Hold) Err() error {
 	}
 }
 
-// frame is one message: tag, little-endian u32 length, payload.
+// frame is one message: an 8-byte header, then the payload.
+//
+// **The header is 8 bytes, not the 5 its two fields add up to.** zmx declares it as a packed struct
+// of a u8 tag and a u32 length, and Zig sizes a packed struct as its backing integer - a u40 - whose
+// ABI size is 8. The daemon reads exactly @sizeOf(Header) bytes per frame, so a 5-byte header shifts
+// every byte after it: the first real daemon this ran against read a payload byte as tag 5, Kill,
+// and shut itself down. The three trailing bytes are padding and are sent as zero.
 func frame(tag byte, payload []byte) []byte {
-	b := make([]byte, 5, 5+len(payload))
+	b := make([]byte, headerLen, headerLen+len(payload))
 	b[0] = tag
 	binary.LittleEndian.PutUint32(b[1:5], uint32(len(payload)))
 	return append(b, payload...)
 }
+
+// headerLen is @sizeOf(ipc.Header) in the daemon: see frame.
+const headerLen = 8
 
 // sizeFrames is a size message in both encodings, 8-byte then 4-byte, back to back.
 func sizeFrames(tag byte, s Size) []byte {

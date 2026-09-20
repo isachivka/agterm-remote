@@ -15,12 +15,12 @@ import (
 
 // 200 rows by 41 columns, little-endian, pixels zero - the 8-byte form and the 4-byte legacy form.
 var (
-	init8   = []byte{7, 8, 0, 0, 0, 200, 0, 41, 0, 0, 0, 0, 0}
-	init4   = []byte{7, 4, 0, 0, 0, 200, 0, 41, 0}
-	resize8 = []byte{2, 8, 0, 0, 0, 200, 0, 41, 0, 0, 0, 0, 0}
-	resize4 = []byte{2, 4, 0, 0, 0, 200, 0, 41, 0}
-	claim   = append([]byte{0, 12, 0, 0, 0}, "\x1b[200~\x1b[201~"...)
-	detach  = []byte{3, 0, 0, 0, 0}
+	init8   = []byte{7, 8, 0, 0, 0, 0, 0, 0, 200, 0, 41, 0, 0, 0, 0, 0}
+	init4   = []byte{7, 4, 0, 0, 0, 0, 0, 0, 200, 0, 41, 0}
+	resize8 = []byte{2, 8, 0, 0, 0, 0, 0, 0, 200, 0, 41, 0, 0, 0, 0, 0}
+	resize4 = []byte{2, 4, 0, 0, 0, 0, 0, 0, 200, 0, 41, 0}
+	claim   = append([]byte{0, 12, 0, 0, 0, 0, 0, 0}, "\x1b[200~\x1b[201~"...)
+	detach  = []byte{3, 0, 0, 0, 0, 0, 0, 0}
 )
 
 const (
@@ -31,7 +31,7 @@ const (
 )
 
 func raw(f zmxholdtest.Frame) []byte {
-	b := []byte{f.Tag, byte(len(f.Payload)), 0, 0, 0}
+	b := []byte{f.Tag, byte(len(f.Payload)), 0, 0, 0, 0, 0, 0}
 	return append(b, f.Payload...)
 }
 
@@ -95,8 +95,8 @@ func TestClaimSendsThePasteThenTheNewSize(t *testing.T) {
 	}
 	got := d.AwaitFrames(t, 8)
 	expectFrames(t, got[5:], claim,
-		[]byte{2, 8, 0, 0, 0, 200, 0, 38, 0, 0, 0, 0, 0},
-		[]byte{2, 4, 0, 0, 0, 200, 0, 38, 0})
+		[]byte{2, 8, 0, 0, 0, 0, 0, 0, 200, 0, 38, 0, 0, 0, 0, 0},
+		[]byte{2, 4, 0, 0, 0, 0, 0, 0, 200, 0, 38, 0})
 	if h.Held() != (Size{Rows: tall, Cols: 38}) {
 		t.Errorf("held %+v after a re-claim", h.Held())
 	}
@@ -104,8 +104,8 @@ func TestClaimSendsThePasteThenTheNewSize(t *testing.T) {
 	d.Send(t, 0, 2, nil)
 	got = d.AwaitFrames(t, 10)
 	expectFrames(t, got[8:],
-		[]byte{2, 8, 0, 0, 0, 200, 0, 38, 0, 0, 0, 0, 0},
-		[]byte{2, 4, 0, 0, 0, 200, 0, 38, 0})
+		[]byte{2, 8, 0, 0, 0, 0, 0, 0, 200, 0, 38, 0, 0, 0, 0, 0},
+		[]byte{2, 4, 0, 0, 0, 0, 0, 0, 200, 0, 38, 0})
 }
 
 func TestReleaseRestatesTheOriginalSizeThenDetaches(t *testing.T) {
@@ -122,8 +122,8 @@ func TestReleaseRestatesTheOriginalSizeThenDetaches(t *testing.T) {
 	got := d.AwaitFrames(t, 8)
 	// 56 rows, 164 columns: 0x38, 0xA4.
 	expectFrames(t, got[5:],
-		[]byte{2, 8, 0, 0, 0, 56, 0, 164, 0, 0, 0, 0, 0},
-		[]byte{2, 4, 0, 0, 0, 56, 0, 164, 0},
+		[]byte{2, 8, 0, 0, 0, 0, 0, 0, 56, 0, 164, 0, 0, 0, 0, 0},
+		[]byte{2, 4, 0, 0, 0, 0, 0, 0, 56, 0, 164, 0},
 		detach)
 	d.AwaitClosed(t, 0)
 	// No paste on the way out: the release must not make us leader again on a pane we are leaving.
@@ -142,8 +142,8 @@ func TestRestoreIsAFreshInitThenDetachAndTypesNothing(t *testing.T) {
 	}
 	got := d.AwaitFrames(t, 3)
 	expectFrames(t, got,
-		[]byte{7, 8, 0, 0, 0, 56, 0, 164, 0, 0, 0, 0, 0},
-		[]byte{7, 4, 0, 0, 0, 56, 0, 164, 0},
+		[]byte{7, 8, 0, 0, 0, 0, 0, 0, 56, 0, 164, 0, 0, 0, 0, 0},
+		[]byte{7, 4, 0, 0, 0, 0, 0, 0, 56, 0, 164, 0},
 		detach)
 	d.AwaitClosed(t, 0)
 	// Init and nothing else: an Input here would take leadership from agterm, which is the opposite
