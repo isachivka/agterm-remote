@@ -122,6 +122,8 @@ func tallFit(t *testing.T, live bool) *tallFixture {
 			return agtermtest.OK(map[string]any{})
 		case "session.text":
 			return agtermtest.OK(map[string]any{"text": "hello"})
+		case "session.type":
+			return agtermtest.OK(map[string]any{})
 		}
 		return agtermtest.Err("unexpected " + req.Cmd)
 	})
@@ -1184,4 +1186,80 @@ func TestATallReadSqueezesTheAirAndAnOrdinaryReadKeepsIt(t *testing.T) {
 	if held.Text == nil || *held.Text != "banner\n\n\n\x1b[0mfooter" {
 		t.Fatalf("a tall read kept the air: %q", *held.Text)
 	}
+}
+
+// Typing into the held pane goes through the hold, with the claim input in front, and agterm is not
+// asked to type at all. The zmx daemon drops a follower's input its classifier does not call user
+// input, and that classifier does not see UTF-8 as text: the owner's Cyrillic (spelled by escape below, the guard refuses the letters), typed from the phone
+// through agterm's client while the bridge led, vanished. Found live on 2026-09-20.
+func TestTypingIntoTheHeldPaneGoesThroughTheHold(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+
+	resp := f.h.Handle(context.Background(), Request{Verb: VerbType, Session: sessionA, Pane: "left", Text: "\u044e\u043d\u0438\u043a\u043e\u0434"})
+	if !resp.OK {
+		t.Fatalf("type: %s", resp.Error)
+	}
+	frames := f.daemon.AwaitFrames(t, 6)
+	last := frames[5]
+	if last.Tag != 0 || string(last.Payload) != zmxhold.ClaimInput+"\u044e\u043d\u0438\u043a\u043e\u0434" {
+		t.Fatalf("the hold carried tag %d %q", last.Tag, last.Payload)
+	}
+	for _, r := range f.agterm.Requests() {
+		if r.Cmd == "session.type" {
+			t.Fatal("agterm was asked to type into a pane the bridge holds")
+		}
+	}
+}
+
+// A pane nothing holds is typed into through agterm exactly as before - no prefix, no hold.
+func TestTypingIntoAnUnheldPaneIsAgtermsAsBefore(t *testing.T) {
+	f := tallFit(t, true)
+	resp := f.h.Handle(context.Background(), Request{Verb: VerbType, Session: sessionA, Pane: "left", Text: "plain"})
+	if !resp.OK {
+		t.Fatalf("type: %s", resp.Error)
+	}
+	typed := 0
+	for _, r := range f.agterm.Requests() {
+		if r.Cmd == "session.type" {
+			typed++
+			if !strings.Contains(string(r.Args), `"text":"plain"`) {
+				t.Fatalf("agterm was asked to type %s", r.Args)
+			}
+		}
+	}
+	if typed != 1 {
+		t.Fatalf("agterm typed %d times", typed)
+	}
+	if hasTag(f.daemon.Frames(), 0) {
+		t.Fatal("something was typed through a hold that does not exist")
+	}
+}
+
+// With the hold's connection gone, agterm types - with the claim input in front, so the daemon's
+// classifier lets a follower's non-ASCII text through.
+func TestTypingWithADeadHoldGoesThroughAgtermWithThePrefix(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	f.dropHoldConnection(t)
+
+	resp := f.h.Handle(context.Background(), Request{Verb: VerbType, Session: sessionA, Pane: "left", Text: "\u0434\u0430"})
+	if !resp.OK {
+		t.Fatalf("type: %s", resp.Error)
+	}
+	for _, r := range f.agterm.Requests() {
+		if r.Cmd == "session.type" {
+			var args struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(r.Args, &args)
+			if args.Text != zmxhold.ClaimInput+"\u0434\u0430" {
+				t.Fatalf("agterm was asked to type %q", args.Text)
+			}
+			return
+		}
+	}
+	t.Fatal("agterm was never asked to type")
 }

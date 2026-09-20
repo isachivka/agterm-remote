@@ -152,6 +152,24 @@ func (h *Hold) Claim(size Size) error {
 	return h.write(sizeFrames(tagResize, size))
 }
 
+// Type puts input on the pty through this connection, ahead of it the claim input.
+//
+// **Why the bridge types through its own client while it holds a pane.** The daemon forwards a
+// non-leader's input only when its classifier calls it user input, and that classifier reads bytes
+// through a VT parser that never yields "print" for a UTF-8 lead byte: a follower typing nothing but
+// Cyrillic is dropped on the floor, silently, while "z" and then the same Cyrillic goes through. While
+// this Hold leads, agterm's own client is that follower - so text the phone sends through agterm
+// vanished exactly when it was not ASCII. Input from the LEADER is never classified, and this Hold is
+// the leader for as long as it is not typed over on the Mac; the claim input in front makes it the
+// leader again if it was, and is inert to the program either way. A side effect worth having: the
+// pty is not resized twice for every line the phone sends, because agterm never becomes leader for it.
+func (h *Hold) Type(input []byte) error {
+	if len(input) == 0 {
+		return nil
+	}
+	return h.write(frame(tagInput, append([]byte(ClaimInput), input...)))
+}
+
 // Held is the size this Hold last claimed.
 func (h *Hold) Held() Size {
 	h.mu.Lock()

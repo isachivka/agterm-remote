@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"log"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/keys"
+	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold"
 )
 
 // typing sends one keystroke, or a short run of text, to a session.
@@ -75,6 +77,18 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 		return refuseContent(err.Error())
 	}
 
+	// A pane this bridge holds tall is typed into through the bridge's own zmx client, because the
+	// daemon drops a follower's input that its classifier does not call user input - and that
+	// classifier does not see UTF-8 as text. See zmxhold.Hold.Type. When the hold cannot carry it,
+	// agterm types it as before, with the claim input in front so the classifier lets it through.
+	if held, _ := h.holdsPane(req.Session, string(pane)); held {
+		if err := h.typeThroughHold(out); err == nil {
+			return Response{OK: true}
+		} else {
+			log.Printf("type: not through the hold (%v); through agterm instead", err)
+		}
+		out = zmxhold.ClaimInput + out
+	}
 	if err := h.client.Type(ctx, req.Session, out, pane); err != nil {
 		// unreadable rather than fail: a pane that vanished on the laptop is a thing that CHANGED
 		// there, not the connection breaking, and it has its own sentence.
