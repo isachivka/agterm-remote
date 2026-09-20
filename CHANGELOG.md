@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/isachivka/agterm-remote/compare/v0.6.2...v0.7.0) (2026-09-20)
+
+
+### Features
+
+* a tall pane through zmx, held by the phone and undone from the palette ([#103](https://github.com/isachivka/agterm-remote/issues/103)) ([deeef67](https://github.com/isachivka/agterm-remote/commit/deeef67e348b7ee61afd7d718e1ebc0412afc7c5))
+
 ## [0.6.2](https://github.com/isachivka/agterm-remote/compare/v0.6.1...v0.6.2) (2026-09-20)
 
 
