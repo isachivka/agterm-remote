@@ -550,7 +550,10 @@ func (h *Handler) RestorePending(ctx context.Context) error {
 		// The record survives a failed restore - see RestoreWindow - so the owner's off press can
 		// still perform it once agterm is up. The setting is left alone for the same reason: the
 		// window is still narrowed, so a flag saying it is fitted remains true. The height's record
-		// stays on Active with it when the pty could not be put back.
+		// stays on Active with it when the pty could not be put back - and when it COULD, the record
+		// is gone from Active, so the copy every reply reads must be told: without this the phone
+		// went on hearing 200 rows for a pty that had just been put back, until the next press.
+		h.publishFit()
 		h.saveStore()
 		return fmt.Errorf("restoring the window a previous run resized: %w", err)
 	}

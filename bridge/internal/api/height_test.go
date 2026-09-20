@@ -1104,3 +1104,63 @@ func TestAPressOnADaemonStillOwedIsWidthOnlyAndKeepsTheDebt(t *testing.T) {
 		t.Fatalf("active = %+v", a)
 	}
 }
+
+// The fourth review's major: a start whose pty put-back succeeds and whose window restore then
+// fails left the PUBLISHED copy as New had loaded it, so every reply went on claiming 200 rows for
+// a pty that had just been put back, until a press. The record on Active is cleared by the put-back;
+// the copy the replies read has to follow it on that exit too.
+func TestAStartWhoseWindowRestoreFailsStopsReportingTheHeightItPutBack(t *testing.T) {
+	f := tallFit(t, true)
+	f.h.store.Active = &resize.Fit{
+		Display: 0, BoxWidthDp: 440, CharacterWidthMilliDp: 9800, Points: 769, Columns: cachedColumns,
+		Rows: tallRows, Session: sessionA, Pane: "left",
+		Daemon: filepath.Base(f.daemon.Path), SocketPath: f.daemon.Path,
+		OriginalRows: 56, OriginalCols: 164,
+	}
+	f.h.store.Pending = &resize.Restore{WindowID: "w1", Width: 1728, Height: 1084}
+	f.h.publishFit()
+	// agterm is not up yet; the daemon is, because daemons outlive agterm.
+	f.set(func() { f.failWindowList = true })
+
+	if err := f.h.RestorePending(context.Background()); err == nil {
+		t.Fatal("the window restore was supposed to fail")
+	}
+	f.daemon.AwaitFrames(t, 3)
+
+	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+		t.Fatalf("active = %+v; the width is still in force and the height is gone", a)
+	}
+	if held, _ := f.h.holdsPane(sessionA, "left"); held {
+		t.Fatal("the published copy still says the pane is held")
+	}
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 || poll.FitEnabled == nil || !*poll.FitEnabled {
+		t.Fatalf("a poll reports rows %d, fit %v; want no rows and the width still on", poll.Rows, poll.FitEnabled)
+	}
+}
+
+// A plain read decides to let the height go from the published copy, then waits for opMu; a tall
+// press on a second connection can land in between. The decision carries the claim number it was
+// made against, so it never lets go of the hold that press just established.
+func TestADropDecidedBeforeANewerPressLeavesThatPressStanding(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	_, before := f.h.holdsPane(sessionA, "left")
+
+	// The Mac took the pty back; the next press re-claims it, and that is a newer claim.
+	f.ptyReports(ptysize.Size{Rows: 56, Cols: cachedColumns})
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 8)
+
+	f.h.dropHeight(context.Background(), before, "a read that decided before the press")
+
+	if a := f.h.store.Active; a == nil || a.Rows != tallRows {
+		t.Fatalf("active = %+v; the newer press was let go", a)
+	}
+	if hasTag(f.daemon.Frames(), 3) {
+		t.Fatal("the daemon was sent a Detach for a hold a newer press owns")
+	}
+	if held, now := f.h.holdsPane(sessionA, "left"); !held || now == before {
+		t.Fatalf("held %v, claim %d (was %d)", held, now, before)
+	}
+}

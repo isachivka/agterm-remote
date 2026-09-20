@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
@@ -80,6 +81,10 @@ type heightState struct {
 	// lastKeepErr is the last reason a check could not read the pty, so a persistent failure is
 	// logged once rather than on every poll.
 	lastKeepErr string
+	// claims counts every claim this process has made. The screen path decides to let a height go
+	// from the PUBLISHED copy, then waits for opMu - and a tall press can land in between. The number
+	// the read saw travels with its decision, so a drop meant for one hold never lets go of the next.
+	claims atomic.Uint64
 }
 
 // heightHold is one hold and what it needs to be released or re-opened.
@@ -289,6 +294,7 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 			err := h.height.held.hold.Claim(size)
 			if err == nil {
 				h.height.checkAfter = h.now().Add(holdCheckEvery)
+				h.height.claims.Add(1)
 				log.Printf("height: re-claimed %d rows by %d columns on the held pane", size.Rows, size.Cols)
 				return req.Rows
 			}
@@ -324,6 +330,7 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 	h.height.held = &heightHold{hold: hold, daemon: entry.Daemon, socketPath: socketPath, original: original}
 	// Just claimed, so the first check is due one interval from now, not on the next poll.
 	h.height.checkAfter = h.now().Add(holdCheckEvery)
+	h.height.claims.Add(1)
 	log.Printf("height: holding the pane at %d rows by %d columns; its pty was %d by %d",
 		size.Rows, size.Cols, original.Rows, original.Cols)
 	return req.Rows
@@ -514,11 +521,20 @@ func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agt
 //
 // A put-back that fails is parked, not retried from here: retrying on every poll would dial the
 // daemon every two seconds and log every time. The next undo, tall press or start retries it.
-func (h *Handler) dropHeight(ctx context.Context, why string) {
+//
+// `claim` is the claim number the read's decision was made against, from [Handler.holdsPane]. A tall
+// press that landed while this waited for opMu made a newer one, and the decision was not about it.
+func (h *Handler) dropHeight(ctx context.Context, claim uint64, why string) {
 	h.opMu.Lock()
 	defer h.opMu.Unlock()
-	// Re-read under the lock: an off press, or another read, may have let it go already.
+	// Re-read under the lock: an off press, or another read, may have let it go already. Republished
+	// even so, because the copy the read decided from evidently disagreed with the store.
 	if h.store == nil || h.store.Active == nil || h.store.Active.Rows == 0 {
+		h.publishFit()
+		return
+	}
+	if h.height.claims.Load() != claim {
+		log.Printf("height: %s - but a newer press holds the pane now, and it stands", why)
 		return
 	}
 	log.Printf("height: %s; letting the height go", why)

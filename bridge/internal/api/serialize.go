@@ -185,10 +185,13 @@ func (h *Handler) fitOnTheWire() (inForce bool, columns, rows int) {
 
 // holdsPane reports whether the fit in force holds a height on this pane - the one question the
 // screen path asks, off the published copy, so a poll never touches the store.
-func (h *Handler) holdsPane(session, pane string) bool {
+//
+// The claim number comes back with the answer, for [Handler.dropHeight]: a decision taken off this
+// copy is about the hold that existed when it was taken, and the number says which one that was.
+func (h *Handler) holdsPane(session, pane string) (bool, uint64) {
 	h.stateMu.RLock()
 	defer h.stateMu.RUnlock()
-	return h.fitRows > 0 && h.heldSession == session && h.heldPane == pane
+	return h.fitRows > 0 && h.heldSession == session && h.heldPane == pane, h.height.claims.Load()
 }
 
 // The two locks. Kept here rather than beside the struct so that the reasoning above travels with them.
