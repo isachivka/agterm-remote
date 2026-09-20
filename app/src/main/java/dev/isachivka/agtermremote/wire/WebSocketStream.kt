@@ -131,7 +131,9 @@ class WebSocketStream private constructor(
             //
             // A man in the middle on this hop gets exactly what a plain connection would give him:
             // the outside of an mTLS handshake he cannot complete. See SECURITY.md's threat model.
-            val trustAnything = object : javax.net.ssl.X509TrustManager {
+            // CodeQL's java/insecure-trustmanager is suppressed here on purpose: it is the rule this
+            // comment block exists to answer, and the alert was dismissed with the same reasoning.
+            val trustAnything = object : javax.net.ssl.X509TrustManager { // lgtm[java/insecure-trustmanager]
                 override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
                 override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
                 override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
