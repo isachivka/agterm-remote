@@ -450,8 +450,36 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 	if err := srv.Serve(ctx, ln); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
+	putBackOnExit(handler)
 	return nil
 }
+
+// putBackOnExit is the half of stop()'s promise that was never kept: "a window this bridge resized
+// is put back the way it was found". The listener and the control socket halves are the defers
+// above; this is the fit. It matters more since the tall fit than it did before, because a fit
+// now also holds a zmx daemon's pty at 200 rows, and a hold that dies with the process leaves the
+// pane squeezed with nothing listening for "Undo phone fit" - the next start's restore is the only
+// way back, and Quit is the exit every owner takes.
+//
+// The context this ran under is cancelled by now, so the restore gets a fresh, short one: agterm
+// answers in well under this, and a bridge that will not exit because agterm is gone is the worse
+// outcome. Through the phone's own off path, so it is one implementation.
+func putBackOnExit(handler *api.Handler) {
+	if !handler.FitInForce() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), exitRestoreTimeout)
+	defer cancel()
+	if err := handler.RestoreFit(ctx); err != nil {
+		log.Printf("exit: the fit could not be put back (%v); the next start will try again", err)
+		return
+	}
+	log.Printf("exit: the fit was put back")
+}
+
+// exitRestoreTimeout bounds the put-back on exit. One agterm round trip is milliseconds; the
+// calibration this can never trigger is the only thing that would take longer.
+const exitRestoreTimeout = 5 * time.Second
 
 // identity loads the bridge's own certificate and key from the state directory, minting them on the
 // first run.
