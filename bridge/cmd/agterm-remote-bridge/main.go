@@ -37,6 +37,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -197,7 +198,11 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 			return fmt.Errorf("log: %w", err)
 		}
 		defer lf.Close()
-		log.SetOutput(lf)
+		// The file AND stderr. The Mac app keeps the last of stderr to turn a failed bind into a
+		// sentence in its menu; the file is where a running bridge's day goes - which pane was held,
+		// what was typed where, why a put-back failed - the questions that cannot be answered from a
+		// buffer that holds a few hundred bytes of the end.
+		log.SetOutput(io.MultiWriter(log.Writer(), lf))
 	}
 
 	// The peer list, which may be empty. **An unpaired bridge starts and listens.**

@@ -93,6 +93,8 @@ public final class BridgeProcess: @unchecked Sendable {
     /// The one executable this app ever launches for the bridge. Named here rather than at the call
     /// site so `BoundaryTests` has a single string to hold the app to.
     public static let executableName = "agterm-remote-bridge"
+    /// The bridge's log, beside its identity and peers. Rotated by the bridge itself.
+    public static let logFileName = "bridge.log"
 
     /// **Where the bridge is looked for, in order, and nowhere else.**
     ///
@@ -423,14 +425,16 @@ public final class BridgeProcess: @unchecked Sendable {
 
     /// The argv. Every flag the binary requires, and nothing it does not.
     ///
-    /// `--log` is not passed, so the bridge writes to stderr and [ChildProcessLauncher] keeps the last
-    /// of it — which is what turns a failed bind into a sentence the owner can read. A log file would
-    /// be a better home for a running bridge's chatter and a worse one for the thing that has to
-    /// reach a menu.
+    /// `--log` names a file in the state directory. The bridge writes to that file AND to stderr,
+    /// so [ChildProcessLauncher] still keeps the last of it — which is what turns a failed bind into
+    /// a sentence the owner can read — while a running bridge's day (which pane it held, what was
+    /// typed where, why a put-back failed) is somewhere a person can open after the fact. The
+    /// 2026-09-20 "typing from the phone does nothing" report could not be answered because it was not.
     func arguments() -> [String] {
         var argv = [
             "--listen", listenAddress,
             "--state-dir", stateDir.path,
+            "--log", stateDir.appending(path: Self.logFileName).path,
             // The other half of dying with the app. Zero would disable it, and this app never passes
             // zero: a bridge outliving its parent holds the owner's exposed port with no user
             // interface left anywhere that could close it.
