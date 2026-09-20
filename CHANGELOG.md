@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/isachivka/agterm-remote/compare/v0.8.3...v0.8.4) (2026-09-20)
+
+
+### Bug Fixes
+
+* **app:** following the tail survives a screen that grows or shrinks under a still finger ([#113](https://github.com/isachivka/agterm-remote/issues/113)) ([04205f0](https://github.com/isachivka/agterm-remote/commit/04205f09fdebd26a4b747c81c18457108d49e199))
+
 ## [0.8.3](https://github.com/isachivka/agterm-remote/compare/v0.8.2...v0.8.3) (2026-09-20)
 
 
