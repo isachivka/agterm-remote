@@ -108,3 +108,31 @@ func TestHistoryReportsAFailedRun(t *testing.T) {
 		t.Fatalf("History err = %v, want the daemon's stderr", err)
 	}
 }
+
+func TestSqueezeCollapsesTheAirInsideATallScreen(t *testing.T) {
+	in := "banner\n\n\n\n\n\n   \n\x1b[0m \nfooter line\n\x1b[31mred\x1b[0m"
+	got := Squeeze(in, 2)
+	want := "banner\n\n\nfooter line\n\x1b[31mred\x1b[0m"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// A short gap is the owner's layout and stays.
+	if s := "a\n\nb"; Squeeze(s, 2) != s {
+		t.Fatalf("a gap within keep was changed: %q", Squeeze(s, 2))
+	}
+	// Two gaps, both squeezed; content between them intact.
+	in = "a\n\n\n\n\nb\n\n\n\nc"
+	if got := Squeeze(in, 1); got != "a\n\nb\n\nc" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSqueezeKeepsTheColourSetInTheGap(t *testing.T) {
+	// The colour is set on a blank row that gets dropped; the row after it must still be red.
+	in := "a\n\n\x1b[31m\n\n\nstill red\x1b[0m"
+	got := Squeeze(in, 1)
+	want := "a\n\n\x1b[0m\x1b[31mstill red\x1b[0m"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

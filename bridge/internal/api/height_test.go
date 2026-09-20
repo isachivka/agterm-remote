@@ -1164,3 +1164,23 @@ func TestADropDecidedBeforeANewerPressLeavesThatPressStanding(t *testing.T) {
 		t.Fatalf("held %v, claim %d (was %d)", held, now, before)
 	}
 }
+
+// A pane held tall is mostly air; the owner asked for the rows that say something. Only while the
+// height is held - the same screen at the pane's own height keeps its gaps.
+func TestATallReadSqueezesTheAirAndAnOrdinaryReadKeepsIt(t *testing.T) {
+	f := tallFit(t, true)
+	airy := "banner\r\n\r\n\r\n\r\n\r\n\r\n\r\nfooter\r\n"
+	f.h.history = func(context.Context, string, string, string) (string, error) { return airy, nil }
+
+	before := f.screen(t, sessionA)
+	if before.Text == nil || *before.Text != "banner\n\n\n\n\n\n\nfooter" {
+		t.Fatalf("an ordinary read changed the screen: %q", *before.Text)
+	}
+
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	held := f.screen(t, sessionA)
+	if held.Text == nil || *held.Text != "banner\n\n\nfooter" {
+		t.Fatalf("a tall read kept the air: %q", *held.Text)
+	}
+}

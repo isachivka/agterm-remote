@@ -204,3 +204,44 @@ func escape(s string) (string, int) {
 		return s[:2], 2
 	}
 }
+
+// Squeeze collapses every run of more than `keep` blank rows inside a screen to `keep` rows.
+//
+// A pane held tall for the phone is mostly air: a fresh Claude Code in a 500-row pty draws its
+// banner at the top, its composer at the bottom, and nothing in the hundreds of rows between - and
+// every one of those rows would travel on every poll and scroll under the owner's thumb. Trailing
+// air is already dropped by Clean; this is the air in the middle. A row is blank when nothing but
+// whitespace and SGR is on it. The SGR on collapsed rows is kept ahead of the first kept row, the
+// same way Tail keeps the state in force at a cut, so a colour set in the gap still reaches the
+// text after it. Only a tall read runs through this: at a pane's own height the gap is the owner's
+// layout, not the bridge's.
+func Squeeze(clean string, keep int) string {
+	if keep < 0 {
+		keep = 0
+	}
+	rows := strings.Split(clean, "\n")
+	out := make([]string, 0, len(rows))
+	run := 0
+	var dropped strings.Builder
+	for _, row := range rows {
+		if strings.TrimSpace(Strip(row)) == "" {
+			run++
+			if run > keep {
+				dropped.WriteString(row)
+				dropped.WriteByte('\n')
+				continue
+			}
+			out = append(out, row)
+			continue
+		}
+		if dropped.Len() > 0 {
+			if state := sgrState(dropped.String()); state != "" {
+				row = "\x1b[0m" + state + row
+			}
+			dropped.Reset()
+		}
+		run = 0
+		out = append(out, row)
+	}
+	return strings.Join(out, "\n")
+}

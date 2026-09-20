@@ -38,6 +38,10 @@ import (
 // a bad value never becomes a request. The ceiling is ours: a 500-line read of a 276-column terminal
 // is already far more than a phone can show, and an unbounded value would let one authenticated
 // request pull the entire scrollback of twenty sessions over a metered connection.
+// squeezeKeep is how many blank rows in a row survive inside a tall read. Two keeps a paragraph
+// break looking like one; anything longer is the pty's height, not the program's layout.
+const squeezeKeep = 2
+
 const (
 	MinLines     = 1
 	MaxLines     = 500
@@ -846,6 +850,12 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 			return unreadable(describe(err))
 		}
 		text = plain
+	}
+	// A pane held tall is mostly air between a fresh session's banner and its composer; the phone
+	// gets the rows that say something. Only while the height is held: at the pane's own height the
+	// gap is the owner's layout.
+	if held {
+		text = styled.Squeeze(text, squeezeKeep)
 	}
 
 	// **The only place in the bridge that MEASURES the owner's window for free.**
