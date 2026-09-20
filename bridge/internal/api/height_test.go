@@ -46,6 +46,11 @@ type tallFixture struct {
 	// detachBeforeWindowRestore records whether the daemon had the Detach when window.resize
 	// arrived - the ordering the off path promises.
 	detachBeforeWindowRestore bool
+	// failWindowList and failZmxList make the next agterm answers fail, standing for agterm
+	// restarting under a press. daemonName is what zmx.list names behind the pane; a test moves
+	// it to stand for the daemon being replaced.
+	failWindowList, failZmxList bool
+	daemonName                  string
 }
 
 // tallFit builds the fixture. `live` says whether the pane has a running daemon behind it.
@@ -53,18 +58,25 @@ func tallFit(t *testing.T, live bool) *tallFixture {
 	t.Helper()
 	f := &tallFixture{pty: ptysize.Size{Rows: 56, Cols: 164}, clock: time.Unix(1_700_000_000, 0)}
 	f.daemon = zmxholdtest.Start(t)
-	entries := []map[string]any{}
-	if live {
-		entries = append(entries, map[string]any{
-			"sessionID": sessionA, "pane": "left", "daemon": filepath.Base(f.daemon.Path),
-			"observation": "running", "leaderPID": shellPID,
-		})
-	}
+	f.daemonName = filepath.Base(f.daemon.Path)
 	f.agterm = agtermtest.Start(t, func(req agtermtest.Request) any {
+		f.mu.Lock()
+		failWindowList, failZmxList, daemonName := f.failWindowList, f.failZmxList, f.daemonName
+		f.mu.Unlock()
+		entries := []map[string]any{}
+		if live {
+			entries = append(entries, map[string]any{
+				"sessionID": sessionA, "pane": "left", "daemon": daemonName,
+				"observation": "running", "leaderPID": shellPID,
+			})
+		}
 		switch req.Cmd {
 		case "tree":
 			return agtermtest.OK(tree())
 		case "window.list":
+			if failWindowList {
+				return agtermtest.Err("agterm is restarting")
+			}
 			return agtermtest.OK(map[string]any{"windows": []any{
 				map[string]any{"id": "w1", "active": true,
 					"geometry": map[string]any{"display": 0, "width": 1728, "height": 1084}},
@@ -75,6 +87,9 @@ func tallFit(t *testing.T, live bool) *tallFixture {
 			f.mu.Unlock()
 			return agtermtest.OK(map[string]any{})
 		case "zmx.list":
+			if failZmxList {
+				return agtermtest.Err("agterm is restarting")
+			}
 			return agtermtest.OK(map[string]any{"zmx": map[string]any{
 				"endpoint": map[string]any{"executable": "/bundle/zmx", "socketDirectory": filepath.Dir(f.daemon.Path)},
 				"entries":  entries,
@@ -109,7 +124,16 @@ func tallFit(t *testing.T, live bool) *tallFixture {
 		defer f.mu.Unlock()
 		return f.clock
 	}
+	// The styled read's zmx history, so a styled screen read of the held pane stays styled rather
+	// than falling back to plain - which would read as the phone giving the height up.
+	f.h.history = func(context.Context, string, string, string) (string, error) { return "hello\r\n", nil }
 	return f
+}
+
+func (f *tallFixture) set(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn()
 }
 
 func (f *tallFixture) press(t *testing.T, rows int) Response {
@@ -136,12 +160,57 @@ func (f *tallFixture) ptyReports(s ptysize.Size) {
 	f.mu.Unlock()
 }
 
-func (f *tallFixture) screen(t *testing.T, session string) {
+// screen is the phone's poll of a pane WITH colours through zmx, which is how it reads while it
+// wants a height. plainScreen is the same read without them.
+func (f *tallFixture) screen(t *testing.T, session string) Response {
+	t.Helper()
+	resp := f.h.Handle(context.Background(), Request{Verb: VerbScreen, Session: session, Pane: "left", Styled: true})
+	if !resp.OK {
+		t.Fatalf("screen: %s", resp.Error)
+	}
+	return resp
+}
+
+func (f *tallFixture) plainScreen(t *testing.T, session string) Response {
 	t.Helper()
 	resp := f.h.Handle(context.Background(), Request{Verb: VerbScreen, Session: session, Pane: "left"})
 	if !resp.OK {
 		t.Fatalf("screen: %s", resp.Error)
 	}
+	return resp
+}
+
+// expectRelease asserts frames[at:] is one release: the original size in both forms, then Detach,
+// and nothing typed.
+func expectRelease(t *testing.T, frames []zmxholdtest.Frame, at int) {
+	t.Helper()
+	if len(frames) < at+3 {
+		t.Fatalf("no release at %d in %+v", at, frames)
+	}
+	for i := at; i < at+2; i++ {
+		if frames[i].Tag != 2 {
+			t.Fatalf("frame %d is tag %d, want Resize", i, frames[i].Tag)
+		}
+		if r, c := sizeOf(t, frames[i]); r != 56 || c != 164 {
+			t.Fatalf("released to %dx%d, not the pty's original 56x164", r, c)
+		}
+	}
+	if frames[at+2].Tag != 3 || len(frames[at+2].Payload) != 0 {
+		t.Fatalf("frame %d is %+v, want Detach", at+2, frames[at+2])
+	}
+	if hasTag(frames[at:at+3], 0) {
+		t.Fatal("the release typed into the pty")
+	}
+}
+
+// rowsOnDisk reads the height record back from the store file, as a restart would.
+func rowsOnDisk(t *testing.T, h *Handler) int {
+	t.Helper()
+	loaded := resize.LoadStore(h.stateDir)
+	if loaded.Active == nil {
+		return 0
+	}
+	return loaded.Active.Rows
 }
 
 func hasTag(frames []zmxholdtest.Frame, tag byte) bool {
@@ -289,7 +358,9 @@ func TestAReadOfAnotherPaneDoesNotCheckTheHold(t *testing.T) {
 	f.advance(3 * time.Second)
 	before := len(f.agterm.Requests())
 
-	f.screen(t, sessionB)
+	// A plain read of a pane that is not held: neither the styled path nor the hold check wants
+	// the inventory, and the plain read must not be taken for the phone giving THIS hold up.
+	f.plainScreen(t, sessionB)
 
 	for _, r := range f.agterm.Requests()[before:] {
 		if r.Cmd == "zmx.list" {
@@ -298,6 +369,9 @@ func TestAReadOfAnotherPaneDoesNotCheckTheHold(t *testing.T) {
 	}
 	if n := len(f.daemon.Frames()); n != 5 {
 		t.Fatalf("%d frames after reading another pane", n)
+	}
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != tallRows {
+		t.Fatalf("reading another pane plain dropped the height: poll says %d rows", poll.Rows)
 	}
 }
 
@@ -365,19 +439,177 @@ func TestAWidthOnlyPressLetsAHeldHeightGo(t *testing.T) {
 	}
 }
 
-func TestASecondTallPressReclaimsOnTheSameConnection(t *testing.T) {
+func TestASecondTallPressReadsThePtyAndClaimsOnlyWhenItMoved(t *testing.T) {
 	f := tallFit(t, true)
 	f.press(t, tallRows)
 	f.daemon.AwaitFrames(t, 5)
 
-	f.press(t, tallRows)
+	// The pty is where the hold put it: a re-press has nothing to claim, and claims nothing.
+	f.ptyReports(ptysize.Size{Rows: tallRows, Cols: cachedColumns})
+	resp := f.press(t, tallRows)
+	if resp.Rows != tallRows {
+		t.Fatalf("reply = %+v", resp)
+	}
+	if n := len(f.daemon.Frames()); n != 5 {
+		t.Fatalf("%d frames; a pty already at the held size was claimed again", n)
+	}
+	// And the re-press restarted the check timer: a poll straight after it checks nothing.
+	f.ptyReports(ptysize.Size{Rows: 56, Cols: 164})
+	f.advance(time.Second)
+	f.screen(t, sessionA)
+	if n := len(f.daemon.Frames()); n != 5 {
+		t.Fatalf("%d frames; the check ran inside the interval after a re-press", n)
+	}
 
+	// The pty moved: the re-press claims, on the same connection, keeping the original.
+	f.press(t, tallRows)
 	expectClaim(t, f.daemon.AwaitFrames(t, 8), 5, tallRows, cachedColumns)
 	if f.daemon.Connections() != 1 {
 		t.Fatalf("%d connections; a re-press must not open a second hold", f.daemon.Connections())
 	}
 	if a := f.h.store.Active; a.OriginalRows != 56 || a.OriginalCols != 164 {
 		t.Fatalf("the original moved to %dx%d under a re-press", a.OriginalRows, a.OriginalCols)
+	}
+}
+
+// **The record is on disk before the pty is touched, and a claim that does not happen takes it
+// back.** With the daemon's socket gone the open fails; the store must then say no height, on disk
+// as well as in memory, or a restart would dial a daemon for a hold that never was.
+func TestAFailedClaimLeavesNoHeightOnDisk(t *testing.T) {
+	f := tallFit(t, true)
+	if err := os.Remove(f.daemon.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := f.press(t, tallRows)
+
+	if resp.Rows != 0 || resp.Columns != cachedColumns {
+		t.Fatalf("reply = %+v", resp)
+	}
+	if a := f.h.store.Active; a == nil || a.Rows != 0 || a.SocketPath != "" {
+		t.Fatalf("active = %+v", a)
+	}
+	if rowsOnDisk(t, f.h) != 0 {
+		t.Fatal("the store on disk promises a height nothing holds")
+	}
+}
+
+func TestAHeldHeightIsOnDiskWithWhatARestartNeeds(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+
+	loaded := resize.LoadStore(f.h.stateDir)
+	a := loaded.Active
+	if a == nil || a.Rows != tallRows || a.SocketPath != f.daemon.Path || a.OriginalRows != 56 || a.OriginalCols != 164 {
+		t.Fatalf("on disk: %+v", a)
+	}
+}
+
+// **A plain read of the held pane is the phone giving the height up.** Colours through zmx is the
+// only thing that asks for a height, the phone reads styled exactly while it is on, and switching it
+// off sends no press - so this read is the only sign, and the bridge acts on it.
+func TestAPlainReadOfTheHeldPaneLetsTheHeightGo(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+
+	resp := f.plainScreen(t, sessionA)
+
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	f.daemon.AwaitClosed(t, 0)
+	if resp.Rows != 0 {
+		t.Fatalf("the reply to the read that let the height go still says %d rows", resp.Rows)
+	}
+	if a := f.h.store.Active; a == nil || a.Rows != 0 || a.Columns != cachedColumns {
+		t.Fatalf("active = %+v; the width stays, the height goes", a)
+	}
+	if rowsOnDisk(t, f.h) != 0 {
+		t.Fatal("the record on disk still holds a height")
+	}
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 {
+		t.Fatalf("a poll still reports %d rows", poll.Rows)
+	}
+	// And a styled read of the pane afterwards keeps nothing: the hold is gone, not paused.
+	f.ptyReports(ptysize.Size{Rows: 56, Cols: 164})
+	f.advance(3 * time.Second)
+	f.screen(t, sessionA)
+	if n := len(f.daemon.Frames()); n != 8 {
+		t.Fatalf("%d frames; a dropped hold was kept", n)
+	}
+}
+
+// resize.To returns with Active INTACT when the window cannot be read: the height must be released
+// AND taken off the record, or every reply goes on saying "200 rows" about a pty just put back.
+func TestAWidthFitThatFailsWithAHeightHeldReleasesItAndClearsTheRecord(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+
+	f.set(func() { f.failWindowList = true })
+	resp := f.h.Handle(context.Background(), Request{
+		Verb: VerbResize, Session: sessionA, Pane: "left",
+		BoxWidthDp: 440, CharacterWidthMilliDp: 9800, Rows: tallRows,
+	})
+	if resp.OK {
+		t.Fatal("the press was supposed to be refused")
+	}
+
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	if a := f.h.store.Active; a == nil || a.Rows != 0 || a.Daemon != "" {
+		t.Fatalf("active = %+v", a)
+	}
+	if rowsOnDisk(t, f.h) != 0 {
+		t.Fatal("the record on disk still holds a height")
+	}
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 {
+		t.Fatalf("a poll still reports %d rows", poll.Rows)
+	}
+}
+
+// The early exits of holdHeight - here, an inventory that could not be read - release like every
+// other width-only exit. Before this a hiccup in zmx.list on the automatic re-apply left the pty
+// held at 200 rows with a record that said nothing, so no reply admitted to it and no restart could
+// put it back.
+func TestATallPressWhoseInventoryFailsReleasesTheHoldItCannotRecord(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+
+	f.set(func() { f.failZmxList = true })
+	resp := f.press(t, tallRows)
+
+	if resp.Rows != 0 || resp.Columns != cachedColumns {
+		t.Fatalf("reply = %+v", resp)
+	}
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	f.daemon.AwaitClosed(t, 0)
+	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+		t.Fatalf("active = %+v", a)
+	}
+}
+
+// A pane whose daemon was replaced cannot be held by the connection to the old one. Once the check
+// has seen that, replies stop claiming a height rather than going on saying 200 rows for a pane
+// nothing holds.
+func TestALostDaemonStopsTheHeightBeingReported(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+
+	f.set(func() { f.daemonName = "agterm-replacement" })
+	f.advance(3 * time.Second)
+	resp := f.screen(t, sessionA)
+
+	if resp.Rows != 0 {
+		t.Fatalf("the read that found the daemon gone still says %d rows", resp.Rows)
+	}
+	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+		t.Fatalf("active = %+v", a)
+	}
+	// The old connection was let go at the original size, which is all that can be done for it.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 {
+		t.Fatalf("a poll still reports %d rows", poll.Rows)
 	}
 }
 

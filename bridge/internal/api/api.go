@@ -806,14 +806,23 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 	// Neither runs for a plain read of a pane nothing holds, so an ordinary poll costs what it always
 	// did; and when both run they share the round trip rather than asking agterm twice.
 	held := h.holdsPane(req.Session, string(pane))
+	if held && !req.Styled {
+		// **A plain read of the held pane is the phone saying it no longer wants the height.** The
+		// colours-through-zmx setting is the only thing that asks for one, the phone reads with
+		// `styled` exactly while that setting is on, and switching it off sends no press - so this
+		// read is the first and only sign. Without it the bridge would go on re-claiming a 200-row
+		// pane, against the owner typing at the Mac, for a feature he has just switched off.
+		h.dropHeight(ctx, "the phone reads this pane without colours through zmx now")
+		held = false
+	}
 	var inv *agterm.ZmxList
 	if req.Styled || held {
 		if list, err := h.client.ZmxList(ctx); err == nil {
 			inv = list
 		}
 	}
-	if held && inv != nil {
-		h.keepHeight(ctx, req.Session, string(pane), inv)
+	if held && inv != nil && h.keepHeight(ctx, req.Session, string(pane), inv) {
+		h.dropHeight(ctx, "the daemon behind the held pane changed")
 	}
 
 	// A styled read is tried first and abandoned silently: the phone said what it would PREFER, and

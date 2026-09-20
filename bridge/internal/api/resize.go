@@ -275,15 +275,23 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// replaces his terminal with a full-page error carrying that same sentence about probe widths.
 		// He cannot act on any of it and his session had done nothing wrong.
 		log.Printf("width: REFUSED - %v", err)
-		// The width is off and the store says so; a height still held would be a pty nothing on
-		// any reply admits to. Let it go with the width.
+		// A height still held would be a pty nothing on any reply admits to. Let it go with the
+		// width - and take it off the record too. resize.To clears Active itself after a failed
+		// calibration, but it returns with Active INTACT when the window could not be read or
+		// resized, and `previous` is a copy: releasing against the copy alone left every reply
+		// saying "200 rows" about a pty just put back to 56.
 		h.releaseHeight(ctx, previous)
+		if h.store.Active != nil && h.store.Active.Rows > 0 {
+			clearHeight(h.store.Active)
+			h.saveStore()
+		}
 		return refuseContent(describe(err))
 	}
 	log.Printf("width: %s, %d columns now in effect",
 		map[bool]string{true: "calibrated", false: "applied from cache"}[calibrated], got)
 	// The height, at the columns the width fit just produced, and recorded into the same Active the
-	// width was. Before the save below, so the record on disk is the whole fit.
+	// width was. It writes its own record to disk before it claims anything - see holdHeight - so
+	// the save below carries nothing the height depends on.
 	rows := h.holdHeight(ctx, req, got, previous)
 	// The setting is set inside resize.To, by the only code that holds the fit it came from.
 	// Saved after the work for the CALIBRATION only. The restore point does not wait for this and must
@@ -466,11 +474,16 @@ func (h *Handler) saveStore() {
 	if h.stateDir == "" {
 		return
 	}
-	// Failure to persist is ignored: what this save carries is the calibration, which is an
-	// optimisation - missing it costs two probe resizes next time. Refusing to work because a cache
-	// file could not be written would be worse. It makes no claim about the restore point, which was
-	// already written by resize.To before the window moved.
-	_ = h.store.Save(h.stateDir)
+	// Failure to persist is logged and never fails the operation. Refusing to work because a file
+	// could not be written would be worse than anything the file protects against. What it protects
+	// against is no longer only a re-calibration: this save also carries the tall fit's record - the
+	// daemon and the size to put its pty back to - which is the only thing that lets a restart, or
+	// "Undo phone fit" after one, undo a hold. So a failure here is worth a line, where it used to
+	// be worth nothing. The window's restore point is not this save's concern: resize.To writes it
+	// itself, before the window moves.
+	if err := h.store.Save(h.stateDir); err != nil {
+		log.Printf("the fit record could not be saved (%v); a restart would not know what to put back", err)
+	}
 }
 
 // CloseStrayCalibrationSession removes a calibration session a previous run left behind.

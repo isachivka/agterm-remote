@@ -26,15 +26,28 @@ import (
 // them all. The desktop pane shows the same stream squeezed into its viewport until the fit is undone
 // - accepted by the owner; "Undo phone fit" in the palette is the way out.
 //
+// # The record and the hold are two things, and every exit keeps them agreeing
+//
+// The hold is a live connection in [heightState]; the record is the height fields on
+// [resize.Store.Active], which every reply is stamped from and which a restart reads to undo a hold
+// that died with the old process. `resize.To` replaces Active wholesale on every press, so the
+// record is written back by [Handler.holdHeight] alone - and therefore EVERY path out of it that does
+// not end holding the pty must release the live hold, or the pty stays tall while every reply says
+// it is not and nothing on disk can put it back. That was the shape of the first review's major
+// finding, and it is why the exits below all go through the same two calls.
+//
 // # What the log may say here
 //
 // Row counts, column counts, pty sizes and the outcome of a claim. Not the session id, not the
 // daemon's name, not the socket path - the first is his, the other two would let a reader of the log
-// dial his pty. See the note at the top of resize.go.
+// dial his pty. zmxhold strips the socket address from the errors it returns, so `%v` on one of them
+// is safe; agterm's errors go through [describe] for the same reason. See the note at the top of
+// resize.go.
 
 // heightState is the live hold and its pacing. Its own mutex rather than opMu, because the hold is
 // checked on the SCREEN path, which must not queue behind a calibration - and released on the
-// resize path, which is under opMu. The two meet only here.
+// resize path, which is under opMu. Lock order is opMu, then height.mu, everywhere; nothing that
+// holds height.mu takes opMu.
 type heightState struct {
 	mu sync.Mutex
 	// held is the connection holding the pty, or nil. Nil after a restart even when the store says
@@ -57,10 +70,16 @@ type heightHold struct {
 	original zmxhold.Size
 }
 
-// holdCheckEvery is how often the screen path may compare the pty with the hold. The phone polls at
-// 2 Hz; a check every poll would run `ps` twice a second for a size that moves only when the owner
-// types on the Mac, and a re-claim more often than this would fight him for the pane while he is
-// typing in it.
+// holdCheckEvery is the least time between two checks of the pty against the hold, and so between
+// two re-claims.
+//
+// The phone itself polls every two seconds (POLL_INTERVAL_MS), so for the one phone this bridge
+// serves today the gate is nearly a no-op. It is not there for that phone. It bounds what any
+// caller can make this path do: a phone polling faster, two phones on one pane, or a burst of reads
+// after a reconnect, none of which may turn into `ps` and a claim per read. And it bounds the rate
+// the pane on the Mac can flip between sizes while the owner types in it - each keystroke hands the
+// pty to agterm, each check takes it back - so however fast the reads come, the pane changes size at
+// most once every two seconds until he runs "Undo phone fit".
 const holdCheckEvery = 2 * time.Second
 
 // holdHeight is the tall half of a fit press, after the width has been applied at `columns`.
@@ -70,8 +89,8 @@ const holdCheckEvery = 2 * time.Second
 // no daemon behind it is the normal state of a session created before Live mode was on.
 //
 // `previous` is the fit that was in force before this press, if any. It matters twice: a press
-// with no rows lets a previously held height go, and a press on the same daemon keeps the original
-// size that press recorded rather than reading a pty that is currently reporting the hold.
+// that ends without a height lets a previously held one go, and a press on the same daemon keeps the
+// original size that press recorded rather than reading a pty that is currently reporting the hold.
 func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, previous *resize.Fit) int {
 	if req.Rows == 0 {
 		// Width only. If a height was held it is let go now: the phone's zmx setting went off, or
@@ -80,14 +99,18 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 		return 0
 	}
 
+	// Every "width only" exit from here on releases as well: the record has just been replaced by a
+	// fresh width, so a hold that survived one of them would be a hold nothing remembers.
 	pane, err := paneFor(req)
 	if err != nil {
 		log.Printf("height: REFUSED - %v; width only", err)
+		h.releaseHeight(ctx, previous)
 		return 0
 	}
 	inv, err := h.client.ZmxList(ctx)
 	if err != nil {
 		log.Printf("height: the daemon inventory could not be read (%v); width only", describe(err))
+		h.releaseHeight(ctx, previous)
 		return 0
 	}
 	entry, ok := styled.Entry(inv.Entries, req.Session, string(pane))
@@ -100,7 +123,7 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 
 	// The way out, installed before the thing it undoes. Best effort: a keymap that cannot be
 	// written is not a reason to refuse the fit the phone is holding the other way out of.
-	h.ensurePalette(ctx)
+	h.InstallPalette(ctx)
 
 	size := zmxhold.Size{Rows: req.Rows, Cols: columns}
 
@@ -117,17 +140,6 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 	switch {
 	case h.height.held != nil:
 		original = h.height.held.original
-		if h.height.held.hold.Err() == nil {
-			if err := h.height.held.hold.Claim(size); err == nil {
-				log.Printf("height: re-claimed %d rows by %d columns on the held pane", size.Rows, size.Cols)
-				h.recordHeight(req, entry, socketPath, size, original)
-				return req.Rows
-			}
-		}
-		// The connection is gone or would not take the claim: open a fresh one below, keeping the
-		// original size this hold was opened with.
-		_ = h.height.held.hold.Close()
-		h.height.held = nil
 	case previous != nil && previous.Rows > 0 && previous.Daemon == entry.Daemon &&
 		previous.OriginalRows > 0 && previous.OriginalCols > 0:
 		// No live hold, but the store remembers one on this daemon: this process restarted while the
@@ -143,9 +155,48 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 		original = zmxhold.Size{Rows: read.Rows, Cols: read.Cols}
 	}
 
+	// **On disk before the pty moves.** The record is what a restart, or "Undo phone fit" after one,
+	// uses to put the pty back; written after the claim it would protect only the path that was
+	// never at risk. resize.To makes the same argument for the window's restore point, and the
+	// height is held to it too. Cleared again below if the claim does not happen.
+	h.recordHeight(req, entry, socketPath, size, original)
+	h.saveStore()
+
+	if h.height.held != nil {
+		if h.height.held.hold.Err() == nil {
+			// A press on a pane already held - a re-press, or the automatic re-apply on a session
+			// switch. The pty is read first: a pty already at this size needs no claim, and a claim it
+			// does not need is a paste into the owner's program and two round trips for nothing.
+			if read, err := h.ptySize(int(entry.LeaderPID)); err == nil &&
+				read.Rows == size.Rows && read.Cols == size.Cols {
+				h.height.checkAfter = h.now().Add(holdCheckEvery)
+				log.Printf("height: the pane is already held at %d rows by %d columns", size.Rows, size.Cols)
+				return req.Rows
+			}
+			if err := h.height.held.hold.Claim(size); err == nil {
+				h.height.checkAfter = h.now().Add(holdCheckEvery)
+				log.Printf("height: re-claimed %d rows by %d columns on the held pane", size.Rows, size.Cols)
+				return req.Rows
+			} else {
+				// A live connection that would not take the claim is let go properly - at its
+				// original, so the pty is known to be where it was - and a fresh one opened below.
+				log.Printf("height: the re-claim failed (%v); opening a fresh hold", err)
+				h.releaseLocked(nil)
+			}
+		} else {
+			// The daemon dropped the connection. There is nothing to release on it; the original is
+			// kept for the fresh connection below.
+			_ = h.height.held.hold.Close()
+			h.height.held = nil
+		}
+	}
+
 	hold, err := zmxhold.Open(ctx, socketPath, size)
 	if err != nil {
 		log.Printf("height: the daemon would not take the hold (%v); width only", err)
+		// The record written above promised a height that is not held. Taken back, on disk.
+		clearHeight(h.store.Active)
+		h.saveStore()
 		return 0
 	}
 	h.height.held = &heightHold{hold: hold, daemon: entry.Daemon, socketPath: socketPath, original: original}
@@ -153,7 +204,6 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 	h.height.checkAfter = h.now().Add(holdCheckEvery)
 	log.Printf("height: holding the pane at %d rows by %d columns; its pty was %d by %d",
 		size.Rows, size.Cols, original.Rows, original.Cols)
-	h.recordHeight(req, entry, socketPath, size, original)
 	return req.Rows
 }
 
@@ -172,8 +222,21 @@ func (h *Handler) recordHeight(req Request, entry agterm.ZmxEntry, socketPath st
 	a.OriginalRows, a.OriginalCols = original.Rows, original.Cols
 }
 
-// ensurePalette installs the "Undo phone fit" line, logging rather than failing.
-func (h *Handler) ensurePalette(ctx context.Context) {
+// clearHeight takes the height record off a fit, leaving its width exactly as it was.
+func clearHeight(fit *resize.Fit) {
+	if fit == nil {
+		return
+	}
+	fit.Rows, fit.Session, fit.Pane = 0, "", ""
+	fit.Daemon, fit.SocketPath = "", ""
+	fit.OriginalRows, fit.OriginalCols = 0, 0
+}
+
+// InstallPalette puts "Undo phone fit" in agterm's command palette, naming this binary where it is,
+// logging rather than failing. Called once at startup and before every tall claim - the line names
+// a path inside the app bundle, and the bundle moves with every install, which is why the bridge
+// writes the line rather than the owner.
+func (h *Handler) InstallPalette(ctx context.Context) {
 	if h.executable == "" || h.stateDir == "" {
 		log.Printf("palette: this binary does not know its own path, so the undo command was not installed")
 		return
@@ -187,7 +250,9 @@ func (h *Handler) ensurePalette(ctx context.Context) {
 	}
 }
 
-// keepHeight is the hold check, run from the screen path for the pane that is held.
+// keepHeight is the hold check, run from the screen path for the pane that is held. It reports
+// whether the hold has been LOST - the pane is no longer behind the daemon that was held - which is
+// the caller's cue to drop the height under opMu, since this runs outside it.
 //
 // # Why a hold has to be kept
 //
@@ -196,29 +261,29 @@ func (h *Handler) ensurePalette(ctx context.Context) {
 // tells this process. So the phone's own poll of that pane - the thing that wants the rows - reads
 // the pty's size through the shell's tty and, when it is not the held size, claims again.
 //
-// # Paced, and the pacing is the courtesy
+// # Paced
 //
-// At most once per [holdCheckEvery]. The owner typing on the Mac and the phone re-claiming are in
-// competition for the pane, and the design accepts that the pane flips between sizes until he runs
-// "Undo phone fit" - but flipping twice a second would make the Mac unusable for the seconds it
-// takes him to reach the palette. Once every two seconds is a pane he can still read.
-func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agterm.ZmxList) {
+// At most once per [holdCheckEvery], whatever the read rate; see that constant for what the pacing
+// protects. A check that could not read the pty, or could not re-claim, is retried at the next
+// interval and recovers by itself once the socket does.
+func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agterm.ZmxList) (lost bool) {
 	h.height.mu.Lock()
 	defer h.height.mu.Unlock()
 	if h.height.held == nil {
-		return
+		return false
 	}
 	now := h.now()
 	if now.Before(h.height.checkAfter) {
-		return
+		return false
 	}
 	h.height.checkAfter = now.Add(holdCheckEvery)
 
 	entry, ok := styled.Entry(inv.Entries, session, pane)
 	if !ok || entry.Daemon != h.height.held.daemon {
-		// The pane's daemon is not the one held: it went away, or was replaced. The hold is stale
-		// and the next fit press replaces it; there is nothing to keep here.
-		return
+		// The pane is not behind the daemon that was held: it went away, or was replaced. Nothing
+		// this check can do will hold that pane, so the height must stop being reported.
+		log.Printf("height: the held pane is no longer behind the daemon that was held")
+		return true
 	}
 	read, err := h.ptySize(int(entry.LeaderPID))
 	if err != nil {
@@ -226,12 +291,12 @@ func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agt
 			log.Printf("height: the held pane's pty could not be read (%v)", err)
 			h.height.lastKeepErr = msg
 		}
-		return
+		return false
 	}
 	h.height.lastKeepErr = ""
 	want := h.height.held.hold.Held()
 	if read.Rows == want.Rows && read.Cols == want.Cols {
-		return
+		return false
 	}
 
 	if h.height.held.hold.Err() != nil {
@@ -241,19 +306,43 @@ func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agt
 		if err != nil {
 			log.Printf("height: the pty is %d by %d, the hold's connection is gone and a new one "+
 				"could not be opened (%v)", read.Rows, read.Cols, err)
-			return
+			return false
 		}
 		_ = h.height.held.hold.Close()
 		h.height.held.hold = fresh
 		log.Printf("height: the pty was %d by %d and the hold's connection was gone; re-opened at %d by %d",
 			read.Rows, read.Cols, want.Rows, want.Cols)
-		return
+		return false
 	}
 	if err := h.height.held.hold.Claim(want); err != nil {
 		log.Printf("height: the pty is %d by %d and the re-claim failed (%v)", read.Rows, read.Cols, err)
-		return
+		return false
 	}
 	log.Printf("height: the pty was %d by %d; re-claimed %d by %d", read.Rows, read.Cols, want.Rows, want.Cols)
+	return false
+}
+
+// dropHeight lets the height go from the SCREEN path, which is the one caller outside opMu.
+//
+// Two things bring it here: a plain read of the held pane, which says the phone no longer reads
+// that pane with colours through zmx and so no longer wants a height (the setting is the only thing
+// that asks for one, and the phone sends no press when it is switched off); and [keepHeight]
+// reporting the hold lost. Both change the store, and the store is changed only under opMu - see
+// serialize.go - so this takes it, the way the resize verb does, and republishes before letting go.
+// A screen read waits behind a calibration here at most once: after it, the pane is not held and
+// this is not reached.
+func (h *Handler) dropHeight(ctx context.Context, why string) {
+	h.opMu.Lock()
+	defer h.opMu.Unlock()
+	// Re-read under the lock: an off press, or another read, may have let it go already.
+	if h.store == nil || h.store.Active == nil || h.store.Active.Rows == 0 {
+		return
+	}
+	log.Printf("height: %s; letting the height go", why)
+	h.releaseHeight(ctx, h.store.Active)
+	clearHeight(h.store.Active)
+	h.saveStore()
+	h.publishFit()
 }
 
 // releaseHeight lets a held height go, BEFORE whatever window restore follows it.
