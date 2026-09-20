@@ -127,7 +127,23 @@ data class ScreenUpdate(val text: ScreenText, val fit: FitState)
  * off.** A moment of blankness costs nothing; a confident wrong toggle costs them a feature that
  * appears dead, which is exactly what happened.
  */
-data class FitState(val enabled: Boolean?, val columns: Int)
+data class FitState(
+    val enabled: Boolean?,
+    val columns: Int,
+    /**
+     * Rows the laptop is HOLDING the pane at, or 0 when it is holding no height.
+     *
+     * **0 is the ordinary answer, not a missing one.** A width-only fit holds no height, and so does a
+     * tall fit the laptop could not realise - no zmx daemon behind the pane, the colour setting off,
+     * the leadership claim lost to agterm when the owner typed on the Mac. All of those are the same
+     * fact from here: nothing is being held, so ask for nothing extra and say nothing extra. That is
+     * why this is an Int rather than a nullable one - unlike [enabled], there is no state here that
+     * "not answered" means something different from.
+     *
+     * Defaulted so every construction that predates the height stays honest about holding none.
+     */
+    val rows: Int = 0,
+)
 
 /**
  * What the laptop did with an automatic re-apply.
@@ -185,6 +201,8 @@ data class SessionListing(
     val workspaces: List<BridgeWorkspace>? = null,
     val fitEnabled: Boolean? = null,
     val fitColumns: Int = 0,
+    /** The held height, on the list reply for the same reason the width is. See [FitState.rows]. */
+    val fitRows: Int = 0,
 )
 
 /**
