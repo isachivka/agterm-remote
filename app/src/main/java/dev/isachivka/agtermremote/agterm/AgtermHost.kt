@@ -99,7 +99,13 @@ fun AgtermHost(
     // Keyed on Unit: this composable is disposed while settings are up and rebuilt on return, so
     // "once per composition" is exactly "once per arrival". The refresh reads the store through the
     // ViewModel's `connect`, so a laptop stored a second ago is the one it connects to.
-    LaunchedEffect(Unit) { if (state is AgtermUiState.NotPaired) sessions.refresh() }
+    //
+    // Widened from NotPaired alone: after an unpair the terminal is left in whatever state the dying
+    // connection produced - Disconnected, or Failed with the pinned door saying no - and coming back
+    // from a fresh pairing into THAT state also showed nothing until the process was killed. Any
+    // state that is not a live list is re-asked on entry; a live list refreshes through the effect
+    // above.
+    LaunchedEffect(Unit) { if (!listOnScreen) sessions.refresh() }
     val renaming by sessions.renaming.collectAsStateWithLifecycle()
 
     // The platform's picker, as with pairing: no permission, no dependency, and the owner already knows

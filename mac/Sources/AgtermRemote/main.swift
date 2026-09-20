@@ -290,7 +290,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     private func wireSettings() {
         // One save path for the whole app: `SaveAddress` with its refusals. A second saver would be a
         // second opinion about what an address is.
-        settings.onSave = { [weak self] typed, port in self?.saveAddress(typed, arrivalPort: port) }
+        settings.onEdited = { [weak self] typed, port in self?.edited(typed, arrivalPort: port) }
+        settings.onConfirmSuffix = { [weak self] in
+            guard let self, let pending = pendingSuffix else { return }
+            saveAddress(pending.typed, arrivalPort: pending.port, confirmed: true)
+        }
         settings.onUnpair = { [weak self] in self?.unpairPhone() }
         // The enrolment window at the bridge must not outlive the window that shows its code.
         settings.onClose = { [weak self] in
@@ -589,7 +593,37 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         AddressPreference.listenPort().map(String.init) ?? ""
     }
 
-    private func saveAddress(_ typed: String, arrivalPort: String, confirmed: Bool = false) {
+    /// **Typing saves; a pause applies.** Every keystroke reaches the store - the address the moment it
+    /// parses, the port the moment it does - so there is no second press to forget. What is NOT done
+    /// per keystroke is restarting the bridge and minting a code: an address grows one character at a
+    /// time and most of its prefixes parse, so applying each one would restart the bridge a dozen
+    /// times and mint codes for places that do not exist. The apply waits for a second of quiet.
+    private func edited(_ typed: String, arrivalPort: String) {
+        saveAddress(typed, arrivalPort: arrivalPort, apply: false)
+        applyAfterQuiet?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyWhatIsStored() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        applyAfterQuiet = timer
+    }
+
+    private var applyAfterQuiet: Timer?
+    /// A two-label host waiting for the owner to say "use it anyway".
+    private var pendingSuffix: (typed: String, port: String)?
+
+    /// The stored address and port become the running bridge and the code on screen. Called once
+    /// the typing has stopped, and by the suffix confirmation.
+    private func applyWhatIsStored() {
+        guard AddressPreference.read().isSuccess else { return }
+        if panel.state.isShowingACode { panel.close() }
+        if runTheBridge() { codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty }
+        refreshSettings()
+        keepTheCodeAlive()
+        rebuildMenu()
+    }
+
+    private func saveAddress(_ typed: String, arrivalPort: String, confirmed: Bool = false, apply: Bool = true) {
         // **Saved in the same act as the address, because they are one setting in two halves.** The
         // port is written first: an address that is refused must not leave a port change on the
         // floor, and the port has its own refusals which say their own sentence.
@@ -605,14 +639,18 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         case .refused(let sentence), .notWritten(let sentence):
             report(sentence + Self.portRefusal(port))
 
-        case .needsConfirmation(let explanation, let question):
+        case .needsConfirmation(let explanation, _):
             // **Deliberate, not impossible.** A two-label name is a valid destination that looks like
-            // the mistake of 2026-08-09, so it costs a second act rather than being prohibited — the
-            // same shape as deleting a session on the phone.
+            // the mistake of 2026-08-09, so it costs a second act rather than being prohibited. The
+            // second act is a button under the message, not an alert - an alert on every keystroke
+            // of a two-label host would be unusable.
             report(explanation)
-            if confirmSuffix(explanation: explanation, question: question) {
-                return saveAddress(typed, arrivalPort: arrivalPort, confirmed: true)
-            }
+            pendingSuffix = (typed, arrivalPort)
+            settings.offersSuffixConfirmation = true
+        }
+        if case .needsConfirmation = outcome {} else {
+            pendingSuffix = nil
+            settings.offersSuffixConfirmation = false
         }
 
         // After a save the field comes from the store, read back rather than assumed. After a refusal
@@ -628,20 +666,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
         }
         settings.field = field
         settings.arrivalPortText = Self.arrivalPortText()
+        guard apply else { return }
         // **A code on screen for an address that has just changed underneath it is worse than no
         // code**: it is scannable, it pairs, and it points the phone at the previous destination. It
         // is withdrawn, and a fresh one is minted for the new address once the bridge is back up.
-        if case .saved = outcome, panel.state.isShowingACode { panel.close() }
-        refreshSettings()
-        // **And now it runs.** A saved address is the whole instruction: the bridge listens on the
-        // port it names and advertises what the phone will dial, and a bridge already up is holding
-        // the previous answer to both. The code follows the bridge.
-        if case .saved = outcome, runTheBridge() {
-            codeIsWaitingForTheBridge = settings.isOpen && pairedPhones.isEmpty
-        }
-        // The menu's "Pair a phone…" is enabled by whether an address exists, and one may have just
-        // started existing.
-        rebuildMenu()
+        if case .saved = outcome { applyWhatIsStored() }
     }
 
     /// What happened to the arrival port, in the same breath as the address — the two are one
@@ -670,7 +699,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
     /// One sentence, put in front of whoever is looking. There is one address editor now — the setup
     /// screen — so this is the one place its outcome is said.
     private func report(_ sentence: String) {
-        settings.addressMessage = sentence
+        settings.sayAboutAddress(sentence)
     }
 
 
@@ -893,23 +922,6 @@ final class MenuBarApp: NSObject, NSApplicationDelegate {
             notify("That did not work.", "\(error)")
         }
         rebuildMenu()
-    }
-
-    /// The second act. **The refusal's own sentence is the body of the question**, not a shortened
-    /// version of it: an alert that said only "save it anyway?" would ask them to decide without the
-    /// reason in front of them, which is a confirmation in form and a shrug in substance.
-    ///
-    /// The default button is the cautious one. Return-to-confirm on a dialogue about the address the
-    /// phone dials is how somebody agrees to something they did not read.
-    private func confirmSuffix(explanation: String, question: String) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = question
-        alert.informativeText = explanation
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Save it anyway")
-        NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertSecondButtonReturn
     }
 
     /// The glyph, and the same words for anyone who cannot see it.
