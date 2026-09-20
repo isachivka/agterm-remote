@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/isachivka/agterm-remote/compare/v0.6.1...v0.6.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* a phone a few minutes ahead of the Mac pairs, and the Mac says why one was turned away ([#101](https://github.com/isachivka/agterm-remote/issues/101)) ([03155fd](https://github.com/isachivka/agterm-remote/commit/03155fd3375c2dbce50dca05ac99f8c3c0002a7e))
+
 ## [0.6.1](https://github.com/isachivka/agterm-remote/compare/v0.6.0...v0.6.1) (2026-09-20)
 
 
