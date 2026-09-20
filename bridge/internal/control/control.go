@@ -256,6 +256,12 @@ type windowReply struct {
 	// Ended is why the last window stopped, and it is absent while one is open and before the first
 	// one has ever been opened. See enroll.Ending for the values.
 	Ended string `json:"ended,omitempty"`
+	// LastRefusal is the owner's sentence for the last refusal, kept until a phone is pinned. Absent
+	// when there has been none. See enroll.State.LastRefusal for why it exists.
+	LastRefusal string `json:"last_refusal,omitempty"`
+	// LastRefusalAgoSeconds is how long ago it happened; an age rather than a timestamp because the
+	// two processes share a clock only approximately.
+	LastRefusalAgoSeconds int64 `json:"last_refusal_ago_seconds,omitempty"`
 }
 
 // pairOpenReply is the code, when it dies, and whether it cost somebody else theirs.
@@ -604,6 +610,10 @@ func status(ctx context.Context, conn net.Conn, p *Pairing) {
 
 	state := p.Window.State()
 	w := windowReply{Open: state.Open, AttemptsLeft: state.AttemptsLeft, Ended: string(state.Ended)}
+	if state.LastRefusal != "" {
+		w.LastRefusal = state.LastRefusal
+		w.LastRefusalAgoSeconds = int64(time.Since(state.LastRefusalAt).Seconds())
+	}
 	if state.Open {
 		w.ExpiresAt = state.Expiry.Unix()
 	}

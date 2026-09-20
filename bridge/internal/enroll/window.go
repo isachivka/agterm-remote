@@ -128,7 +128,9 @@ type Window struct {
 	attempts int
 	// ended is why the last window stopped accepting a token, and it is the only thing here that
 	// outlives the secret it describes. It carries no secret of its own - see [Ending].
-	ended Ending
+	ended         Ending
+	lastRefusal   string
+	lastRefusalAt time.Time
 }
 
 // NewWindow returns a closed window that reads the time from now.
@@ -333,6 +335,30 @@ type State struct {
 	AttemptsLeft int
 	// Ended is why the last window stopped, and it is meaningful only while Open is false.
 	Ended Ending
+	// LastRefusal is the owner's sentence for the last refusal worth a log line - a wrong token, or
+	// a phone that spent the token and was then not pinned - kept until a phone IS pinned. It exists
+	// because that sentence used to live only in the bridge's stderr, which the Mac app keeps in
+	// memory and shows nowhere; the owner met "that code did not work" twice in a day with the
+	// reason unreadable by anyone.
+	LastRefusal string
+	// LastRefusalAt is when it happened. Zero when LastRefusal is empty.
+	LastRefusalAt time.Time
+}
+
+// NoteRefusal records the sentence for the last refusal. See [State.LastRefusal].
+func (w *Window) NoteRefusal(sentence string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastRefusal = sentence
+	w.lastRefusalAt = w.now()
+}
+
+// ClearRefusal forgets it, which a successful pairing does.
+func (w *Window) ClearRefusal() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastRefusal = ""
+	w.lastRefusalAt = time.Time{}
 }
 
 // State is the window as the owner's machine may see it. See [Ending] for why this exists here and
@@ -345,7 +371,10 @@ func (w *Window) State() State {
 	// panel says nothing about a code that stopped working an instant ago. It also records the
 	// expiry, which is the answer this call is being asked for.
 	if !w.liveLocked() {
-		return State{Ended: w.ended}
+		return State{Ended: w.ended, LastRefusal: w.lastRefusal, LastRefusalAt: w.lastRefusalAt}
 	}
-	return State{Open: true, Expiry: w.expiry, AttemptsLeft: MaxAttempts - w.attempts}
+	return State{
+		Open: true, Expiry: w.expiry, AttemptsLeft: MaxAttempts - w.attempts,
+		LastRefusal: w.lastRefusal, LastRefusalAt: w.lastRefusalAt,
+	}
 }

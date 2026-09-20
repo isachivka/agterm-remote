@@ -107,7 +107,8 @@ public final class UnixControlClient: ControlClient, @unchecked Sendable {
                 // put 1970 on the panel and expire every code the instant it was drawn.
                 expiresAt: expiry.map { Date(timeIntervalSince1970: TimeInterval($0)) },
                 attemptsLeft: window["attempts_left"] as? Int ?? 0,
-                ended: PairingEnding(wire: window["ended"] as? String ?? ""))
+                ended: PairingEnding(wire: window["ended"] as? String ?? ""),
+                lastRefusal: (window["last_refusal"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         )
     }
 
