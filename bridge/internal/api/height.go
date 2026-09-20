@@ -616,3 +616,17 @@ func (h *Handler) letGoLocked(ctx context.Context, fit *resize.Fit, columns int)
 	clearHeight(fit)
 	return true, nil
 }
+
+// typeThroughHold puts input on the held pane's pty through the live hold. An error means there is no
+// live hold to carry it - none open, or its connection has gone - and the caller types through agterm.
+func (h *Handler) typeThroughHold(input string) error {
+	h.height.mu.Lock()
+	defer h.height.mu.Unlock()
+	if h.height.held == nil {
+		return errors.New("no hold is live")
+	}
+	if err := h.height.held.hold.Err(); err != nil {
+		return err
+	}
+	return h.height.held.hold.Type([]byte(input))
+}
