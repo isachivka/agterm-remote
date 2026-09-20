@@ -255,3 +255,52 @@ func TestErrorsNameNeitherTheSocketNorTheDaemon(t *testing.T) {
 		t.Fatalf("Claim on a closed hold = %v", err)
 	}
 }
+
+// The daemon's "tell me your size" can still be owed when Release runs - queued behind the snapshot
+// Init provokes. Whatever the interleaving, nothing may restate the tall size once the release's
+// original has gone out: the answer switches to the original first, and the Resize and the Detach
+// travel in one write. Before that the stream could read Resize(original), Resize(tall), Detach,
+// and a release that reported success left the pty tall.
+func TestAQuestionOwedAtReleaseNeverRestatesTheTallSize(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		d := zmxholdtest.Start(t)
+		h, err := Open(context.Background(), d.Path, Size{Rows: tall, Cols: columns})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.AwaitFrames(t, 5)
+		d.Send(t, 0, 2, nil) // the question, racing the release
+		if err := h.Release(Size{Rows: 56, Cols: 164}); err != nil {
+			t.Fatal(err)
+		}
+		d.AwaitClosed(t, 0)
+		// The deterministic half: whatever the reader answers from now on is the original. The
+		// interleaving itself is too narrow for a fake daemon to force, so the loop below only
+		// checks that no run produced the bad order.
+		if got := h.Held(); got != (Size{Rows: 56, Cols: 164}) {
+			t.Fatalf("run %d: after the release the answer to the daemon's question is still %+v", i, got)
+		}
+
+		frames := d.Frames()
+		seenOriginal := false
+		for _, f := range frames[5:] {
+			if f.Tag != 2 || len(f.Payload) < 4 {
+				continue
+			}
+			r := int(f.Payload[0]) | int(f.Payload[1])<<8
+			c := int(f.Payload[2]) | int(f.Payload[3])<<8
+			switch {
+			case r == 56 && c == 164:
+				seenOriginal = true
+			case seenOriginal:
+				t.Fatalf("run %d: a %dx%d Resize after the original: %+v", i, r, c, frames[5:])
+			}
+		}
+		if last := frames[len(frames)-1]; last.Tag != 3 {
+			t.Fatalf("run %d: the last frame is tag %d, not Detach", i, last.Tag)
+		}
+		if !seenOriginal {
+			t.Fatalf("run %d: the original was never stated: %+v", i, frames[5:])
+		}
+	}
+}

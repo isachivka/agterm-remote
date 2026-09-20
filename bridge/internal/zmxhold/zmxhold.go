@@ -170,10 +170,16 @@ func (h *Hold) Release(original Size) error {
 	if err := original.valid(); err != nil {
 		return err
 	}
-	err := h.write(sizeFrames(tagResize, original))
-	if derr := h.write(frame(tagDetach, nil)); err == nil {
-		err = derr
-	}
+	// The reader may still owe the daemon an answer to "tell me your size" - the question is queued
+	// behind the snapshot Init provokes, and the reader can reach it at any moment. So the answer it
+	// would give is switched to the original BEFORE anything goes out, and the Resize and the Detach
+	// leave in ONE write, under one hold of the write lock: with two, the reader's answer could land
+	// between them and the stream would read Resize(original), Resize(tall), Detach - a pty left tall
+	// by a release that reported success.
+	h.mu.Lock()
+	h.held = original
+	h.mu.Unlock()
+	err := h.write(append(sizeFrames(tagResize, original), frame(tagDetach, nil)...))
 	// The daemon closes a detached client. Waiting for that, briefly, is what makes "released" mean
 	// the daemon has read the frames rather than that they left this process.
 	select {
