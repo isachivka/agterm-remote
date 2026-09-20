@@ -147,7 +147,34 @@ object TerminalScroll {
      * ruled out, arriving by the back door.
      */
     fun rememberedAtBottom(previous: Boolean, transitionInFlight: Boolean, offset: Int, max: Int): Boolean =
-        if (transitionInFlight) previous else isAtBottom(offset, max)
+        rememberedAtBottom(previous, transitionInFlight, offset, max, contentMoved = false, ownerScrolling = false)
+
+    /**
+     * The same memory, told whether the CONTENT moved or the OWNER did.
+     *
+     * A memory sampled on every frame answers "is the offset at the maximum" - and when a poll
+     * replaces forty rows with five hundred, the maximum leaps while the offset stays, so the frame
+     * that lays out the new screen records "not at the bottom" for someone who was following a moment
+     * ago. The next poll then reads that memory and leaves them where the pixels put them: near the
+     * TOP of a screen ten times taller. That was every Fit press and every Enter on a held pane
+     * (the owner, 2026-09-21: the scroll "throws me to the top").
+     *
+     * So a frame on which the maximum moved is the content moving, not the owner, and the memory
+     * keeps what it had - unless the owner's finger is on it, which is the one case where an offset
+     * changing under a moving maximum is theirs.
+     */
+    fun rememberedAtBottom(
+        previous: Boolean,
+        transitionInFlight: Boolean,
+        offset: Int,
+        max: Int,
+        contentMoved: Boolean,
+        ownerScrolling: Boolean,
+    ): Boolean = when {
+        transitionInFlight -> previous
+        contentMoved && !ownerScrolling -> previous
+        else -> isAtBottom(offset, max)
+    }
 
     /**
      * What is taking space at the bottom, as TWO facts rather than one.
@@ -249,15 +276,25 @@ object TerminalScroll {
         offset: () -> Int,
         max: () -> Int,
         initial: Boolean = true,
+        scrolling: () -> Boolean = { false },
         onChanged: (Boolean) -> Unit,
     ) {
         var remembered = initial
-        snapshotFlow { Triple(transitionInFlight(), offset(), max()) }
-            .collect { (settling, currentOffset, currentMax) ->
-                remembered = rememberedAtBottom(remembered, settling, currentOffset, currentMax)
+        var lastMax: Int? = null
+        snapshotFlow { Sample(transitionInFlight(), offset(), max(), scrolling()) }
+            .collect { sample ->
+                // The first sample has no previous maximum to have moved from.
+                val contentMoved = lastMax != null && sample.max != lastMax
+                lastMax = sample.max
+                remembered = rememberedAtBottom(
+                    remembered, sample.settling, sample.offset, sample.max,
+                    contentMoved = contentMoved, ownerScrolling = sample.scrolling,
+                )
                 onChanged(remembered)
             }
     }
+
+    private data class Sample(val settling: Boolean, val offset: Int, val max: Int, val scrolling: Boolean)
 
     /** The instruction Compose carries out. */
     enum class Scroll {
