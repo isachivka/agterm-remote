@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/isachivka/agterm-remote/compare/v0.7.0...v0.8.0) (2026-09-20)
+
+
+### Features
+
+* the tall pane is 500 rows, and the air inside it is squeezed out of what the phone reads ([#105](https://github.com/isachivka/agterm-remote/issues/105)) ([71c4624](https://github.com/isachivka/agterm-remote/commit/71c46241c9ef4b8b483451effb66da2df569fcd4))
+
 ## [0.7.0](https://github.com/isachivka/agterm-remote/compare/v0.6.2...v0.7.0) (2026-09-20)
 
 
