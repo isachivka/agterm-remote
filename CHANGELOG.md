@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/isachivka/agterm-remote/compare/v0.6.0...v0.6.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* settings save as you type, and a phone that has just paired lands on the terminal ([#99](https://github.com/isachivka/agterm-remote/issues/99)) ([376dc74](https://github.com/isachivka/agterm-remote/commit/376dc74319967972206d39563f41d2414bdd3d6b))
+
 ## [0.6.0](https://github.com/isachivka/agterm-remote/compare/v0.5.1...v0.6.0) (2026-09-19)
 
 
