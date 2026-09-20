@@ -152,7 +152,7 @@ func (h *Hold) Claim(size Size) error {
 	return h.write(sizeFrames(tagResize, size))
 }
 
-// Type puts input on the pty through this connection, ahead of it the claim input.
+// Type puts input on the pty through this connection.
 //
 // **Why the bridge types through its own client while it holds a pane.** The daemon forwards a
 // non-leader's input only when its classifier calls it user input, and that classifier reads bytes
@@ -160,14 +160,77 @@ func (h *Hold) Claim(size Size) error {
 // Cyrillic is dropped on the floor, silently, while "z" and then the same Cyrillic goes through. While
 // this Hold leads, agterm's own client is that follower - so text the phone sends through agterm
 // vanished exactly when it was not ASCII. Input from the LEADER is never classified, and this Hold is
-// the leader for as long as it is not typed over on the Mac; the claim input in front makes it the
-// leader again if it was, and is inert to the program either way. A side effect worth having: the
-// pty is not resized twice for every line the phone sends, because agterm never becomes leader for it.
+// the leader for as long as it is not typed over on the Mac. A side effect worth having: the pty is
+// not resized twice for every line the phone sends, because agterm never becomes leader for it.
+//
+// **The claim input goes in front only when the input could not claim leadership by itself, and
+// then as a write of its own.** If the Mac typed in between, this Hold is a follower again and its
+// input is classified like anyone's: Enter, ASCII text, CSI keys pass on their own; pure non-ASCII
+// text, Backspace (DEL), Escape, control keys and unmodified arrows do not, and those get the empty
+// paste ahead of them. Ahead in a SEPARATE write, with a pause: sent in one chunk with the key, the
+// program reads "empty paste, then a carriage return" as one paste event and the Enter never lands -
+// which is how the first version of this lost the owner's Enter.
 func (h *Hold) Type(input []byte) error {
 	if len(input) == 0 {
 		return nil
 	}
-	return h.write(frame(tagInput, append([]byte(ClaimInput), input...)))
+	if !ClaimsLeadership(input) {
+		if err := h.write(frame(tagInput, []byte(ClaimInput))); err != nil {
+			return err
+		}
+		time.Sleep(claimSettle)
+	}
+	return h.write(frame(tagInput, input))
+}
+
+// claimSettle is the pause between the claim input and the input it clears the way for, long enough
+// for the daemon to flush the first to the pty as a write of its own before the second arrives.
+const claimSettle = 40 * time.Millisecond
+
+// ClaimsLeadership reports whether the daemon's classifier would call `input` user input - the
+// condition under which a non-leader's input is forwarded and makes it leader. Mirrors zmx's
+// util.isUserInput at rev fb1b6b6: any printable ASCII, CR, LF, Tab or BS (0x08 - not DEL), a CSI
+// ending in `u` or `~`, or a CSI ending in A-D with more than one parameter. Conservative where zmx
+// is not obviously so: bytes above 0x7F are counted as NOT passing, which is the whole finding.
+func ClaimsLeadership(input []byte) bool {
+	for i := 0; i < len(input); i++ {
+		c := input[i]
+		switch {
+		case c >= 0x20 && c <= 0x7e:
+			return true
+		case c == '\r' || c == '\n' || c == '\t' || c == 0x08:
+			return true
+		case c == 0x1b && i+1 < len(input) && input[i+1] == '[':
+			// A CSI: an optional private marker, parameters, then the final byte.
+			j := i + 2
+			params := 0
+			for j < len(input) && (input[j] == '<' || input[j] == '=' || input[j] == '>' || input[j] == '?') {
+				j++
+			}
+			for j < len(input) && (input[j] >= '0' && input[j] <= '9' || input[j] == ';' || input[j] == ':') {
+				if input[j] == ';' {
+					params++
+				}
+				j++
+			}
+			if j >= len(input) {
+				return false
+			}
+			final := input[j]
+			if final == 'u' || final == '~' {
+				return true
+			}
+			if final >= 'A' && final <= 'D' && params >= 1 {
+				return true
+			}
+			// A mouse report or a focus event ends the question the way zmx ends it: not user input.
+			if final == 'M' || final == 'I' || final == 'O' {
+				return false
+			}
+			i = j
+		}
+	}
+	return false
 }
 
 // Held is the size this Hold last claimed.

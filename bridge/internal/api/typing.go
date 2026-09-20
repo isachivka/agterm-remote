@@ -87,7 +87,9 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 		} else {
 			log.Printf("type: not through the hold (%v); through agterm instead", err)
 		}
-		out = zmxhold.ClaimInput + out
+		if !zmxhold.ClaimsLeadership([]byte(out)) {
+			out = zmxhold.ClaimInput + out
+		}
 	}
 	if err := h.client.Type(ctx, req.Session, out, pane); err != nil {
 		// unreadable rather than fail: a pane that vanished on the laptop is a thing that CHANGED

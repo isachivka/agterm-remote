@@ -525,7 +525,18 @@ fun AgtermScreen(
                     // ONE object shared by every session - see AgtermViewModel, where it is hoisted so
                     // a rotation does not lose the reading position - so without this the next session
                     // opens at the previous one's offset, a number from a buffer it never had.
+                    // **The first screen of an opened session lands at its bottom, whatever the offset.**
+                    // The effect above scrolls to the bottom of what is on screen when the session
+                    // opens - which is still the PREVIOUS session's text, or nothing; this session's
+                    // own screen arrives with a later poll. Before the tall fit that was near enough,
+                    // because a screen was forty rows. At five hundred rows the first poll replaces
+                    // the whole buffer, the follow-the-tail rule below sees an offset that is nowhere
+                    // near the new maximum, and the owner opens every session in the middle of a
+                    // wall of text with the composer far below. The owner, 2026-09-20: "I need it scrolled to the very
+                    // bottom whenever I open any session".
+                    var landingOnOpen by remember { mutableStateOf(false) }
                     LaunchedEffect(watching.id) {
+                        landingOnOpen = true
                         if (TerminalScroll.onSessionOpened() == TerminalScroll.Scroll.ToBottom) {
                             // The new text has not been laid out yet, so maxValue is still the old
                             // one. Waiting a frame is what makes this the bottom of THIS session
@@ -679,6 +690,15 @@ fun AgtermScreen(
                         //     never yank a view he is already steering;
                         //   - it expires (see the effect below), so a pageup that changed nothing
                         //     cannot make some later, unrelated poll jump him.
+                        if (TerminalScroll.landsOnFirstScreen(opened = landingOnOpen, hasText = state.screen.isNotEmpty())) {
+                            landingOnOpen = false
+                            pageUpLanding = null
+                            // Settled rather than one frame, for the same reason as the PgUp landing:
+                            // five hundred rows are not laid out in one.
+                            awaitStableMax(terminalVertical)
+                            terminalVertical.scrollTo(terminalVertical.maxValue)
+                            return@LaunchedEffect
+                        }
                         val landing = pageUpLanding
                         if (landing != null && terminalVertical.value == landing) {
                             pageUpLanding = null
@@ -693,7 +713,10 @@ fun AgtermScreen(
                         val wasAtBottom = TerminalScroll.isAtBottom(
                             terminalVertical.value, terminalVertical.maxValue,
                         )
-                        withFrameNanos { }
+                        // Settled, not one frame: a tall screen relayouts over several, and a
+                        // maximum read between two of them lands the follower short of the end -
+                        // after which "at the bottom" is false and following stops for good.
+                        awaitStableMax(terminalVertical)
                         val decision = TerminalScroll.onContentChanged(
                             wasAtBottom = wasAtBottom,
                             offset = terminalVertical.value,

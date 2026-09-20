@@ -72,6 +72,19 @@ object TerminalScroll {
     fun onSessionOpened(): Scroll = Scroll.ToBottom
 
     /**
+     * Whether the screen that just arrived is the first of a session the owner has just opened, and
+     * so lands at the bottom whatever the offset was.
+     *
+     * [onSessionOpened] fires when the session is chosen, which is before its own screen has arrived:
+     * what it scrolls to the bottom of is the previous session's text. This is the second half - the
+     * poll that brings THIS session's screen - and it is answered once: the caller clears the flag.
+     * An empty screen does not count, because there is nothing to land on yet and clearing the flag
+     * on it would leave the real first screen to the ordinary rule, which at five hundred rows keeps
+     * the owner far above the composer.
+     */
+    fun landsOnFirstScreen(opened: Boolean, hasText: Boolean): Boolean = opened && hasText
+
+    /**
      * What to do when something has taken space at the bottom - the keyboard, or our own controls.
      *
      * The owner: *"when i focus to keyboard it overlap claude input. it means if terminal on phone

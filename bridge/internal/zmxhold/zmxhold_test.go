@@ -304,3 +304,47 @@ func TestAQuestionOwedAtReleaseNeverRestatesTheTallSize(t *testing.T) {
 		}
 	}
 }
+
+// What the daemon's classifier lets a follower through with - mirrored here because the bridge
+// decides on it whether the claim input has to go first.
+func TestClaimsLeadershipMirrorsTheDaemonsClassifier(t *testing.T) {
+	passes := []string{"a", " ", "z\u044e", "\r", "\n", "\t", "\x08", "\x1b[27u", "\x1b[3~", "\x1b[200~\x1b[201~", "\x1b[1;5C", "\x1b[13u"}
+	dropped := []string{"\u044e\u043d\u0438\u043a\u043e\u0434", "\x7f", "\x1b", "\x03", "\x1b[A", "\x1b[H", "\x1b[I", "\x1b[<0;1;1M", ""}
+	for _, in := range passes {
+		if !ClaimsLeadership([]byte(in)) {
+			t.Errorf("%q should pass", in)
+		}
+	}
+	for _, in := range dropped {
+		if ClaimsLeadership([]byte(in)) {
+			t.Errorf("%q should not pass", in)
+		}
+	}
+}
+
+// The claim input is a frame of its own, ahead of input that cannot claim by itself, and absent
+// otherwise.
+func TestTypeSendsTheClaimInputSeparatelyAndOnlyWhenNeeded(t *testing.T) {
+	d := zmxholdtest.Start(t)
+	h, err := Open(context.Background(), d.Path, Size{Rows: tall, Cols: columns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	d.AwaitFrames(t, 5)
+
+	if err := h.Type([]byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	got := d.AwaitFrames(t, 6)
+	if got[5].Tag != 0 || string(got[5].Payload) != "\r" {
+		t.Fatalf("enter went as %+v", got[5])
+	}
+	if err := h.Type([]byte("\x7f")); err != nil {
+		t.Fatal(err)
+	}
+	got = d.AwaitFrames(t, 8)
+	if string(got[6].Payload) != ClaimInput || string(got[7].Payload) != "\x7f" {
+		t.Fatalf("backspace went as %q then %q", got[6].Payload, got[7].Payload)
+	}
+}

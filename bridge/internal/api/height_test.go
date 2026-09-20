@@ -1201,10 +1201,24 @@ func TestTypingIntoTheHeldPaneGoesThroughTheHold(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("type: %s", resp.Error)
 	}
-	frames := f.daemon.AwaitFrames(t, 6)
-	last := frames[5]
-	if last.Tag != 0 || string(last.Payload) != zmxhold.ClaimInput+"\u044e\u043d\u0438\u043a\u043e\u0434" {
-		t.Fatalf("the hold carried tag %d %q", last.Tag, last.Payload)
+	// Pure non-ASCII cannot claim leadership by itself, so the claim input goes first, as a
+	// frame of its own, and the text follows.
+	frames := f.daemon.AwaitFrames(t, 7)
+	if frames[5].Tag != 0 || string(frames[5].Payload) != zmxhold.ClaimInput {
+		t.Fatalf("frame 5 is tag %d %q, want the claim input alone", frames[5].Tag, frames[5].Payload)
+	}
+	if frames[6].Tag != 0 || string(frames[6].Payload) != "\u044e\u043d\u0438\u043a\u043e\u0434" {
+		t.Fatalf("frame 6 is tag %d %q, want the text alone", frames[6].Tag, frames[6].Payload)
+	}
+	// Enter claims leadership by itself and goes alone: sent behind the claim input in one chunk,
+	// the program read "empty paste, carriage return" as one paste and the Enter never landed.
+	resp = f.h.Handle(context.Background(), Request{Verb: VerbType, Session: sessionA, Pane: "left", Key: "enter"})
+	if !resp.OK {
+		t.Fatalf("enter: %s", resp.Error)
+	}
+	frames = f.daemon.AwaitFrames(t, 8)
+	if frames[7].Tag != 0 || string(frames[7].Payload) != "\r" {
+		t.Fatalf("enter went as tag %d %q", frames[7].Tag, frames[7].Payload)
 	}
 	for _, r := range f.agterm.Requests() {
 		if r.Cmd == "session.type" {

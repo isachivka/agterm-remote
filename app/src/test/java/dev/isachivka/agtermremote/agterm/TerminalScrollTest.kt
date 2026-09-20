@@ -45,6 +45,13 @@ class TerminalScrollTest {
     }
 
     @Test
+    fun `the first screen after opening lands at the bottom, an empty one waits`() {
+        assertEquals(true, TerminalScroll.landsOnFirstScreen(opened = true, hasText = true))
+        assertEquals(false, TerminalScroll.landsOnFirstScreen(opened = true, hasText = false))
+        assertEquals(false, TerminalScroll.landsOnFirstScreen(opened = false, hasText = true))
+    }
+
+    @Test
     fun `opening a session shows the bottom`() {
         // Unconditional, and it must stay so: the scroll state is one object shared by every session,
         // so anything conditional here opens the next session at the previous one's offset.
