@@ -201,8 +201,9 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// fails keeps its record - on Active while the window is still narrowed, parked on the store
 		// once Active goes - so the next undo can try again. A pty an earlier press left waiting is
 		// tried again now for the same reason.
-		back, lost := h.releaseHeight(ctx, h.store.Active)
-		h.retryPendingHeight(ctx)
+		// The window restore follows at once, so the pty goes back to its pre-fit width (columns 0).
+		back, lost := h.releaseHeight(ctx, h.store.Active, 0)
+		h.retryPendingHeights(ctx)
 		if err := resize.RestoreWindow(ctx, term, h.store); err != nil {
 			// The restore is the path that fails when agterm refuses a resize outright - which is how
 			// a width-only request looked on 2026-07-31: five ok=false lines with nothing above them.
@@ -291,7 +292,14 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// calibration, but it returns with Active INTACT when the window could not be read or
 		// resized, and `previous` is a copy: releasing against the copy alone left every reply
 		// saying "200 rows" about a pty just put back to 56.
-		back, lost := h.releaseHeight(ctx, previous)
+		// Which width to put back depends on what resize.To left: a failed calibration put the
+		// window back itself and took Active with it (pre-fit width, columns 0); otherwise the window
+		// is still at the fit in force, and the pty goes back to those columns.
+		columns := 0
+		if h.store.Active != nil {
+			columns = h.store.Active.Columns
+		}
+		back, lost := h.releaseHeight(ctx, previous, columns)
 		switch {
 		case back && h.store.Active != nil:
 			clearHeight(h.store.Active)
@@ -528,7 +536,7 @@ func (h *Handler) RestorePending(ctx context.Context) error {
 		return nil
 	}
 	// A pty an earlier run could not put back is tried first; it owes nothing to the window.
-	if h.retryPendingHeight(ctx) {
+	if h.retryPendingHeights(ctx) {
 		h.publishFit()
 		h.saveStore()
 	}
@@ -537,7 +545,7 @@ func (h *Handler) RestorePending(ctx context.Context) error {
 	}
 	// The height before the window, as on the off press. No hold is live in a process that has just
 	// started, so this is the one-shot Restore against the daemon the record names.
-	back, lost := h.releaseHeight(ctx, h.store.Active)
+	back, lost := h.releaseHeight(ctx, h.store.Active, 0)
 	if err := resize.RestoreWindow(ctx, terminal{client: h.client}, h.store); err != nil {
 		// The record survives a failed restore - see RestoreWindow - so the owner's off press can
 		// still perform it once agterm is up. The setting is left alone for the same reason: the

@@ -24,7 +24,7 @@ import (
 //
 // A pty that a finished fit could not put back counts too: the window is the owner's again, but
 // the pane is still tall and the restore verb is how the palette gets it back. See
-// resize.Store.PendingHeight.
+// resize.Store.PendingHeights.
 func (h *Handler) FitInForce() bool {
 	inForce, _ := h.fitNow()
 	return inForce || h.heightPending()

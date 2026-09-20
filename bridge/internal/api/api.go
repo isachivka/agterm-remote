@@ -31,6 +31,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/ptysize"
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 	"github.com/isachivka/agterm-remote/bridge/internal/styled"
+	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold"
 )
 
 // Bounds on `lines`. The floor is agterm's own (`--lines must be greater than 0`), re-checked here so
@@ -380,6 +381,9 @@ type Handler struct {
 	// ptySize reads the live size of the pty behind a pane's shell, for the tall fit's hold check. A
 	// field so tests can stand in a size without a pty; production is ptysize.Read.
 	ptySize func(pid int) (ptysize.Size, error)
+	// openHold connects to a daemon and claims the pty. A field so a test can stand in a daemon that
+	// drops the connection partway through a claim; production is zmxhold.Open.
+	openHold func(ctx context.Context, socketPath string, size zmxhold.Size) (*zmxhold.Hold, error)
 	// now is the clock the hold check paces itself by. Injectable so a test can move it two seconds
 	// without waiting two seconds.
 	now func() time.Time
@@ -396,7 +400,8 @@ type Handler struct {
 
 // New builds a handler. stateDir is where the resize calibration cache lives; empty disables resize.
 func New(client *agterm.Client, stateDir string) *Handler {
-	h := &Handler{client: client, stateDir: stateDir, history: styled.History, ptySize: ptysize.Read, now: time.Now}
+	h := &Handler{client: client, stateDir: stateDir, history: styled.History,
+		ptySize: ptysize.Read, openHold: zmxhold.Open, now: time.Now}
 	if stateDir != "" {
 		h.store = resize.LoadStore(stateDir)
 	}

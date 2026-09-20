@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -36,6 +37,26 @@ import (
 // not end holding the pty must release the live hold, or the pty stays tall while every reply says
 // it is not and nothing on disk can put it back. That was the shape of the first review's major
 // finding, and it is why the exits below all go through the same two calls.
+//
+// # Which size a release puts the pty back to
+//
+// After our Detach nobody leads. agterm's own client becomes leader again only when it types or
+// sends a Resize, and it sends a Resize only on a SIGWINCH, which only a window change causes. So
+// the size a release states is the size the pty KEEPS until the owner types, and it has to be right
+// for the window as it will be:
+//
+//   - A release the window restore follows at once - the off press, the control socket's restore,
+//     the startup restore - puts the pty back to the pre-fit original, rows and columns; the window
+//     restore's SIGWINCH then makes agterm leader with its true size anyway.
+//   - A height-only release, where the WIDTH fit stays in force - a plain read of the held pane, a
+//     width-only press, a plan that failed after the width was re-applied, a hold found lost - puts
+//     the pty back to {the pre-fit rows, the columns in force}. Never the pre-fit width: nothing
+//     would correct 164 columns inside a 41-column pane until the owner typed, and every line in the
+//     pane would wrap at 164 in the meantime, on the Mac and on the phone.
+//
+// So [Handler.letGoLocked] takes the columns to put back, zero meaning the pre-fit width, and the
+// pre-fit original stays recorded on the fit as it was read. A parked put-back carries the size the
+// release that failed would have stated, for the same reason.
 //
 // # What the log may say here
 //
@@ -97,8 +118,8 @@ type tallPlan struct {
 	entry      agterm.ZmxEntry
 	socketPath string
 	// original is the pty as it was before the fit, read only when nothing else already knows it:
-	// a live hold on this daemon, the record of one, or a pending put-back all take precedence,
-	// because a pty under a hold reports the hold. Nil when the read failed; readErr says why.
+	// a live hold on this daemon or the record of one takes precedence, because a pty under a hold
+	// reports the hold. Nil when the read failed or was not safe; readErr says why.
 	original *zmxhold.Size
 	readErr  error
 }
@@ -125,6 +146,18 @@ func (h *Handler) planHeight(ctx context.Context, req Request, previous *resize.
 		return plan
 	}
 	plan.entry, plan.socketPath = entry, filepath.Join(inv.SocketDir, entry.Daemon)
+	// Every put-back still owed is tried before this press claims anything - on this daemon and on
+	// every other, because a debt on another pane is no less a debt for the phone having moved on.
+	if h.retryPendingHeights(ctx) {
+		h.saveStore()
+	}
+	if h.owes(entry.Daemon) {
+		// This very daemon still owes a put-back that just failed again. Its pty may be tall, so a
+		// read now would record a hold as the original; and a daemon that would not take a
+		// put-back will not take a claim. Width only, and the debt stays on record.
+		plan.readErr = errors.New("a put-back on this pane's daemon is still owed")
+		return plan
+	}
 	if h.originalKnown(entry.Daemon, previous) {
 		return plan
 	}
@@ -145,10 +178,20 @@ func (h *Handler) originalKnown(daemon string, previous *resize.Fit) bool {
 	if h.height.held != nil && h.height.held.daemon == daemon {
 		return true
 	}
-	if recordNames(previous, daemon) {
-		return true
+	return recordNames(previous, daemon)
+}
+
+// owes says whether a put-back on daemon is still on record.
+func (h *Handler) owes(daemon string) bool {
+	if h.store == nil {
+		return false
 	}
-	return h.store != nil && h.store.PendingHeight != nil && h.store.PendingHeight.Daemon == daemon
+	for _, p := range h.store.PendingHeights {
+		if p.Daemon == daemon {
+			return true
+		}
+	}
+	return false
 }
 
 // hasRecord says whether fit carries a complete height record; recordNames, one for this daemon.
@@ -172,17 +215,19 @@ func recordNames(fit *resize.Fit, daemon string) bool {
 // original size that press recorded rather than reading a pty that is currently reporting the hold.
 // `plan` is what planHeight learned before the width fit; nil when no height was asked for.
 func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, previous *resize.Fit, plan *tallPlan) int {
+	// On every width-only exit the width fit has just been applied at `columns`, so a pty let go
+	// here is put back to that width - see the doctrine at the top of this file.
 	if plan == nil {
 		// Width only. If a height was held it is let go now: the phone's zmx setting went off, or
 		// this is a phone that never asked for one, and either way it is no longer asked for.
-		h.giveUpHeight(ctx, previous)
+		h.giveUpHeight(ctx, previous, columns)
 		return 0
 	}
 	// Every "width only" exit from here on releases as well: the record has just been replaced by a
 	// fresh width, so a hold that survived one of them would be a hold nothing remembers.
 	if plan.reason != "" {
 		log.Printf("height: %s; width only", plan.reason)
-		h.giveUpHeight(ctx, previous)
+		h.giveUpHeight(ctx, previous, columns)
 		return 0
 	}
 	entry, socketPath := plan.entry, plan.socketPath
@@ -201,7 +246,7 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 	// time, because one pane is being read. A put-back that fails is parked rather than forgotten.
 	if (h.height.held != nil && h.height.held.daemon != entry.Daemon) ||
 		(hasRecord(previous) && previous.Daemon != entry.Daemon) {
-		if back, lost := h.letGoLocked(ctx, previous); !back {
+		if back, lost := h.letGoLocked(ctx, previous, columns); !back {
 			h.park(lost, "the record must give way to a fit on another pane")
 		}
 	}
@@ -215,16 +260,11 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 		// fit was on and the startup restore did not reach the daemon. The pty may still be at the
 		// held size, so the recorded original is the truth and a fresh read of the pty is not.
 		original = zmxhold.Size{Rows: previous.OriginalRows, Cols: previous.OriginalCols}
-	case h.store.PendingHeight != nil && h.store.PendingHeight.Daemon == entry.Daemon:
-		// A put-back that failed on this very daemon: this hold adopts what it owed, and will owe it
-		// itself. The pending record is spent by that adoption.
-		original = zmxhold.Size{Rows: h.store.PendingHeight.Rows, Cols: h.store.PendingHeight.Cols}
-		h.store.PendingHeight = nil
 	case plan.original != nil:
 		original = *plan.original
 	default:
 		log.Printf("height: the pane's pty size could not be read (%v); width only", plan.readErr)
-		h.giveUpLocked(ctx, previous)
+		h.giveUpLocked(ctx, previous, columns)
 		return 0
 	}
 
@@ -256,7 +296,7 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 			// so the pty is known to be where it was - and a fresh one opened below with the same
 			// original. Nothing is parked here: the fresh hold owes the same put-back.
 			log.Printf("height: the re-claim failed (%v); opening a fresh hold", err)
-			h.letGoLocked(ctx, nil)
+			h.letGoLocked(ctx, nil, columns)
 		} else {
 			// The daemon dropped the connection. There is nothing to release on it; the original is
 			// kept for the fresh connection below.
@@ -265,10 +305,18 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 		}
 	}
 
-	hold, err := zmxhold.Open(ctx, socketPath, size)
+	hold, err := h.openHold(ctx, socketPath, size)
 	if err != nil {
 		log.Printf("height: the daemon would not take the hold (%v); width only", err)
-		// The record written above promised a height that is not held. Taken back, on disk.
+		// **Not proof that the pty never moved.** Open is Init, then the claim, then the size, as
+		// separate writes; a daemon that took the claim and dropped the connection before the size
+		// has a pty that is leaderless and possibly tall. And the record above may not be new at all
+		// - a previous process's, still owed. So it is parked with the size the release would have
+		// stated, exactly as a failed release is, whether the pty moved or not: a put-back for a pty
+		// that never moved is harmless, since Restore's Init applies only when nobody leads and
+		// states the size the pty already has.
+		h.park(&resize.HeightRestore{Daemon: entry.Daemon, SocketPath: socketPath,
+			Rows: original.Rows, Cols: columns}, "the daemon would not take the hold")
 		clearHeight(h.store.Active)
 		h.saveStore()
 		return 0
@@ -281,49 +329,62 @@ func (h *Handler) holdHeight(ctx context.Context, req Request, columns int, prev
 	return req.Rows
 }
 
-// giveUpHeight is the width-only exit: whatever was held is let go, and a put-back that fails is
-// parked on the store so a later undo, the next tall press or the next start can dial it.
-func (h *Handler) giveUpHeight(ctx context.Context, previous *resize.Fit) {
+// giveUpHeight is the width-only exit: whatever was held is let go at the columns now in force,
+// and a put-back that fails is parked on the store so a later undo, the next tall press or the
+// next start can dial it.
+func (h *Handler) giveUpHeight(ctx context.Context, previous *resize.Fit, columns int) {
 	h.height.mu.Lock()
 	defer h.height.mu.Unlock()
-	h.giveUpLocked(ctx, previous)
+	h.giveUpLocked(ctx, previous, columns)
 }
 
-func (h *Handler) giveUpLocked(ctx context.Context, previous *resize.Fit) {
-	if back, lost := h.letGoLocked(ctx, previous); !back {
+func (h *Handler) giveUpLocked(ctx context.Context, previous *resize.Fit, columns int) {
+	if back, lost := h.letGoLocked(ctx, previous, columns); !back {
 		h.park(lost, "the fit went on without a height")
 		h.saveStore()
 	}
 }
 
-// park keeps the record of a pty that could not be put back, apart from the fit that is ending.
-// The caller saves the store. See resize.Store.PendingHeight.
+// park keeps the record of a pty that could not be put back, apart from the fit it belonged to.
+// One entry per daemon: a second failure on the same daemon replaces its entry, and a failure on
+// another daemon is another entry, never an overwrite. The caller saves the store. See
+// resize.Store.PendingHeights.
 func (h *Handler) park(lost *resize.HeightRestore, why string) {
 	if lost == nil || h.store == nil {
 		return
 	}
-	if h.store.PendingHeight != nil && *h.store.PendingHeight != *lost {
-		log.Printf("height: a pty of %d by %d was still waiting to be put back and is now forgotten for a newer one",
-			h.store.PendingHeight.Rows, h.store.PendingHeight.Cols)
+	replaced := false
+	for i := range h.store.PendingHeights {
+		if h.store.PendingHeights[i].Daemon == lost.Daemon {
+			h.store.PendingHeights[i] = *lost
+			replaced = true
+		}
 	}
-	h.store.PendingHeight = lost
-	log.Printf("height: %s and the pty could not be put back to %d by %d; kept on record for the next undo",
-		why, lost.Rows, lost.Cols)
+	if !replaced {
+		h.store.PendingHeights = append(h.store.PendingHeights, *lost)
+	}
+	log.Printf("height: %s and the pty could not be put back to %d by %d; kept on record for the next undo (%d owed)",
+		why, lost.Rows, lost.Cols, len(h.store.PendingHeights))
 }
 
-// retryPendingHeight dials a parked put-back again. It reports whether the store changed.
-func (h *Handler) retryPendingHeight(ctx context.Context) bool {
-	if h.store == nil || h.store.PendingHeight == nil {
+// retryPendingHeights dials every parked put-back again, keeping the ones that still fail. It
+// reports whether the store changed.
+func (h *Handler) retryPendingHeights(ctx context.Context) bool {
+	if h.store == nil || len(h.store.PendingHeights) == 0 {
 		return false
 	}
-	p := h.store.PendingHeight
-	if err := zmxhold.Restore(ctx, p.SocketPath, zmxhold.Size{Rows: p.Rows, Cols: p.Cols}); err != nil {
-		log.Printf("height: a pty of %d by %d is still waiting to be put back (%v)", p.Rows, p.Cols, err)
-		return false
+	var still []resize.HeightRestore
+	for _, p := range h.store.PendingHeights {
+		if err := zmxhold.Restore(ctx, p.SocketPath, zmxhold.Size{Rows: p.Rows, Cols: p.Cols}); err != nil {
+			log.Printf("height: a pty of %d by %d is still waiting to be put back (%v)", p.Rows, p.Cols, err)
+			still = append(still, p)
+			continue
+		}
+		log.Printf("height: put a pty back to %d by %d that an earlier release could not", p.Rows, p.Cols)
 	}
-	log.Printf("height: put a pty back to %d by %d that an earlier release could not", p.Rows, p.Cols)
-	h.store.PendingHeight = nil
-	return true
+	changed := len(still) != len(h.store.PendingHeights)
+	h.store.PendingHeights = still
+	return changed
 }
 
 // recordHeight writes the hold into the fit in force, so every reply can say it and a restart can
@@ -421,7 +482,7 @@ func (h *Handler) keepHeight(ctx context.Context, session, pane string, inv *agt
 	if h.height.held.hold.Err() != nil {
 		// The daemon dropped the connection - it restarted, or agterm detached everything. A
 		// Claim on a dead socket cannot help; a fresh connection with the same original can.
-		fresh, err := zmxhold.Open(ctx, h.height.held.socketPath, want)
+		fresh, err := h.openHold(ctx, h.height.held.socketPath, want)
 		if err != nil {
 			log.Printf("height: the pty is %d by %d, the hold's connection is gone and a new one "+
 				"could not be opened (%v)", read.Rows, read.Cols, err)
@@ -461,7 +522,8 @@ func (h *Handler) dropHeight(ctx context.Context, why string) {
 		return
 	}
 	log.Printf("height: %s; letting the height go", why)
-	if back, lost := h.releaseHeight(ctx, h.store.Active); !back {
+	// The width fit stays in force here, so the pty goes back to its columns, not the pre-fit ones.
+	if back, lost := h.releaseHeight(ctx, h.store.Active, h.store.Active.Columns); !back {
 		h.park(lost, why)
 	}
 	clearHeight(h.store.Active)
@@ -470,11 +532,20 @@ func (h *Handler) dropHeight(ctx context.Context, why string) {
 }
 
 // releaseHeight lets a held height go, BEFORE whatever window restore follows it. See letGoLocked
-// for what it does and what it answers.
-func (h *Handler) releaseHeight(ctx context.Context, fit *resize.Fit) (back bool, lost *resize.HeightRestore) {
+// for what it does, what it answers, and what `columns` means.
+func (h *Handler) releaseHeight(ctx context.Context, fit *resize.Fit, columns int) (back bool, lost *resize.HeightRestore) {
 	h.height.mu.Lock()
 	defer h.height.mu.Unlock()
-	return h.letGoLocked(ctx, fit)
+	return h.letGoLocked(ctx, fit, columns)
+}
+
+// putBackSize is the size a release states: the pre-fit rows, and either the columns in force or,
+// for zero, the pre-fit columns - the window restore is about to put those back.
+func putBackSize(original zmxhold.Size, columns int) zmxhold.Size {
+	if columns > 0 {
+		original.Cols = columns
+	}
+	return original
 }
 
 // letGoLocked puts the held pty back and says whether it is known to be back. The caller holds
@@ -486,41 +557,46 @@ func (h *Handler) releaseHeight(ctx context.Context, fit *resize.Fit) (back bool
 // which daemon and which size, and it is dialled the same way: this process restarted while the fit
 // was on.
 //
+// `columns` is the width to put back: the columns in force for a height-only release, or zero for
+// the pre-fit width when the window restore follows at once - see the doctrine at the top of this
+// file. The rows are always the pre-fit rows.
+//
 // **The record is cleared only by a put-back that succeeded.** On failure `fit` keeps its fields
-// and `lost` describes what is still owed, for the caller to keep - on the fit, or parked on the
-// store when the fit is ending. Errors are logged and never returned: a daemon that has gone away
-// has taken its pty with it, and the window restore that follows must not wait on it.
-func (h *Handler) letGoLocked(ctx context.Context, fit *resize.Fit) (back bool, lost *resize.HeightRestore) {
+// and `lost` describes what is still owed - the size this release would have stated - for the
+// caller to keep: on the fit, or parked on the store when the fit is ending. Errors are logged and
+// never returned: a daemon that has gone away has taken its pty with it, and the window restore
+// that follows must not wait on it.
+func (h *Handler) letGoLocked(ctx context.Context, fit *resize.Fit, columns int) (back bool, lost *resize.HeightRestore) {
 	if held := h.height.held; held != nil {
 		h.height.held = nil
-		owed := &resize.HeightRestore{Daemon: held.daemon, SocketPath: held.socketPath,
-			Rows: held.original.Rows, Cols: held.original.Cols}
-		if err := held.hold.Release(held.original); err == nil {
-			log.Printf("height: released the pty to %d by %d", held.original.Rows, held.original.Cols)
+		to := putBackSize(held.original, columns)
+		owed := &resize.HeightRestore{Daemon: held.daemon, SocketPath: held.socketPath, Rows: to.Rows, Cols: to.Cols}
+		if err := held.hold.Release(to); err == nil {
+			log.Printf("height: released the pty to %d by %d", to.Rows, to.Cols)
 			clearHeight(fit)
 			return true, nil
 		} else {
 			log.Printf("height: releasing the pty to %d by %d failed (%v); dialling the daemon afresh",
-				held.original.Rows, held.original.Cols, err)
+				to.Rows, to.Cols, err)
 		}
-		if err := zmxhold.Restore(ctx, held.socketPath, held.original); err != nil {
-			log.Printf("height: the pty could not be put back to %d by %d (%v)", held.original.Rows, held.original.Cols, err)
+		if err := zmxhold.Restore(ctx, held.socketPath, to); err != nil {
+			log.Printf("height: the pty could not be put back to %d by %d (%v)", to.Rows, to.Cols, err)
 			return false, owed
 		}
-		log.Printf("height: put the pty back to %d by %d on a fresh connection", held.original.Rows, held.original.Cols)
+		log.Printf("height: put the pty back to %d by %d on a fresh connection", to.Rows, to.Cols)
 		clearHeight(fit)
 		return true, nil
 	}
 	if !hasRecord(fit) {
 		return true, nil
 	}
-	original := zmxhold.Size{Rows: fit.OriginalRows, Cols: fit.OriginalCols}
-	owed := &resize.HeightRestore{Daemon: fit.Daemon, SocketPath: fit.SocketPath, Rows: original.Rows, Cols: original.Cols}
-	if err := zmxhold.Restore(ctx, fit.SocketPath, original); err != nil {
-		log.Printf("height: the pty could not be put back to %d by %d (%v)", original.Rows, original.Cols, err)
+	to := putBackSize(zmxhold.Size{Rows: fit.OriginalRows, Cols: fit.OriginalCols}, columns)
+	owed := &resize.HeightRestore{Daemon: fit.Daemon, SocketPath: fit.SocketPath, Rows: to.Rows, Cols: to.Cols}
+	if err := zmxhold.Restore(ctx, fit.SocketPath, to); err != nil {
+		log.Printf("height: the pty could not be put back to %d by %d (%v)", to.Rows, to.Cols, err)
 		return false, owed
 	}
-	log.Printf("height: put the pty back to %d by %d from the record of a previous run", original.Rows, original.Cols)
+	log.Printf("height: put the pty back to %d by %d from the record of a previous run", to.Rows, to.Cols)
 	clearHeight(fit)
 	return true, nil
 }

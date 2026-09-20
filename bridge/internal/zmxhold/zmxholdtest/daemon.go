@@ -33,9 +33,12 @@ type Daemon struct {
 
 	mu     sync.Mutex
 	frames []Frame
-	conns  []net.Conn
-	closed []bool
-	ln     net.Listener
+	// dropOnInput makes the daemon hang up as soon as a client types - after the Init, before it
+	// can state a size. What a daemon that dies partway through a claim looks like.
+	dropOnInput bool
+	conns       []net.Conn
+	closed      []bool
+	ln          net.Listener
 }
 
 // Start binds a socket and serves until the test ends.
@@ -97,10 +100,11 @@ func (d *Daemon) read(i int, conn net.Conn) {
 		}
 		d.mu.Lock()
 		d.frames = append(d.frames, Frame{Conn: i, Tag: header[0], Payload: payload})
+		drop := d.dropOnInput && header[0] == 0
 		d.mu.Unlock()
 		// Detach: the real daemon closes the client. Done here so a Release that waits for the
 		// daemon to hang up sees what it would see in production.
-		if header[0] == 3 {
+		if header[0] == 3 || drop {
 			return
 		}
 	}
@@ -145,6 +149,13 @@ func (d *Daemon) Send(t *testing.T, i int, tag byte, payload []byte) {
 	if _, err := conn.Write(append(b, payload...)); err != nil {
 		t.Fatalf("send to connection %d: %v", i, err)
 	}
+}
+
+// DropOnInput makes every connection hang up on the first Input it receives.
+func (d *Daemon) DropOnInput(on bool) {
+	d.mu.Lock()
+	d.dropOnInput = on
+	d.mu.Unlock()
 }
 
 // Drop closes connection i from the daemon's side without a Detach, as a daemon that detached

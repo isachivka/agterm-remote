@@ -88,7 +88,7 @@ func (h *Handler) publishFit() {
 		rows = h.store.Active.Rows
 		session, pane = h.store.Active.Session, h.store.Active.Pane
 	}
-	pendingHeight := h.store != nil && h.store.PendingHeight != nil
+	pendingHeight := h.store != nil && len(h.store.PendingHeights) > 0
 
 	h.stateMu.Lock()
 	h.fitInForce, h.fitColumns = inForce, columns

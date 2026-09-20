@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm/agtermtest"
 	"github.com/isachivka/agterm-remote/bridge/internal/ptysize"
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
+	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold"
 	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold/zmxholdtest"
 )
 
@@ -194,9 +196,10 @@ func (f *tallFixture) plainScreen(t *testing.T, session string) Response {
 	return resp
 }
 
-// expectRelease asserts frames[at:] is one release: the original size in both forms, then Detach,
-// and nothing typed.
-func expectRelease(t *testing.T, frames []zmxholdtest.Frame, at int) {
+// expectRelease asserts frames[at:] is one release: 56 rows by `cols` in both forms, then Detach,
+// and nothing typed. The columns are the test's to say: 164 (pre-fit) when the window restore
+// follows, 41 (the fit in force) when only the height is let go.
+func expectRelease(t *testing.T, frames []zmxholdtest.Frame, at, cols int) {
 	t.Helper()
 	if len(frames) < at+3 {
 		t.Fatalf("no release at %d in %+v", at, frames)
@@ -205,8 +208,8 @@ func expectRelease(t *testing.T, frames []zmxholdtest.Frame, at int) {
 		if frames[i].Tag != 2 {
 			t.Fatalf("frame %d is tag %d, want Resize", i, frames[i].Tag)
 		}
-		if r, c := sizeOf(t, frames[i]); r != 56 || c != 164 {
-			t.Fatalf("released to %dx%d, not the pty's original 56x164", r, c)
+		if r, c := sizeOf(t, frames[i]); r != 56 || c != cols {
+			t.Fatalf("released to %dx%d, want 56x%d", r, c, cols)
 		}
 	}
 	if frames[at+2].Tag != 3 || len(frames[at+2].Payload) != 0 {
@@ -481,11 +484,10 @@ func TestAWidthOnlyPressLetsAHeldHeightGo(t *testing.T) {
 	if resp.Rows != 0 || resp.Columns != cachedColumns {
 		t.Fatalf("reply = %+v", resp)
 	}
-	frames := f.daemon.AwaitFrames(t, 8)
-	if r, c := sizeOf(t, frames[5]); r != 56 || c != 164 || frames[7].Tag != 3 {
-		t.Fatalf("frames after the press: %+v", frames[5:])
-	}
-	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+	// The width fit is still in force at 41 columns and nothing will correct the pty until the
+	// owner types, so the release says 56x41 - the pre-fit 164 would wrap every line in the pane.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, cachedColumns)
+	if a := f.h.store.Active; a == nil || a.Rows != 0 || a.Columns != cachedColumns {
 		t.Fatalf("active = %+v", a)
 	}
 	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 {
@@ -569,7 +571,8 @@ func TestAPlainReadOfTheHeldPaneLetsTheHeightGo(t *testing.T) {
 
 	resp := f.plainScreen(t, sessionA)
 
-	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	// Height only: the window is still fitted to 41 columns, so that is what the pty goes back to.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, cachedColumns)
 	f.daemon.AwaitClosed(t, 0)
 	if resp.Rows != 0 {
 		t.Fatalf("the reply to the read that let the height go still says %d rows", resp.Rows)
@@ -608,7 +611,8 @@ func TestAWidthFitThatFailsWithAHeightHeldReleasesItAndClearsTheRecord(t *testin
 		t.Fatal("the press was supposed to be refused")
 	}
 
-	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	// Active is intact, so the window is still at its 41 columns and the pty goes back to them.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, cachedColumns)
 	if a := f.h.store.Active; a == nil || a.Rows != 0 || a.Daemon != "" {
 		t.Fatalf("active = %+v", a)
 	}
@@ -635,7 +639,8 @@ func TestATallPressWhoseInventoryFailsReleasesTheHoldItCannotRecord(t *testing.T
 	if resp.Rows != 0 || resp.Columns != cachedColumns {
 		t.Fatalf("reply = %+v", resp)
 	}
-	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	// The width was re-applied at 41 columns before the height gave up, so the pty goes to 56x41.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, cachedColumns)
 	f.daemon.AwaitClosed(t, 0)
 	if a := f.h.store.Active; a == nil || a.Rows != 0 {
 		t.Fatalf("active = %+v", a)
@@ -660,8 +665,8 @@ func TestALostDaemonStopsTheHeightBeingReported(t *testing.T) {
 	if a := f.h.store.Active; a == nil || a.Rows != 0 {
 		t.Fatalf("active = %+v", a)
 	}
-	// The old connection was let go at the original size, which is all that can be done for it.
-	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	// The old connection was let go at the fit's columns, which is all that can be done for it.
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, cachedColumns)
 	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.Rows != 0 {
 		t.Fatalf("a poll still reports %d rows", poll.Rows)
 	}
@@ -783,7 +788,7 @@ func TestTheOriginalIsReadBeforeTheWidthFitNarrowsThePty(t *testing.T) {
 	if !off.OK {
 		t.Fatal(off.Error)
 	}
-	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5, 164)
 }
 
 // **A failed release keeps the record until a put-back succeeds.** The daemon dropped the hold's
@@ -805,9 +810,9 @@ func TestAReleaseOnADeadConnectionDialsTheDaemonAfresh(t *testing.T) {
 		t.Fatalf("the put-back did not come on a fresh connection: %+v", frames[5:])
 	}
 	expectRestore(t, frames, 5)
-	if f.h.store.Active != nil || f.h.store.PendingHeight != nil || f.h.FitInForce() {
+	if f.h.store.Active != nil || len(f.h.store.PendingHeights) != 0 || f.h.FitInForce() {
 		t.Fatalf("active=%+v pending=%+v; a put-back that succeeded must clear the record",
-			f.h.store.Active, f.h.store.PendingHeight)
+			f.h.store.Active, f.h.store.PendingHeights)
 	}
 }
 
@@ -831,8 +836,10 @@ func TestAPutBackThatFailsIsKeptOnDiskUntilALaterUndoSucceeds(t *testing.T) {
 	if loaded.Active != nil {
 		t.Fatalf("the fit survived off: %+v", loaded.Active)
 	}
-	p := loaded.PendingHeight
-	if p == nil || p.SocketPath != f.daemon.Path || p.Rows != 56 || p.Cols != 164 {
+	if len(loaded.PendingHeights) != 1 {
+		t.Fatalf("pending heights on disk = %+v", loaded.PendingHeights)
+	}
+	if p := loaded.PendingHeights[0]; p.SocketPath != f.daemon.Path || p.Rows != 56 || p.Cols != 164 {
 		t.Fatalf("pending height on disk = %+v", p)
 	}
 	// The palette's undo still has something to do, and the phone's button does not.
@@ -849,10 +856,10 @@ func TestAPutBackThatFailsIsKeptOnDiskUntilALaterUndoSucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectRestore(t, back.AwaitFrames(t, 3), 0)
-	if f.h.store.PendingHeight != nil || f.h.FitInForce() || rowsOnDisk(t, f.h) != 0 {
+	if len(f.h.store.PendingHeights) != 0 || f.h.FitInForce() || rowsOnDisk(t, f.h) != 0 {
 		t.Fatal("the record outlived the put-back")
 	}
-	if resize.LoadStore(f.h.stateDir).PendingHeight != nil {
+	if len(resize.LoadStore(f.h.stateDir).PendingHeights) != 0 {
 		t.Fatal("the record outlived the put-back on disk")
 	}
 }
@@ -860,9 +867,9 @@ func TestAPutBackThatFailsIsKeptOnDiskUntilALaterUndoSucceeds(t *testing.T) {
 // The next start retries a pty still waiting, before anything else.
 func TestAStartRetriesAPtyStillWaitingToBePutBack(t *testing.T) {
 	f := tallFit(t, true)
-	f.h.store.PendingHeight = &resize.HeightRestore{
+	f.h.store.PendingHeights = []resize.HeightRestore{{
 		Daemon: filepath.Base(f.daemon.Path), SocketPath: f.daemon.Path, Rows: 56, Cols: 164,
-	}
+	}}
 	f.h.publishFit()
 	if !f.h.FitInForce() {
 		t.Fatal("a pending put-back does not count for the control socket")
@@ -873,7 +880,7 @@ func TestAStartRetriesAPtyStillWaitingToBePutBack(t *testing.T) {
 	}
 
 	expectRestore(t, f.daemon.AwaitFrames(t, 3), 0)
-	if f.h.store.PendingHeight != nil || f.h.FitInForce() || resize.LoadStore(f.h.stateDir).PendingHeight != nil {
+	if len(f.h.store.PendingHeights) != 0 || f.h.FitInForce() || len(resize.LoadStore(f.h.stateDir).PendingHeights) != 0 {
 		t.Fatal("the record outlived the put-back")
 	}
 }
@@ -911,7 +918,189 @@ func TestARefusedPressKeepsTheRecordWhenThePutBackFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectRestore(t, back.AwaitFrames(t, 3), 0)
-	if f.h.store.Active != nil || f.h.store.PendingHeight != nil {
+	if f.h.store.Active != nil || len(f.h.store.PendingHeights) != 0 {
 		t.Fatal("the record outlived the put-back")
+	}
+}
+
+// expectRestoreTo is expectRestore at a size of the test's choosing.
+func expectRestoreTo(t *testing.T, frames []zmxholdtest.Frame, at, rows, cols int) {
+	t.Helper()
+	if len(frames) < at+3 {
+		t.Fatalf("no restore at %d in %+v", at, frames)
+	}
+	for i := at; i < at+2; i++ {
+		if frames[i].Tag != 7 {
+			t.Fatalf("frame %d is tag %d, want Init", i, frames[i].Tag)
+		}
+		if r, c := sizeOf(t, frames[i]); r != rows || c != cols {
+			t.Fatalf("restored to %dx%d, want %dx%d", r, c, rows, cols)
+		}
+	}
+	if frames[at+2].Tag != 3 || hasTag(frames[at:at+3], 0) {
+		t.Fatalf("frames = %+v", frames[at:])
+	}
+}
+
+// **An Open that fails is not proof the pty never moved.** The daemon takes the Init and the claim
+// and drops the connection before the size lands: the pty is leaderless and may be tall. The record
+// is parked with the size the release would have stated - 56 by the 41 columns in force - and the
+// next undo puts it back.
+func TestAClaimTheDaemonDropsPartwayIsParkedNotForgotten(t *testing.T) {
+	f := tallFit(t, true)
+	f.daemon.DropOnInput(true)
+	// zmxhold.Open's three writes land before the daemon can hang up, so the failure it models - a
+	// write that fails because the daemon has gone - is made deterministic here: wait for the
+	// hang-up the daemon promised and answer as a failed write would.
+	f.h.openHold = func(ctx context.Context, socketPath string, size zmxhold.Size) (*zmxhold.Hold, error) {
+		h, err := zmxhold.Open(ctx, socketPath, size)
+		if err != nil {
+			return nil, err
+		}
+		// The daemon registers a connection on its own goroutine, so wait for the claim to have
+		// arrived - Init twice, then the Input it hangs up on - and for that connection to be gone.
+		frames := f.daemon.AwaitFrames(t, 3)
+		f.daemon.AwaitClosed(t, frames[len(frames)-1].Conn)
+		_ = h.Close()
+		return nil, errors.New("zmx daemon: write: broken pipe")
+	}
+
+	resp := f.press(t, tallRows)
+
+	if resp.Rows != 0 || resp.Columns != cachedColumns {
+		t.Fatalf("reply = %+v", resp)
+	}
+	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+		t.Fatalf("active = %+v", a)
+	}
+	loaded := resize.LoadStore(f.h.stateDir)
+	if len(loaded.PendingHeights) != 1 {
+		t.Fatalf("pending on disk = %+v; the record of a claim that may have moved the pty was forgotten", loaded.PendingHeights)
+	}
+	if p := loaded.PendingHeights[0]; p.SocketPath != f.daemon.Path || p.Rows != 56 || p.Cols != cachedColumns {
+		t.Fatalf("parked as %+v, want the pre-fit rows and the columns in force", p)
+	}
+	if !f.h.FitInForce() {
+		t.Fatal("the control socket would answer 'no fit is in force' with a put-back still owed")
+	}
+
+	// A later off press retries it: a fresh connection carries Init at the parked size.
+	f.daemon.DropOnInput(false)
+	f.h.openHold = zmxhold.Open
+	before := f.daemon.Connections()
+	off := f.h.Handle(context.Background(), Request{Verb: VerbResize})
+	if !off.OK {
+		t.Fatal(off.Error)
+	}
+	// The dropped connection recorded its Init and the claim only; the put-back is the three frames
+	// on the connection after it.
+	frames := f.daemon.AwaitFrames(t, 6)
+	var fresh []zmxholdtest.Frame
+	for _, fr := range frames {
+		if fr.Conn >= before {
+			fresh = append(fresh, fr)
+		}
+	}
+	expectRestoreTo(t, fresh, 0, 56, cachedColumns)
+	if len(f.h.store.PendingHeights) != 0 || len(resize.LoadStore(f.h.stateDir).PendingHeights) != 0 {
+		t.Fatal("the record outlived the put-back")
+	}
+}
+
+// Two failed put-backs on two daemons are two debts. Both are kept, both are retried on the off
+// press and at start, and a second failure on a daemon already owed replaces its entry alone.
+func TestEveryParkedPutBackIsKeptAndRetried(t *testing.T) {
+	f := tallFit(t, true)
+	other := zmxholdtest.Start(t)
+	f.h.park(&resize.HeightRestore{Daemon: "agterm-a", SocketPath: f.daemon.Path, Rows: 56, Cols: 41}, "test")
+	f.h.park(&resize.HeightRestore{Daemon: "agterm-b", SocketPath: other.Path, Rows: 60, Cols: 120}, "test")
+	f.h.park(&resize.HeightRestore{Daemon: "agterm-a", SocketPath: f.daemon.Path, Rows: 56, Cols: 164}, "test")
+	f.h.saveStore()
+	f.h.publishFit()
+
+	loaded := resize.LoadStore(f.h.stateDir)
+	if len(loaded.PendingHeights) != 2 {
+		t.Fatalf("pending on disk = %+v; want one entry per daemon", loaded.PendingHeights)
+	}
+	if loaded.PendingHeights[0].Cols != 164 || loaded.PendingHeights[1].Daemon != "agterm-b" {
+		t.Fatalf("pending on disk = %+v; a park on a daemon already owed must replace that entry only", loaded.PendingHeights)
+	}
+	if !f.h.FitInForce() {
+		t.Fatal("two put-backs owed and the control socket says nothing is in force")
+	}
+
+	// The off press retries both.
+	if err := f.h.RestoreFit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectRestoreTo(t, f.daemon.AwaitFrames(t, 3), 0, 56, 164)
+	expectRestoreTo(t, other.AwaitFrames(t, 3), 0, 60, 120)
+	if len(f.h.store.PendingHeights) != 0 || f.h.FitInForce() {
+		t.Fatalf("pending = %+v after both were put back", f.h.store.PendingHeights)
+	}
+
+	// The start retries whatever a previous run left, both again.
+	f.h.store.PendingHeights = []resize.HeightRestore{
+		{Daemon: "agterm-a", SocketPath: f.daemon.Path, Rows: 56, Cols: 164},
+		{Daemon: "agterm-b", SocketPath: other.Path, Rows: 60, Cols: 120},
+	}
+	if err := f.h.RestorePending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectRestoreTo(t, f.daemon.AwaitFrames(t, 6), 3, 56, 164)
+	expectRestoreTo(t, other.AwaitFrames(t, 6), 3, 60, 120)
+	if len(f.h.store.PendingHeights) != 0 {
+		t.Fatalf("pending = %+v after the start", f.h.store.PendingHeights)
+	}
+}
+
+// A tall press retries every put-back owed BEFORE it claims - on other daemons too, not only the
+// one it is about to hold - and one that still fails stays on record.
+func TestATallPressRetriesEveryParkedPutBackBeforeItClaims(t *testing.T) {
+	f := tallFit(t, true)
+	other := zmxholdtest.Start(t)
+	gone := filepath.Join(filepath.Dir(other.Path), "agterm-gone")
+	f.h.store.PendingHeights = []resize.HeightRestore{
+		{Daemon: "agterm-b", SocketPath: other.Path, Rows: 60, Cols: 120},
+		{Daemon: "agterm-gone", SocketPath: gone, Rows: 50, Cols: 100},
+	}
+
+	resp := f.press(t, tallRows)
+
+	if resp.Rows != tallRows {
+		t.Fatalf("reply = %+v", resp)
+	}
+	// The other daemon was put back before this pane's claim went out...
+	expectRestoreTo(t, other.AwaitFrames(t, 3), 0, 60, 120)
+	f.daemon.AwaitFrames(t, 5)
+	// ...and the one that cannot be reached is still owed, on disk.
+	loaded := resize.LoadStore(f.h.stateDir)
+	if len(loaded.PendingHeights) != 1 || loaded.PendingHeights[0].Daemon != "agterm-gone" {
+		t.Fatalf("pending on disk = %+v", loaded.PendingHeights)
+	}
+}
+
+// A put-back owed on the very daemon a press wants to hold, and still failing, keeps the press to
+// the width: its pty may be tall, so it must not be read as an original, and it is kept on record.
+func TestAPressOnADaemonStillOwedIsWidthOnlyAndKeepsTheDebt(t *testing.T) {
+	f := tallFit(t, true)
+	if err := os.Remove(f.daemon.Path); err != nil {
+		t.Fatal(err)
+	}
+	f.h.store.PendingHeights = []resize.HeightRestore{
+		{Daemon: filepath.Base(f.daemon.Path), SocketPath: f.daemon.Path, Rows: 56, Cols: 164},
+	}
+
+	resp := f.press(t, tallRows)
+
+	if resp.Rows != 0 || resp.Columns != cachedColumns {
+		t.Fatalf("reply = %+v", resp)
+	}
+	loaded := resize.LoadStore(f.h.stateDir)
+	if len(loaded.PendingHeights) != 1 || loaded.PendingHeights[0].Cols != 164 {
+		t.Fatalf("pending on disk = %+v", loaded.PendingHeights)
+	}
+	if a := f.h.store.Active; a == nil || a.Rows != 0 {
+		t.Fatalf("active = %+v", a)
 	}
 }

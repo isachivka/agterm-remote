@@ -283,7 +283,10 @@ type Restore struct {
 	SidebarWidthMilli int `json:"sidebar_width_milli,omitempty"`
 }
 
-// HeightRestore is a pty to put back: which daemon, by name and socket, and the size it had.
+// HeightRestore is a pty still to be put back: which daemon, by name and socket, and the size the
+// release that failed would have put it to - the pre-fit rows, and the columns in force at the
+// time, which is the pre-fit width when the window was put back with it and the fitted width when
+// the window stayed narrow. See api/height.go for why the two differ.
 type HeightRestore struct {
 	Daemon     string `json:"daemon"`
 	SocketPath string `json:"socket_path"`
@@ -309,12 +312,17 @@ type Store struct {
 	Active *Fit `json:"active,omitempty"`
 
 	Pending *Restore `json:"pending_restore,omitempty"`
-	// PendingHeight is a pty that could not be put back when its fit ended - the daemon dropped the
-	// connection that held it and would not answer a fresh one - kept apart from Active for the same
-	// reason Pending is: the fit is over and the setting must say so, but the record of what to put
-	// back is the only thing that still can. Retried on the next off press, the next tall press and
-	// the next start, and cleared only by a put-back that succeeded.
-	PendingHeight *HeightRestore `json:"pending_height,omitempty"`
+	// PendingHeights are ptys that could not be put back when their hold ended - the daemon dropped
+	// the connection that held one and would not answer a fresh one, or a claim failed partway - kept
+	// apart from Active for the same reason Pending is: the fit may be over and the setting must say
+	// so, but the record of what to put back is the only thing that still can.
+	//
+	// A list keyed by daemon, one entry per daemon, because two failures on two panes are two debts
+	// and a slot that held one would forget the first. EVERY entry is retried on the next off press,
+	// on every tall press before its claim, and at the next start; an entry is removed only by a
+	// put-back that succeeded. The tag is `pending_heights`, a new name: a file written by the one
+	// build that had a single `pending_height` object still loads, and that object is dropped.
+	PendingHeights []HeightRestore `json:"pending_heights,omitempty"`
 	// dir is where this store was loaded from, so it can write itself back at the one moment that
 	// cannot wait for the caller - see persist. Unexported, so it is never serialised into its own
 	// file, and empty for a store built directly in a test, which makes persist a no-op there.

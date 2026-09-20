@@ -1076,3 +1076,42 @@ func TestTheRecalibrateFlagForcesAFreshSearch(t *testing.T) {
 		t.Error("a forced recalibration reported no columns, so the phone has nothing to show")
 	}
 }
+
+// A store written before the pending-height list existed, and one written by the single build that
+// had a single `pending_height` object, both still load; the old object is dropped, not read.
+func TestOlderStoreShapesStillLoad(t *testing.T) {
+	for name, raw := range map[string]string{
+		"no pending height":     `{"fits":{},"active":{"display":0,"columns":41}}`,
+		"the old single object": `{"fits":{},"pending_height":{"daemon":"agterm-1","socket_path":"/tmp/x/agterm-1","rows":56,"cols":164}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "resize-cache.json"), []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s := LoadStore(dir)
+			if s.Fits == nil || len(s.PendingHeights) != 0 {
+				t.Fatalf("loaded as %+v", s)
+			}
+			if name == "no pending height" && (s.Active == nil || s.Active.Columns != 41) {
+				t.Fatalf("the fit did not survive the load: %+v", s.Active)
+			}
+		})
+	}
+}
+
+func TestPendingHeightsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := LoadStore(dir)
+	s.PendingHeights = []HeightRestore{{Daemon: "agterm-1", SocketPath: "/tmp/x/agterm-1", Rows: 56, Cols: 41}}
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "resize-cache.json"))
+	if !strings.Contains(string(raw), `"pending_heights"`) || strings.Contains(string(raw), `"pending_height"`+":") {
+		t.Fatalf("written as %s", raw)
+	}
+	if got := LoadStore(dir).PendingHeights; len(got) != 1 || got[0] != s.PendingHeights[0] {
+		t.Fatalf("loaded as %+v", got)
+	}
+}
