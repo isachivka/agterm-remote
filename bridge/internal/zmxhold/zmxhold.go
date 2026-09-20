@@ -178,14 +178,23 @@ func (h *Hold) Type(input []byte) error {
 		if err := h.write(frame(tagInput, []byte(ClaimInput))); err != nil {
 			return err
 		}
-		time.Sleep(claimSettle)
+		time.Sleep(ClaimSettle)
 	}
 	return h.write(frame(tagInput, input))
 }
 
-// claimSettle is the pause between the claim input and the input it clears the way for, long enough
-// for the daemon to flush the first to the pty as a write of its own before the second arrives.
-const claimSettle = 40 * time.Millisecond
+// ClaimSettle is the pause between the claim input and the input it clears the way for.
+//
+// **A guess, and named as one.** What the split needs is for the program on the far end of the pty
+// to READ between the two writes: two writes still unread arrive in one read, and one read holding
+// "empty paste, then a key" is the paste that swallows the key. Nothing on this side can observe
+// that read - the daemon does not report it, the pty does not - so this is not the mechanism the
+// house rule asks for (resize.go: "it observes the thing it is waiting for"); it is the smallest
+// interval that reliably separated the two on the machine this was written on, with a margin. The
+// claim also goes out whenever the input could not claim by itself, whether or not this Hold still
+// leads - it cannot know - so the pause is paid on every Backspace and Escape from the phone, and
+// the failure it leaves open needs the program to have been busy for longer than this.
+const ClaimSettle = 40 * time.Millisecond
 
 // ClaimsLeadership reports whether the daemon's classifier would call `input` user input - the
 // condition under which a non-leader's input is forwarded and makes it leader. Mirrors zmx's

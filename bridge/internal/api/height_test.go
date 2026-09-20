@@ -1263,17 +1263,38 @@ func TestTypingWithADeadHoldGoesThroughAgtermWithThePrefix(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("type: %s", resp.Error)
 	}
+	var typed []string
 	for _, r := range f.agterm.Requests() {
 		if r.Cmd == "session.type" {
 			var args struct {
 				Text string `json:"text"`
 			}
 			_ = json.Unmarshal(r.Args, &args)
-			if args.Text != zmxhold.ClaimInput+"\u0434\u0430" {
-				t.Fatalf("agterm was asked to type %q", args.Text)
-			}
-			return
+			typed = append(typed, args.Text)
 		}
 	}
-	t.Fatal("agterm was never asked to type")
+	// Two session.type calls, never one payload: the claim input in one payload with the key is one
+	// pty write, and one read of "empty paste, then a key" is the paste that swallows the key.
+	if len(typed) != 2 || typed[0] != zmxhold.ClaimInput || typed[1] != "\u0434\u0430" {
+		t.Fatalf("agterm was asked to type %q", typed)
+	}
+
+	// Enter can claim by itself and goes as the one call it always was.
+	resp = f.h.Handle(context.Background(), Request{Verb: VerbType, Session: sessionA, Pane: "left", Key: "enter"})
+	if !resp.OK {
+		t.Fatalf("enter: %s", resp.Error)
+	}
+	typed = typed[:0]
+	for _, r := range f.agterm.Requests() {
+		if r.Cmd == "session.type" {
+			var args struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(r.Args, &args)
+			typed = append(typed, args.Text)
+		}
+	}
+	if len(typed) != 3 || typed[2] != "\r" {
+		t.Fatalf("after Enter agterm was asked to type %q", typed)
+	}
 }
