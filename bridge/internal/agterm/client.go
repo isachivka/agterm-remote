@@ -234,6 +234,10 @@ type ZmxEntry struct {
 	// Observation is what zmx itself reported when agterm took the inventory: "running" when the
 	// daemon answered, "absent" when the pane claims one that is not there.
 	Observation string `json:"observation"`
+	// LeaderPID is the pid of the shell the daemon started in its pty - the `pid=` of `zmx list`,
+	// which agterm passes through. It is how the tall fit finds the pty to read its size from:
+	// `ps -o tty=` on this pid names the device. Zero when agterm or zmx reported none.
+	LeaderPID int32 `json:"leaderPID"`
 }
 
 // Window is one agterm window, as `window.list` reports it.

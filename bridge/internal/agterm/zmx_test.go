@@ -21,7 +21,7 @@ func TestZmxListReadsTheEndpointAndEveryPaneRow(t *testing.T) {
 				"restore":           map[string]any{"active": "live"},
 				"inventoryComplete": true,
 				"entries": []map[string]any{
-					{"sessionID": "S1", "pane": "left", "daemon": "agterm-1", "observation": "running"},
+					{"sessionID": "S1", "pane": "left", "daemon": "agterm-1", "observation": "running", "leaderPID": 39723},
 					{"sessionID": "S1", "pane": "right", "daemon": "agterm-2", "observation": "absent"},
 				},
 			},
@@ -37,5 +37,9 @@ func TestZmxListReadsTheEndpointAndEveryPaneRow(t *testing.T) {
 	}
 	if len(got.Entries) != 2 || got.Entries[0].Daemon != "agterm-1" || got.Entries[1].Observation != "absent" {
 		t.Fatalf("entries = %+v", got.Entries)
+	}
+	// The shell's pid rides along, and a row without one reads zero rather than failing the list.
+	if got.Entries[0].LeaderPID != 39723 || got.Entries[1].LeaderPID != 0 {
+		t.Fatalf("leader pids = %d, %d", got.Entries[0].LeaderPID, got.Entries[1].LeaderPID)
 	}
 }
