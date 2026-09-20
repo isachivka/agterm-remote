@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/isachivka/agterm-remote/compare/v0.8.2...v0.8.3) (2026-09-20)
+
+
+### Bug Fixes
+
+* Enter from the phone reaches a held pane again, and an opened session lands at its bottom ([#111](https://github.com/isachivka/agterm-remote/issues/111)) ([4807102](https://github.com/isachivka/agterm-remote/commit/4807102dda8ddb9e5a2e9771c6c98ea9167acc4b))
+
 ## [0.8.2](https://github.com/isachivka/agterm-remote/compare/v0.8.1...v0.8.2) (2026-09-20)
 
 
