@@ -87,13 +87,13 @@ window goes back to its own width when Fit is pressed again.
 
 ### Tall through zmx
 
-With colours through zmx switched on in the phone app, Fit also holds the pane 200 rows tall.
+With colours through zmx switched on in the phone app, Fit also holds the pane 500 rows tall, and the empty rows a fresh session leaves between its banner and its composer are squeezed out of what the phone reads.
 agterm's window cannot be made that tall, so the height is set through the zmx daemon behind the
 pane: the bridge connects to it as a second client and states the size, and programs that draw their
-own scroller - Claude Code above all - render 200 rows for the phone to read. This works only for
+own scroller - Claude Code above all - render 500 rows for the phone to read. This works only for
 panes agterm runs under zmx ("Live sessions").
 
-While it is on, the pane on the Mac shows the same 200-row stream squeezed into its own viewport, and
+While it is on, the pane on the Mac shows the same 500-row stream squeezed into its own viewport, and
 typing in it on the Mac hands the pane back to agterm's size until the phone's next poll takes it
 again. There are two ways off: press Fit on the phone, or run **Undo phone fit** from agterm's
 command palette on the Mac - the bridge installs that command in `keymap.conf`, inside a fenced

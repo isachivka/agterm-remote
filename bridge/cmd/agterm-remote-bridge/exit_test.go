@@ -14,7 +14,7 @@ import (
 
 // stop()'s promise - "a window this bridge resized is put back the way it was found" - is kept on
 // the way out of run, through the phone's own off path. Without this an ordinary Quit left the
-// window narrow and, since the tall fit, the pane's pty at 200 rows with nothing listening for
+// window narrow and, since the tall fit, the pane's pty at 500 rows with nothing listening for
 // "Undo phone fit". A store with a fit in force and a restore point is what a running bridge has
 // on disk; the fake agterm records the resize the exit performs.
 func TestExitPutsTheFitBack(t *testing.T) {

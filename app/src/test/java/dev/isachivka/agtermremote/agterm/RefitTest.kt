@@ -161,7 +161,7 @@ class RefitTest {
     @Test
     fun `with colours through zmx on, the re-apply asks for the tall pane`() = runBlocking {
         val sessions = holder(
-            listing, screen, """{"ok":true,"fit_enabled":true,"columns":39,"rows":200}""",
+            listing, screen, """{"ok":true,"fit_enabled":true,"columns":39,"rows":500}""",
             styled = true,
         ).opened()
 
@@ -169,8 +169,8 @@ class RefitTest {
 
         val last = requests.last()
         assertEquals("the re-apply stopped being a re-apply: $last", true, last.contains(""""cached_only":true"""))
-        assertEquals("the re-apply dropped the height: $last", true, last.contains(""""rows":200"""))
-        assertEquals(200, sessions.fit.value.rows)
+        assertEquals("the re-apply dropped the height: $last", true, last.contains(""""rows":500"""))
+        assertEquals(500, sessions.fit.value.rows)
     }
 
     /**
@@ -194,7 +194,7 @@ class RefitTest {
     /**
      * **A taller pane is only worth asking for if the phone then reads all of it.**
      *
-     * The bridge holds the zmx pty at 200 rows and Claude Code draws 200; a read still bounded by the
+     * The bridge holds the zmx pty at 500 rows and Claude Code draws 500; a read still bounded by the
      * usual 120 would fetch the pane cut off two fifths of the way down, so the owner would have asked
      * for a taller terminal and been shown LESS of it. The floor stays 120 - a held height smaller
      * than the default must not shrink an ordinary read.
@@ -202,10 +202,10 @@ class RefitTest {
     @Test
     fun `a screen read reaches as far as the pane is held tall`() = runBlocking {
         val tall = """{"ok":true,"sessions":[{"id":"A","name":"a","active":true}],""" +
-            """"fit_enabled":true,"columns":45,"rows":200}"""
+            """"fit_enabled":true,"columns":45,"rows":500}"""
         holder(tall, screen, styled = true).opened()
 
-        assertEquals("a tall fit was read with the ordinary line bound", 200, requests.last().linesAsked())
+        assertEquals("a tall fit was read with the ordinary line bound", 500, requests.last().linesAsked())
 
         sent.reset()
         holder(listing, screen).opened()

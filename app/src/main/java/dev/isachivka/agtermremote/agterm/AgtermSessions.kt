@@ -412,8 +412,8 @@ class AgtermSessions(
     /**
      * Reads a screen from the pane the owner is looking at. See [pane]; do not inline it.
      *
-     * **The line bound follows the height the laptop is holding.** A tall fit makes the pty 200 rows,
-     * and Claude Code then draws 200 - so asking for the usual 120 would fetch a pane cut off two
+     * **The line bound follows the height the laptop is holding.** A tall fit makes the pty 500 rows,
+     * and Claude Code then draws 500 - so asking for the usual 120 would fetch a pane cut off two
      * fifths of the way down and the owner would have asked for a taller terminal to see LESS of it.
      * [BridgeConnection.DEFAULT_LINES] stays the floor: a held height smaller than it must not shrink
      * an ordinary read.
