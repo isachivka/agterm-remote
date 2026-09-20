@@ -79,6 +79,26 @@ read on real hardware is still outstanding. The payload format is in [wire/READM
 and the ALPN split that keeps a certificate-less connection away from the API is argued in
 `bridge/internal/enroll/alpn.go`.
 
+## Fitting the terminal to the phone
+
+The phone's **Fit** button makes the Mac's agterm window as many columns wide as the phone can show,
+so vim, htop and Claude Code lay themselves out for the phone rather than being reflowed by it. The
+window goes back to its own width when Fit is pressed again.
+
+### Tall through zmx
+
+With colours through zmx switched on in the phone app, Fit also holds the pane 200 rows tall.
+agterm's window cannot be made that tall, so the height is set through the zmx daemon behind the
+pane: the bridge connects to it as a second client and states the size, and programs that draw their
+own scroller - Claude Code above all - render 200 rows for the phone to read. This works only for
+panes agterm runs under zmx ("Live sessions").
+
+While it is on, the pane on the Mac shows the same 200-row stream squeezed into its own viewport, and
+typing in it on the Mac hands the pane back to agterm's size until the phone's next poll takes it
+again. There are two ways off: press Fit on the phone, or run **Undo phone fit** from agterm's
+command palette on the Mac - the bridge installs that command in `keymap.conf`, inside a fenced
+block it maintains, and touches nothing else in the file.
+
 ## Build and test
 
 ```
