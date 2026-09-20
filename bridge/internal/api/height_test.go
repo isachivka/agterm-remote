@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,8 +83,21 @@ func tallFit(t *testing.T, live bool) *tallFixture {
 					"geometry": map[string]any{"display": 0, "width": 1728, "height": 1084}},
 			}})
 		case "window.resize":
+			// The pty follows the window, as it does on a real Mac: the fit's width narrows it to the
+			// fitted columns, the restore widens it back. A hold that read the pty AFTER the width
+			// fit would record the narrow size as the original - the second review's finding.
+			var args struct {
+				Width int `json:"width"`
+			}
+			_ = json.Unmarshal(req.Args, &args)
 			f.mu.Lock()
 			f.detachBeforeWindowRestore = hasTag(f.daemon.Frames(), 3)
+			switch args.Width {
+			case 769:
+				f.pty.Cols = cachedColumns
+			case 1728:
+				f.pty.Cols = 164
+			}
 			f.mu.Unlock()
 			return agtermtest.OK(map[string]any{})
 		case "zmx.list":
@@ -211,6 +225,46 @@ func rowsOnDisk(t *testing.T, h *Handler) int {
 		return 0
 	}
 	return loaded.Active.Rows
+}
+
+// dropHoldConnection has the daemon hang up on the hold without a Detach, as a daemon that
+// detached all its clients does, and waits until the hold has noticed.
+func (f *tallFixture) dropHoldConnection(t *testing.T) {
+	t.Helper()
+	f.daemon.Drop(t, 0)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.h.height.mu.Lock()
+		dead := f.h.height.held != nil && f.h.height.held.hold.Err() != nil
+		f.h.height.mu.Unlock()
+		if dead {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hold never noticed the daemon hanging up")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// expectRestore asserts frames[at:] is one fresh put-back: Init at 56x164 in both forms, then
+// Detach, and nothing typed.
+func expectRestore(t *testing.T, frames []zmxholdtest.Frame, at int) {
+	t.Helper()
+	if len(frames) < at+3 {
+		t.Fatalf("no restore at %d in %+v", at, frames)
+	}
+	for i := at; i < at+2; i++ {
+		if frames[i].Tag != 7 {
+			t.Fatalf("frame %d is tag %d, want Init", i, frames[i].Tag)
+		}
+		if r, c := sizeOf(t, frames[i]); r != 56 || c != 164 {
+			t.Fatalf("restored to %dx%d, not the original 56x164", r, c)
+		}
+	}
+	if frames[at+2].Tag != 3 || hasTag(frames[at:at+3], 0) {
+		t.Fatalf("frames = %+v", frames[at:])
+	}
 }
 
 func hasTag(frames []zmxholdtest.Frame, tag byte) bool {
@@ -707,5 +761,157 @@ func TestATallPressInstallsTheUndoCommand(t *testing.T) {
 	}
 	if !reloaded {
 		t.Fatal("the keymap was written and agterm was not told")
+	}
+}
+
+// **The original is the pty BEFORE the width fit.** The fit narrows the window and the pty with
+// it, and holdHeight runs after; a size read there is 56x41 and a release that put it back would
+// leave the pane narrow. So the pty is read before resize.To, and the release says 56x164.
+func TestTheOriginalIsReadBeforeTheWidthFitNarrowsThePty(t *testing.T) {
+	f := tallFit(t, true)
+
+	f.press(t, tallRows)
+
+	if a := f.h.store.Active; a.OriginalRows != 56 || a.OriginalCols != 164 {
+		t.Fatalf("original recorded as %dx%d; the pty was read after the fit narrowed it", a.OriginalRows, a.OriginalCols)
+	}
+	if f.pty.Cols != cachedColumns {
+		t.Fatalf("the fixture's pty did not follow the window (%dx%d); this test is not testing the order", f.pty.Rows, f.pty.Cols)
+	}
+	f.daemon.AwaitFrames(t, 5)
+	off := f.h.Handle(context.Background(), Request{Verb: VerbResize})
+	if !off.OK {
+		t.Fatal(off.Error)
+	}
+	expectRelease(t, f.daemon.AwaitFrames(t, 8), 5)
+}
+
+// **A failed release keeps the record until a put-back succeeds.** The daemon dropped the hold's
+// connection but is alive and its pty is still tall: the release fails, the daemon is dialled
+// afresh with the original, and only that clears the record.
+func TestAReleaseOnADeadConnectionDialsTheDaemonAfresh(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	f.dropHoldConnection(t)
+
+	off := f.h.Handle(context.Background(), Request{Verb: VerbResize})
+	if !off.OK {
+		t.Fatal(off.Error)
+	}
+
+	frames := f.daemon.AwaitFrames(t, 8)
+	if frames[5].Conn != 1 {
+		t.Fatalf("the put-back did not come on a fresh connection: %+v", frames[5:])
+	}
+	expectRestore(t, frames, 5)
+	if f.h.store.Active != nil || f.h.store.PendingHeight != nil || f.h.FitInForce() {
+		t.Fatalf("active=%+v pending=%+v; a put-back that succeeded must clear the record",
+			f.h.store.Active, f.h.store.PendingHeight)
+	}
+}
+
+// And when the fresh dial fails too, the record stays - on disk, apart from the fit that ended -
+// so a later undo can dial it, and does once the daemon answers again.
+func TestAPutBackThatFailsIsKeptOnDiskUntilALaterUndoSucceeds(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	f.dropHoldConnection(t)
+	if err := os.Remove(f.daemon.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	off := f.h.Handle(context.Background(), Request{Verb: VerbResize})
+	if !off.OK || off.FitEnabled == nil || *off.FitEnabled || off.Rows != 0 {
+		t.Fatalf("off = %+v", off)
+	}
+
+	loaded := resize.LoadStore(f.h.stateDir)
+	if loaded.Active != nil {
+		t.Fatalf("the fit survived off: %+v", loaded.Active)
+	}
+	p := loaded.PendingHeight
+	if p == nil || p.SocketPath != f.daemon.Path || p.Rows != 56 || p.Cols != 164 {
+		t.Fatalf("pending height on disk = %+v", p)
+	}
+	// The palette's undo still has something to do, and the phone's button does not.
+	if !f.h.FitInForce() {
+		t.Fatal("the control socket would answer 'no fit is in force' with a pty still tall")
+	}
+	if poll := f.h.Handle(context.Background(), Request{Verb: VerbSessions}); poll.FitEnabled == nil || *poll.FitEnabled || poll.Rows != 0 {
+		t.Fatalf("poll = %+v", poll)
+	}
+
+	// The daemon answers again; the next undo puts the pty back and the record is spent.
+	back := zmxholdtest.StartAt(t, f.daemon.Path)
+	if err := f.h.RestoreFit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectRestore(t, back.AwaitFrames(t, 3), 0)
+	if f.h.store.PendingHeight != nil || f.h.FitInForce() || rowsOnDisk(t, f.h) != 0 {
+		t.Fatal("the record outlived the put-back")
+	}
+	if resize.LoadStore(f.h.stateDir).PendingHeight != nil {
+		t.Fatal("the record outlived the put-back on disk")
+	}
+}
+
+// The next start retries a pty still waiting, before anything else.
+func TestAStartRetriesAPtyStillWaitingToBePutBack(t *testing.T) {
+	f := tallFit(t, true)
+	f.h.store.PendingHeight = &resize.HeightRestore{
+		Daemon: filepath.Base(f.daemon.Path), SocketPath: f.daemon.Path, Rows: 56, Cols: 164,
+	}
+	f.h.publishFit()
+	if !f.h.FitInForce() {
+		t.Fatal("a pending put-back does not count for the control socket")
+	}
+
+	if err := f.h.RestorePending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	expectRestore(t, f.daemon.AwaitFrames(t, 3), 0)
+	if f.h.store.PendingHeight != nil || f.h.FitInForce() || resize.LoadStore(f.h.stateDir).PendingHeight != nil {
+		t.Fatal("the record outlived the put-back")
+	}
+}
+
+// A refused press with the fit intact keeps the height record on it when the put-back fails, so
+// the undo that follows can dial it - and does.
+func TestARefusedPressKeepsTheRecordWhenThePutBackFails(t *testing.T) {
+	f := tallFit(t, true)
+	f.press(t, tallRows)
+	f.daemon.AwaitFrames(t, 5)
+	f.dropHoldConnection(t)
+	if err := os.Remove(f.daemon.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	f.set(func() { f.failWindowList = true })
+	resp := f.h.Handle(context.Background(), Request{
+		Verb: VerbResize, Session: sessionA, Pane: "left",
+		BoxWidthDp: 440, CharacterWidthMilliDp: 9800, Rows: tallRows,
+	})
+	if resp.OK {
+		t.Fatal("the press was supposed to be refused")
+	}
+	a := f.h.store.Active
+	if a == nil || a.Rows != tallRows || a.SocketPath != f.daemon.Path || a.OriginalCols != 164 {
+		t.Fatalf("active = %+v; a put-back that failed must leave the record", a)
+	}
+	if rowsOnDisk(t, f.h) != tallRows {
+		t.Fatal("the record is not on disk")
+	}
+
+	f.set(func() { f.failWindowList = false })
+	back := zmxholdtest.StartAt(t, f.daemon.Path)
+	if err := f.h.RestoreFit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	expectRestore(t, back.AwaitFrames(t, 3), 0)
+	if f.h.store.Active != nil || f.h.store.PendingHeight != nil {
+		t.Fatal("the record outlived the put-back")
 	}
 }

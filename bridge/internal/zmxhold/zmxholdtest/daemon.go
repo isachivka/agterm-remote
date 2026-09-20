@@ -45,14 +45,21 @@ func Start(t *testing.T) *Daemon {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "agterm-1")
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return StartAt(t, filepath.Join(dir, "agterm-1"))
+}
+
+// StartAt serves at a path of the test's choosing - the path an earlier daemon had, for a daemon
+// that comes back after the socket went away.
+func StartAt(t *testing.T, path string) *Daemon {
+	t.Helper()
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{Path: path, ln: ln}
 	go d.serve()
-	t.Cleanup(func() { ln.Close(); os.RemoveAll(dir) })
+	t.Cleanup(func() { ln.Close() })
 	return d
 }
 
@@ -138,6 +145,20 @@ func (d *Daemon) Send(t *testing.T, i int, tag byte, payload []byte) {
 	if _, err := conn.Write(append(b, payload...)); err != nil {
 		t.Fatalf("send to connection %d: %v", i, err)
 	}
+}
+
+// Drop closes connection i from the daemon's side without a Detach, as a daemon that detached
+// all its clients or died does.
+func (d *Daemon) Drop(t *testing.T, i int) {
+	t.Helper()
+	d.mu.Lock()
+	if i >= len(d.conns) {
+		d.mu.Unlock()
+		t.Fatalf("no connection %d", i)
+	}
+	conn := d.conns[i]
+	d.mu.Unlock()
+	_ = conn.Close()
 }
 
 // AwaitClosed waits until connection i has hung up, or fails the test.

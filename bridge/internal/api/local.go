@@ -21,9 +21,13 @@ import (
 // Read from the published flag rather than the store, because this is called by the control socket's
 // goroutine while a calibration may be running on the phone's. See serialize.go. The local command
 // uses it to be honest about doing nothing rather than resizing a window on a guess.
+//
+// A pty that a finished fit could not put back counts too: the window is the owner's again, but
+// the pane is still tall and the restore verb is how the palette gets it back. See
+// resize.Store.PendingHeight.
 func (h *Handler) FitInForce() bool {
 	inForce, _ := h.fitNow()
-	return inForce
+	return inForce || h.heightPending()
 }
 
 // RestoreFit puts the owner's window back, through the phone's own off path.

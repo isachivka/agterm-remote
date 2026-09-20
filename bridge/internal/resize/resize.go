@@ -283,6 +283,14 @@ type Restore struct {
 	SidebarWidthMilli int `json:"sidebar_width_milli,omitempty"`
 }
 
+// HeightRestore is a pty to put back: which daemon, by name and socket, and the size it had.
+type HeightRestore struct {
+	Daemon     string `json:"daemon"`
+	SocketPath string `json:"socket_path"`
+	Rows       int    `json:"rows"`
+	Cols       int    `json:"cols"`
+}
+
 // Store is the on-disk cache. It lives beside the bridge's config, which is gitignored.
 type Store struct {
 	Fits map[string]Fit `json:"fits"`
@@ -301,6 +309,12 @@ type Store struct {
 	Active *Fit `json:"active,omitempty"`
 
 	Pending *Restore `json:"pending_restore,omitempty"`
+	// PendingHeight is a pty that could not be put back when its fit ended - the daemon dropped the
+	// connection that held it and would not answer a fresh one - kept apart from Active for the same
+	// reason Pending is: the fit is over and the setting must say so, but the record of what to put
+	// back is the only thing that still can. Retried on the next off press, the next tall press and
+	// the next start, and cleared only by a put-back that succeeded.
+	PendingHeight *HeightRestore `json:"pending_height,omitempty"`
 	// dir is where this store was loaded from, so it can write itself back at the one moment that
 	// cannot wait for the caller - see persist. Unexported, so it is never serialised into its own
 	// file, and empty for a store built directly in a test, which makes persist a no-op there.

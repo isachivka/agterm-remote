@@ -88,10 +88,12 @@ func (h *Handler) publishFit() {
 		rows = h.store.Active.Rows
 		session, pane = h.store.Active.Session, h.store.Active.Pane
 	}
+	pendingHeight := h.store != nil && h.store.PendingHeight != nil
 
 	h.stateMu.Lock()
 	h.fitInForce, h.fitColumns = inForce, columns
 	h.fitRows, h.heldSession, h.heldPane = rows, session, pane
+	h.pendingHeight = pendingHeight
 	// **A completed operation re-establishes the truth, so the old measurement is discarded rather
 	// than left to argue with it.** Whatever the pty showed a moment ago described a window that has
 	// just been resized; keeping it would let a stale reading suppress a fit that genuinely is in
@@ -141,6 +143,13 @@ func (h *Handler) fitNow() (inForce bool, columns int) {
 	h.stateMu.RLock()
 	defer h.stateMu.RUnlock()
 	return h.fitInForce, h.fitColumns
+}
+
+// heightPending is whether a pty a previous release could not put back is still on record.
+func (h *Handler) heightPending() bool {
+	h.stateMu.RLock()
+	defer h.stateMu.RUnlock()
+	return h.pendingHeight
 }
 
 // fitOnTheWire is what the PHONE is told: the setting, reduced by what the screen has since proved.
@@ -202,6 +211,10 @@ type locks struct {
 	// the pane it is held on. Zero rows is "no height", never "zero rows".
 	fitRows               int
 	heldSession, heldPane string
+	// pendingHeight is whether a pty is still waiting to be put back after its fit ended. Read by
+	// the control socket's FitInForce alone, so "Undo phone fit" can retry it; the phone is never
+	// told, because there is no fit for its button to be on about.
+	pendingHeight bool
 	// measuredColumns is what the pty last actually showed - the counterweight to the two above.
 	// Zero means nothing has been measured since the last operation, which is "no evidence", never
 	// "no columns". See noteMeasuredColumns and fitOutgrown.
