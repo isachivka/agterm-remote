@@ -52,6 +52,37 @@ class TerminalScrollTest {
     }
 
     @Test
+    fun `content moving under a still finger leaves the memory alone`() {
+        // Following, then a poll replaces forty rows with five hundred: the offset is now nowhere
+        // near the new maximum, and that is the content moving, not the owner.
+        var remembered = true
+        remembered = TerminalScroll.rememberedAtBottom(
+            remembered, transitionInFlight = false, offset = 800, max = 9000,
+            contentMoved = true, ownerScrolling = false,
+        )
+        assertEquals(true, remembered)
+        // A reader stays a reader through the same growth.
+        assertEquals(
+            false,
+            TerminalScroll.rememberedAtBottom(
+                false, transitionInFlight = false, offset = 800, max = 9000,
+                contentMoved = true, ownerScrolling = false,
+            ),
+        )
+        // The owner dragging while the content moves is the owner: what they are at is recorded.
+        assertEquals(
+            false,
+            TerminalScroll.rememberedAtBottom(
+                true, transitionInFlight = false, offset = 100, max = 9000,
+                contentMoved = true, ownerScrolling = true,
+            ),
+        )
+        // Content still: an offset away from the end is a reader, at the end a follower.
+        assertEquals(false, TerminalScroll.rememberedAtBottom(true, false, 100, 9000, contentMoved = false, ownerScrolling = false))
+        assertEquals(true, TerminalScroll.rememberedAtBottom(false, false, 9000, 9000, contentMoved = false, ownerScrolling = false))
+    }
+
+    @Test
     fun `opening a session shows the bottom`() {
         // Unconditional, and it must stay so: the scroll state is one object shared by every session,
         // so anything conditional here opens the next session at the previous one's offset.

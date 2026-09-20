@@ -624,6 +624,9 @@ fun AgtermScreen(
                             transitionInFlight = { chromeSettling.value },
                             offset = { terminalVertical.value },
                             max = { terminalVertical.maxValue },
+                            // A finger on the terminal is the owner moving; a maximum moving under
+                            // a still finger is the content. See rememberedAtBottom.
+                            scrolling = { terminalVertical.isScrollInProgress },
                         ) { atBottomBeforeKeyboard = it }
                     }
 
@@ -710,9 +713,12 @@ fun AgtermScreen(
                         }
                         pageUpLanding = null
 
-                        val wasAtBottom = TerminalScroll.isAtBottom(
-                            terminalVertical.value, terminalVertical.maxValue,
-                        )
+                        // **The memory, not a sample.** Whether the new screen has been laid out
+                        // by the time this runs is a matter of frame timing; a sample taken after it
+                        // compares the old offset with a maximum that just leapt and says "reading"
+                        // of someone who was following. The tracked memory ignores frames on which
+                        // the content moved, so it still says what they were doing before the poll.
+                        val wasAtBottom = atBottomBeforeKeyboard
                         // Settled, not one frame: a tall screen relayouts over several, and a
                         // maximum read between two of them lands the follower short of the end -
                         // after which "at the bottom" is false and following stops for good.
