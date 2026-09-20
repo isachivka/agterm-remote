@@ -409,9 +409,23 @@ class AgtermSessions(
 
     private val pane: Pane get() = _pane.value
 
-    /** Reads a screen from the pane the owner is looking at. See [pane]; do not inline it. */
+    /**
+     * Reads a screen from the pane the owner is looking at. See [pane]; do not inline it.
+     *
+     * **The line bound follows the height the laptop is holding.** A tall fit makes the pty 200 rows,
+     * and Claude Code then draws 200 - so asking for the usual 120 would fetch a pane cut off two
+     * fifths of the way down and the owner would have asked for a taller terminal to see LESS of it.
+     * [BridgeConnection.DEFAULT_LINES] stays the floor: a held height smaller than it must not shrink
+     * an ordinary read.
+     */
     private fun BridgeConnection.readingScreen(sessionId: String, digest: String?) =
-        screen(sessionId, pane, digest = digest, styled = styled())
+        screen(
+            sessionId,
+            pane,
+            lines = maxOf(BridgeConnection.DEFAULT_LINES, _fit.value.rows),
+            digest = digest,
+            styled = styled(),
+        )
 
     /** Types into the pane the owner is looking at. See [pane]; do not inline it. */
     private fun BridgeConnection.typingInto(
@@ -716,7 +730,7 @@ class AgtermSessions(
                 // source. That matters because leaving and returning is the owner's current workaround
                 // for a stale toggle - if this read from anywhere else, the workaround and the poll
                 // could disagree, and the state they trust most would be the one we had not corrected.
-                _fit.value = FitState(enabled = listing.fitEnabled, columns = listing.fitColumns)
+                _fit.value = FitState(enabled = listing.fitEnabled, columns = listing.fitColumns, rows = listing.fitRows)
                 _state.value = AgtermUiState.Sessions(listing.sessions, workspaces = listing.workspaces)
             }
         } finally {
@@ -1335,7 +1349,8 @@ class AgtermSessions(
                 val answer = it.resize(
                     watching.id, pane, boxWidthDp, characterWidthMilliDp,
                     FitToPhone.TERMINAL_HORIZONTAL_PADDING_DP,
-                    recalibrate,
+                    rows = tallRows(),
+                    recalibrate = recalibrate,
                 )
                 _fit.value = answer
                 // **On the ANSWER, not on anything looking different**. A recalibration
@@ -1366,6 +1381,21 @@ class AgtermSessions(
      */
     private val _recalibrated = MutableStateFlow<Int?>(null)
     val recalibrated: StateFlow<Int?> = _recalibrated.asStateFlow()
+
+    /**
+     * The height a fit asks for, and **the colour setting is the only thing that decides it**.
+     *
+     * The owner's rule, in his words: *"Fit in zmx mode substitutes the height"*. There is no second
+     * switch and there is deliberately no new button. The reason it rides on this setting rather than
+     * on one of its own is that it is the SAME precondition: a height can only be held by claiming
+     * leadership of the zmx daemon behind the pane, and a pane read through zmx is exactly a pane
+     * that has one. A separate toggle would let the owner ask for a height in the one mode where the
+     * laptop cannot deliver it, and the only honest answer would be a control that does nothing.
+     *
+     * Read on every call rather than captured once, for the same reason [styled] is: a flip in
+     * Settings must reach the next request, not the next process.
+     */
+    private fun tallRows(): Int = if (styled()) FitToPhone.TALL_ROWS else 0
 
     private val _fit = MutableStateFlow(FitState(enabled = null, columns = 0))
     val fit: StateFlow<FitState> = _fit.asStateFlow()
@@ -1429,6 +1459,7 @@ class AgtermSessions(
                 when (val answer = bridge.refit(
                     watching.id, pane, boxWidthDp, characterWidthMilliDp,
                     FitToPhone.TERMINAL_HORIZONTAL_PADDING_DP,
+                    rows = tallRows(),
                 )) {
                     // The laptop's own answer, adopted whole - the same rule as every other reply.
                     is Refit.Applied -> adoptFit(answer.fit)
@@ -1686,7 +1717,7 @@ class AgtermSessions(
                 // would be a loop that silently accomplishes nothing.
                 val resumed = withConnection { bridge ->
                     val listing = bridge.sessions()
-                    _fit.value = FitState(enabled = listing.fitEnabled, columns = listing.fitColumns)
+                    _fit.value = FitState(enabled = listing.fitEnabled, columns = listing.fitColumns, rows = listing.fitRows)
                     _state.value = AgtermUiState.Sessions(listing.sessions)
                 }
                 if (!resumed) continue

@@ -195,14 +195,27 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// asserted a column count; it no longer sends one at all, so the box width is what says whether
 	// this is a request to adapt or a request to stop.
 	if req.BoxWidthDp == 0 {
+		// The height first, and its failure never stops the width. The pty is the daemon's to put
+		// back and the window is agterm's; a daemon that has gone away must not leave the owner with
+		// a narrow window because the pty behind one pane could not be reached. A put-back that
+		// fails keeps its record - on Active while the window is still narrowed, parked on the store
+		// once Active goes - so the next undo can try again. A pty an earlier press left waiting is
+		// tried again now for the same reason.
+		// The window restore follows at once, so the pty goes back to its pre-fit width (columns 0).
+		back, lost := h.releaseHeight(ctx, h.store.Active, 0)
+		h.retryPendingHeights(ctx)
 		if err := resize.RestoreWindow(ctx, term, h.store); err != nil {
 			// The restore is the path that fails when agterm refuses a resize outright - which is how
 			// a width-only request looked on 2026-07-31: five ok=false lines with nothing above them.
+			h.saveStore()
 			return refuse("width: the window could not be put back: %v", err)
 		}
 		// Off has to outlive this process, or the next start silently re-narrows a window the owner
 		// deliberately gave back to themselves.
 		log.Printf("width: off, restoring the window")
+		if !back {
+			h.park(lost, "the fit is off")
+		}
 		// Off is the absence of a fit, not a flag beside one.
 		h.store.Active = nil
 		h.saveStore()
@@ -213,6 +226,9 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// something to aim at. The answer that comes back is what the laptop's terminal really rendered.
 	if req.CharacterWidthMilliDp <= 0 {
 		return refuse("width: REFUSED - the phone did not say how wide one character measures on its screen")
+	}
+	if req.Rows < 0 || req.Rows > resize.MaxRows {
+		return refuse("height: REFUSED - rows must be between 0 and %d, not %d", resize.MaxRows, req.Rows)
 	}
 	columns := columnsThatStrictlyFit(req.BoxWidthDp, req.CharacterWidthMilliDp)
 
@@ -241,6 +257,17 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		return refuse("width: REFUSED - %v", err)
 	}
 
+	// The fit in force BEFORE this press, copied: resize.To replaces Active with a fresh width, and
+	// the height that was held rides on the old one. See holdHeight for both uses.
+	var previous *resize.Fit
+	if h.store.Active != nil {
+		copied := *h.store.Active
+		previous = &copied
+	}
+	// The pane's pty as it is NOW, before the width fit narrows it - see tallPlan. Nil for a
+	// width-only press.
+	plan := h.planHeight(ctx, req, previous)
+
 	got, calibrated, err := resize.To(
 		ctx, term, h.store, h.stateDir, req.BoxWidthDp, req.MarginDp, req.CharacterWidthMilliDp,
 		columns, intent)
@@ -260,10 +287,36 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 		// replaces his terminal with a full-page error carrying that same sentence about probe widths.
 		// He cannot act on any of it and his session had done nothing wrong.
 		log.Printf("width: REFUSED - %v", err)
+		// A height still held would be a pty nothing on any reply admits to. Let it go with the
+		// width - and take it off the record too. resize.To clears Active itself after a failed
+		// calibration, but it returns with Active INTACT when the window could not be read or
+		// resized, and `previous` is a copy: releasing against the copy alone left every reply
+		// saying "200 rows" about a pty just put back to 56.
+		// Which width to put back depends on what resize.To left: a failed calibration put the
+		// window back itself and took Active with it (pre-fit width, columns 0); otherwise the window
+		// is still at the fit in force, and the pty goes back to those columns.
+		columns := 0
+		if h.store.Active != nil {
+			columns = h.store.Active.Columns
+		}
+		back, lost := h.releaseHeight(ctx, previous, columns)
+		switch {
+		case back && h.store.Active != nil:
+			clearHeight(h.store.Active)
+		case !back && h.store.Active == nil:
+			// A failed calibration took Active with it; the record of what is still owed lives on.
+			h.park(lost, "the press was refused")
+		}
+		// !back with Active intact: Active keeps its record, so the next undo can dial it.
+		h.saveStore()
 		return refuseContent(describe(err))
 	}
 	log.Printf("width: %s, %d columns now in effect",
 		map[bool]string{true: "calibrated", false: "applied from cache"}[calibrated], got)
+	// The height, at the columns the width fit just produced, and recorded into the same Active the
+	// width was. It writes its own record to disk before it claims anything - see holdHeight - so
+	// the save below carries nothing the height depends on.
+	rows := h.holdHeight(ctx, req, got, previous, plan)
 	// The setting is set inside resize.To, by the only code that holds the fit it came from.
 	// Saved after the work for the CALIBRATION only. The restore point does not wait for this and must
 	// not: resize.To writes it to disk itself, before the first window change, because a crash between
@@ -279,7 +332,7 @@ func (h *Handler) resize(ctx context.Context, req Request) Response {
 	// disagreed, the owner's press sent the opposite of what they intended and the feature looked
 	// dead. Measured 2026-07-30: `enabled: false` on disk while they were pressing a button to turn
 	// it on.
-	return Response{OK: true, Columns: got, Calibrated: calibrated, FitEnabled: boolPtr(h.store.Active != nil)}
+	return Response{OK: true, Columns: got, Rows: rows, Calibrated: calibrated, FitEnabled: boolPtr(h.store.Active != nil)}
 }
 
 // paneShape describes what the fit is about to size, for the log and for nothing else.
@@ -445,11 +498,16 @@ func (h *Handler) saveStore() {
 	if h.stateDir == "" {
 		return
 	}
-	// Failure to persist is ignored: what this save carries is the calibration, which is an
-	// optimisation - missing it costs two probe resizes next time. Refusing to work because a cache
-	// file could not be written would be worse. It makes no claim about the restore point, which was
-	// already written by resize.To before the window moved.
-	_ = h.store.Save(h.stateDir)
+	// Failure to persist is logged and never fails the operation. Refusing to work because a file
+	// could not be written would be worse than anything the file protects against. What it protects
+	// against is no longer only a re-calibration: this save also carries the tall fit's record - the
+	// daemon and the size to put its pty back to - which is the only thing that lets a restart, or
+	// "Undo phone fit" after one, undo a hold. So a failure here is worth a line, where it used to
+	// be worth nothing. The window's restore point is not this save's concern: resize.To writes it
+	// itself, before the window moves.
+	if err := h.store.Save(h.stateDir); err != nil {
+		log.Printf("the fit record could not be saved (%v); a restart would not know what to put back", err)
+	}
 }
 
 // CloseStrayCalibrationSession removes a calibration session a previous run left behind.
@@ -474,14 +532,33 @@ func (h *Handler) CloseStrayCalibrationSession(ctx context.Context) error {
 // session, the pending restore is on disk and the phone may never reconnect to trigger it, so the
 // owner is left with a narrow window and nothing to explain it.
 func (h *Handler) RestorePending(ctx context.Context) error {
-	if h.store == nil || h.store.Pending == nil {
+	if h.store == nil {
 		return nil
 	}
+	// A pty an earlier run could not put back is tried first; it owes nothing to the window.
+	if h.retryPendingHeights(ctx) {
+		h.publishFit()
+		h.saveStore()
+	}
+	if h.store.Pending == nil {
+		return nil
+	}
+	// The height before the window, as on the off press. No hold is live in a process that has just
+	// started, so this is the one-shot Restore against the daemon the record names.
+	back, lost := h.releaseHeight(ctx, h.store.Active, 0)
 	if err := resize.RestoreWindow(ctx, terminal{client: h.client}, h.store); err != nil {
 		// The record survives a failed restore - see RestoreWindow - so the owner's off press can
 		// still perform it once agterm is up. The setting is left alone for the same reason: the
-		// window is still narrowed, so a flag saying it is fitted remains true.
+		// window is still narrowed, so a flag saying it is fitted remains true. The height's record
+		// stays on Active with it when the pty could not be put back - and when it COULD, the record
+		// is gone from Active, so the copy every reply reads must be told: without this the phone
+		// went on hearing 200 rows for a pty that had just been put back, until the next press.
+		h.publishFit()
+		h.saveStore()
 		return fmt.Errorf("restoring the window a previous run resized: %w", err)
+	}
+	if !back {
+		h.park(lost, "a previous run's fit is over")
 	}
 
 	// **The window is back, so the setting must say so.** Without this the store claimed a fit was in

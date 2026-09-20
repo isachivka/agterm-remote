@@ -348,6 +348,117 @@ class BridgeConnectionTest {
         assertTrue("an ordinary press mentioned recalibrate: $sentText", !sentText.contains("recalibrate"))
     }
 
+    // --- the held height ---------------------------------------------------------------------------
+
+    /**
+     * **A height is asked for by name, on both fit paths.**
+     *
+     * The laptop's window cannot deliver one - agterm clamps a resize to the screen - so `rows` is the
+     * phone's whole part in a tall fit: the bridge reads it and holds the zmx pty there. Asserted on
+     * the bytes, like the pane and the recalibrate flag, because a renamed argument can leave a lambda
+     * test passing while the request on the wire is the one it always was.
+     */
+    @Test
+    fun `a tall fit asks for the rows it wants`() {
+        for (call in fitCalls) {
+            sent.reset()
+            call(open("""{"ok":true,"fit_enabled":true,"columns":45,"rows":200}"""), 200)
+
+            assertEquals("the fit went out without the height it was asked for", 200, request().getInt("rows"))
+        }
+    }
+
+    /**
+     * And a width-only fit puts NOTHING new on the wire. Not `rows: 0` - absent.
+     *
+     * The bridge disallows unknown fields, so a bridge too old to know the height refuses the whole
+     * request the moment the key appears. An ordinary press must see exactly the bridge it always saw,
+     * which is the same rule that keeps `recalibrate` off an ordinary press.
+     */
+    @Test
+    fun `a width-only fit mentions no rows at all`() {
+        for (call in fitCalls) {
+            sent.reset()
+            call(open("""{"ok":true,"fit_enabled":true,"columns":45}"""), 0)
+
+            assertTrue("a width-only fit sent a height: $sentText", !request().has("rows"))
+        }
+    }
+
+    /**
+     * **The undo shape is recognised by what is ABSENT from it.**
+     *
+     * No box width means "stop adapting and put the window back" - see the bridge handler - so a
+     * height on this request would be read as a fit being applied rather than as the end of one, and
+     * the one way out of a tall pane would be the thing that re-made it.
+     */
+    @Test
+    fun `the undo carries no height`() {
+        val fit = open("""{"ok":true,"fit_enabled":false,"rows":0}""").restoreWindow()
+
+        assertTrue("the undo sent a height: $sentText", !request().has("rows"))
+        assertEquals(0, fit.rows)
+    }
+
+    /**
+     * The held height comes back from the LAPTOP, on every reply that carries the setting.
+     *
+     * Same rule as the column count: the claim can fail - no zmx daemon behind the pane, leadership
+     * lost to agterm when the owner types on the Mac - and echoing the request back would tell this
+     * app 200 rows are held while the pane is the size it always was.
+     */
+    @Test
+    fun `the height the laptop reports is the one the phone holds`() {
+        val resized = open("""{"ok":true,"fit_enabled":true,"columns":45,"rows":200}""")
+            .resize("S", Pane.Left, boxWidthDp = 440, characterWidthMilliDp = 9777, marginDp = 4, rows = 200)
+        assertEquals(200, resized.rows)
+
+        sent.reset()
+        val screen = open("""{"ok":true,"text":"x","digest":"d","fit_enabled":true,"columns":45,"rows":200}""")
+            .screen("S", Pane.Left)
+        assertEquals(200, screen.fit.rows)
+
+        sent.reset()
+        val listing = open("""{"ok":true,"sessions":[],"fit_enabled":true,"columns":45,"rows":200}""").sessions()
+        assertEquals(200, listing.fitRows)
+
+        sent.reset()
+        val applied = open("""{"ok":true,"fit_enabled":true,"columns":45,"rows":200}""")
+            .refit("S", Pane.Left, boxWidthDp = 440, characterWidthMilliDp = 9777, marginDp = 4, rows = 200)
+        assertEquals(200, (applied as Refit.Applied).fit.rows)
+    }
+
+    /**
+     * **Absent and null both decode as 0, and 0 is an ANSWER.**
+     *
+     * Unlike `fit_enabled`, there is no third state to preserve here: a width-only fit, a bridge too
+     * old to know the field, and a tall claim the laptop could not make all mean the same thing from
+     * the phone - nothing is being held, so ask for no extra lines and say nothing about a height.
+     */
+    @Test
+    fun `a reply that says nothing about a height is holding none`() {
+        for (reply in listOf(
+            """{"ok":true,"fit_enabled":true,"columns":45}""",
+            """{"ok":true,"fit_enabled":true,"columns":45,"rows":null}""",
+        )) {
+            sent.reset()
+            val fit = open(reply)
+                .resize("S", Pane.Left, boxWidthDp = 440, characterWidthMilliDp = 9777, marginDp = 4)
+
+            assertEquals("a reply with no height was read as holding one: $reply", 0, fit.rows)
+        }
+    }
+
+    /** The two ways a height reaches the wire. Both must behave the same, so both are driven here. */
+    private val fitCalls: List<(BridgeConnection, Int) -> Unit> = listOf(
+        { bridge, rows ->
+            bridge.resize("S", Pane.Left, boxWidthDp = 440, characterWidthMilliDp = 9777, marginDp = 4, rows = rows)
+        },
+        { bridge, rows ->
+            bridge.refit("S", Pane.Left, boxWidthDp = 440, characterWidthMilliDp = 9777, marginDp = 4, rows = rows)
+        },
+    )
+
     private val sentText: String get() = sent.toString(Charsets.UTF_8.name())
 
     private fun open(vararg replies: String): BridgeConnection =

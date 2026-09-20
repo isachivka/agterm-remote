@@ -96,6 +96,7 @@ class BridgeConnection private constructor(
             workspaces = spaces,
             fitEnabled = readTriState(reply),
             fitColumns = reply.optInt("columns"),
+            fitRows = reply.optInt("rows"),
         )
     }
 
@@ -217,7 +218,12 @@ class BridgeConnection private constructor(
         // **Read off the same reply as the text, including the `unchanged` one.** The setting is not a
         // property of there being new output, so taking it only from the text branch would leave it
         // uncorrected through the 95% of polls that convey nothing.
-        val fit = FitState(enabled = readTriState(reply), columns = reply.optInt("columns"))
+        val fit = FitState(
+            enabled = readTriState(reply),
+            columns = reply.optInt("columns"),
+            // Absent decodes as 0, which is the same answer as "holding no height" - see FitState.rows.
+            rows = reply.optInt("rows"),
+        )
         if (reply.optBoolean("unchanged")) return ScreenUpdate(ScreenText.Unchanged, fit)
         // A reply that is neither `unchanged` nor carrying text is not something to paper over with an
         // empty string: it would render as a session that has gone blank, which is a thing a terminal
@@ -373,13 +379,23 @@ class BridgeConnection private constructor(
         boxWidthDp: Int,
         characterWidthMilliDp: Int,
         marginDp: Int,
+        /** See [resize]. The re-apply asks for the same height the press would, or it would drop it. */
+        rows: Int = 0,
     ): Refit {
-        val reply = exchange(fitRequest(sessionId, pane, boxWidthDp, characterWidthMilliDp, marginDp)
-            .put("cached_only", true))
+        val reply = exchange(
+            fitRequest(sessionId, pane, boxWidthDp, characterWidthMilliDp, marginDp, rows)
+                .put("cached_only", true),
+        )
         // **An ordinary reply, not a failure.** It rides on `ok:true` precisely so it cannot reach the
         // owner through the path that once replaced his terminal with a full-page error.
         if (reply.optBoolean("needs_fit")) return Refit.NeedsFit
-        return Refit.Applied(FitState(enabled = readTriState(reply), columns = reply.optInt("columns")))
+        return Refit.Applied(
+            FitState(
+                enabled = readTriState(reply),
+                columns = reply.optInt("columns"),
+                rows = reply.optInt("rows"),
+            ),
+        )
     }
 
     /** The fields both fit calls send. One builder, so the two cannot drift apart. */
@@ -389,11 +405,16 @@ class BridgeConnection private constructor(
         boxWidthDp: Int,
         characterWidthMilliDp: Int,
         marginDp: Int,
+        rows: Int,
     ): JSONObject = JSONObject().put("verb", "resize").put("session", sessionId)
         .put("character_width_milli_dp", characterWidthMilliDp)
         .put("box_width_dp", boxWidthDp)
         .put("margin_dp", marginDp)
         .put("pane", pane.wire)
+        // **Only when there is a height to ask for.** A `rows: 0` on the wire is a bridge too old to
+        // know the field refusing the whole request - it disallows unknown ones - so a width-only fit
+        // must send exactly the bytes it always sent. Same rule as `recalibrate` below.
+        .apply { if (rows > 0) put("rows", rows) }
 
     fun resize(
         sessionId: String,
@@ -401,6 +422,16 @@ class BridgeConnection private constructor(
         boxWidthDp: Int,
         characterWidthMilliDp: Int,
         marginDp: Int,
+        /**
+         * How tall to hold the pane, through zmx, or 0 for today's width-only fit.
+         *
+         * **The laptop's window cannot deliver this and the bridge does not try**: agterm clamps a
+         * resize to the screen, so the height comes from claiming leadership of the zmx daemon behind
+         * the pane and holding its pty. That is only possible when the pane HAS a daemon, which is
+         * the same condition the colour setting names - see [AgtermSessions.fitToPhone] for why that
+         * setting is the only thing that turns this on.
+         */
+        rows: Int = 0,
         // **The long press.** The bridge verifies a cached fit on every apply and corrects
         // itself when the terminal contradicts it; this is the owner saying "measure it again anyway".
         // Self-healing must not be the only escape from a wrong entry - that was the position they
@@ -420,6 +451,9 @@ class BridgeConnection private constructor(
                 .put("box_width_dp", boxWidthDp)
                 // Recorded beside the fit so a human reading that file can see WHY a key changed.
                 .put("margin_dp", marginDp)
+                // Sent ONLY when a height is being asked for - see [fitRequest] for why a zero
+                // must not go out.
+                .apply { if (rows > 0) put("rows", rows) }
                 // **Which half he is looking at, because that is what the fit is FOR**.
                 //
                 // The fit's target is the pane, not the window. Measured on his own machine: a session
@@ -436,6 +470,10 @@ class BridgeConnection private constructor(
         return FitState(
             enabled = readTriState(reply),
             columns = reply.optInt("columns"),
+            // **The held height is the one the LAPTOP reports**, the same rule as the column count:
+            // the claim can fail - no daemon, leadership lost - and echoing the request back would
+            // tell this app 200 rows are held while the pane is still the size it was.
+            rows = reply.optInt("rows"),
         )
     }
 
@@ -448,8 +486,10 @@ class BridgeConnection private constructor(
      */
     fun restoreWindow(): FitState {
         // No box width means "stop adapting and put the window back" - see the bridge handler.
+        // **And no rows either.** The undo shape is recognised by what is ABSENT from it, so a height
+        // on this request would be read as a fit rather than as the end of one.
         val reply = exchange(JSONObject().put("verb", "resize"))
-        return FitState(enabled = readTriState(reply), columns = 0)
+        return FitState(enabled = readTriState(reply), columns = 0, rows = 0)
     }
 
     /**

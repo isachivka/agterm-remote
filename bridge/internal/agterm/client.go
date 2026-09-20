@@ -204,6 +204,17 @@ type result struct {
 	// Zmx is what `zmx.list` answers: where the bundled zmx and its sockets are, and which daemon
 	// each pane claims. Read by the styled screen path only.
 	Zmx *zmxResult `json:"zmx,omitempty"`
+	// Keymap is what `keymap.list` answers. Only the file's path and the custom commands' names are
+	// decoded; the chords, menu equivalents and diagnostics are left to the decoder to skip.
+	Keymap *keymapResult `json:"keymap,omitempty"`
+}
+
+// keymapResult is the `keymap` object of a `keymap.list` reply, as agterm 0.26 shapes it.
+type keymapResult struct {
+	Path     string `json:"path"`
+	Commands []struct {
+		Name string `json:"name"`
+	} `json:"commands"`
 }
 
 // zmxResult is the `zmx` object of a `zmx.list` reply, as agterm 0.26 shapes it. Only the parts the
@@ -234,6 +245,10 @@ type ZmxEntry struct {
 	// Observation is what zmx itself reported when agterm took the inventory: "running" when the
 	// daemon answered, "absent" when the pane claims one that is not there.
 	Observation string `json:"observation"`
+	// LeaderPID is the pid of the shell the daemon started in its pty - the `pid=` of `zmx list`,
+	// which agterm passes through. It is how the tall fit finds the pty to read its size from:
+	// `ps -o tty=` on this pid names the device. Zero when agterm or zmx reported none.
+	LeaderPID int32 `json:"leaderPID"`
 }
 
 // Window is one agterm window, as `window.list` reports it.
@@ -576,6 +591,33 @@ func (c *Client) ZmxList(ctx context.Context) (*ZmxList, error) {
 		SocketDir:  res.Zmx.Endpoint.SocketDirectory,
 		Entries:    res.Zmx.Entries,
 	}, nil
+}
+
+// KeymapList reads where agterm's keymap.conf lives and which custom commands it currently holds.
+//
+// Read-only. The path is where internal/palette writes the owner's way out of a tall fit; the names
+// are how it tells a file agterm has loaded from one it has not.
+func (c *Client) KeymapList(ctx context.Context) (string, []string, error) {
+	res, err := c.call(ctx, request{Cmd: "keymap.list"})
+	if err != nil {
+		return "", nil, err
+	}
+	if res.Keymap == nil {
+		return "", nil, errors.New("keymap.list answered without a keymap object")
+	}
+	names := make([]string, 0, len(res.Keymap.Commands))
+	for _, cmd := range res.Keymap.Commands {
+		names = append(names, cmd.Name)
+	}
+	return res.Keymap.Path, names, nil
+}
+
+// KeymapReload asks agterm to re-read keymap.conf, so a line internal/palette just wrote is in the
+// palette without the owner restarting anything. It applies whatever the file holds - his edits as
+// well as ours - which is what a reload from his own agtermctl would do.
+func (c *Client) KeymapReload(ctx context.Context) error {
+	_, err := c.call(ctx, request{Cmd: "keymap.reload"})
+	return err
 }
 
 // Windows lists agterm's windows, so the resize path can remember what to restore.

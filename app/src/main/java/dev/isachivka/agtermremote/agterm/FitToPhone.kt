@@ -50,4 +50,21 @@ object FitToPhone {
 
     /** Mirrors `internal/resize`. A sanity bound, not a measurement. */
     const val MAX_COLUMNS = 400
+
+    /**
+     * The HEIGHT a fit asks for while "Colours through zmx" is on, in rows.
+     *
+     * Not a measurement, and it could not be one: the phone cannot see the laptop's window, and
+     * agterm's own resize is clamped to the screen's visibleFrame, so a tall pane is impossible to
+     * reach by making the window bigger. The height comes from the zmx daemon instead - the bridge
+     * claims leadership of the daemon and holds its pty at this many rows - which is why the zmx
+     * colour setting is the only thing that turns this on.
+     *
+     * **200 because it is far more than any phone shows and well under the bridge's refusal at 500.**
+     * The point is not to fill the screen: it is that Claude Code, which draws its own scroller and
+     * emits exactly the rows its pty has, renders 200 of them, so the phone can scroll back through
+     * output that would otherwise never have been written. Higher would only cost bytes on every poll
+     * for lines nobody reaches.
+     */
+    const val TALL_ROWS = 200
 }

@@ -22,12 +22,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 	"github.com/isachivka/agterm-remote/bridge/internal/keys"
+	"github.com/isachivka/agterm-remote/bridge/internal/ptysize"
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 	"github.com/isachivka/agterm-remote/bridge/internal/styled"
+	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold"
 )
 
 // Bounds on `lines`. The floor is agterm's own (`--lines must be greater than 0`), re-checked here so
@@ -131,6 +135,16 @@ type Request struct {
 	//
 	// Set with Recalibrate it is refused rather than resolved. See [intentOf].
 	CachedOnly bool `json:"cached_only,omitempty"`
+	// Rows asks VerbResize for a HEIGHT as well as a width: hold the pane's pty this many rows tall
+	// through the zmx daemon behind it, so the program in it renders that many rows for the phone
+	// to read. Absent or zero is the width-only fit every phone has always asked for. Never sent on
+	// the undo shape, which carries no box width and no rows.
+	//
+	// The phone sends it only while its colours-through-zmx setting is on: that setting is what
+	// says the pane HAS a daemon to hold. A bridge that predates it refuses the whole request
+	// through DisallowUnknownFields, which is the safe direction for the same reason it was for
+	// `cached_only`.
+	Rows int `json:"rows,omitempty"`
 }
 
 // Response is what goes back. Fields are omitted rather than zeroed so a response says only what it
@@ -220,6 +234,11 @@ type Response struct {
 	Styled bool `json:"styled,omitempty"`
 	// Columns is the width now in effect. See Calibrated for whether anything was measured to get it.
 	Columns int `json:"columns,omitempty"`
+	// Rows is the height the pane's pty is HELD at, on every reply beside Columns; zero - and so
+	// absent - when no height is held: no daemon behind the pane, the phone asked for width only,
+	// or the claim failed. omitempty is right here where it was wrong for FitEnabled: absent and
+	// zero both mean "no height", and there is no third state for the encoding to swallow.
+	Rows int `json:"rows,omitempty"`
 	// FitEnabled is the BRIDGE's setting and it is the truth: on, off, or - as nil - not answered.
 	//
 	// **A POINTER, and NOT omitempty, and both of those are the fix for a shipped bug.** It was
@@ -359,6 +378,20 @@ type Handler struct {
 	// history runs `zmx history <daemon> --vt` for a styled read. A field so tests can stand in a
 	// dump without a zmx binary; production is styled.History.
 	history func(ctx context.Context, executable, socketDir, daemon string) (string, error)
+	// ptySize reads the live size of the pty behind a pane's shell, for the tall fit's hold check. A
+	// field so tests can stand in a size without a pty; production is ptysize.Read.
+	ptySize func(pid int) (ptysize.Size, error)
+	// openHold connects to a daemon and claims the pty. A field so a test can stand in a daemon that
+	// drops the connection partway through a claim; production is zmxhold.Open.
+	openHold func(ctx context.Context, socketPath string, size zmxhold.Size) (*zmxhold.Hold, error)
+	// now is the clock the hold check paces itself by. Injectable so a test can move it two seconds
+	// without waiting two seconds.
+	now func() time.Time
+	// executable is this binary's own path, for the palette line that names it. Empty when the
+	// OS could not say, in which case the line is not written and the log says so.
+	executable string
+	// The live height hold and its pacing. See height.go.
+	height heightState
 	// The store is reachable by two independent callers - the phone and the local control socket -
 	// so access to it is serialized. See serialize.go, which explains why removing this while
 	// looking at a single-caller trace would be a mistake.
@@ -367,9 +400,15 @@ type Handler struct {
 
 // New builds a handler. stateDir is where the resize calibration cache lives; empty disables resize.
 func New(client *agterm.Client, stateDir string) *Handler {
-	h := &Handler{client: client, stateDir: stateDir, history: styled.History}
+	h := &Handler{client: client, stateDir: stateDir, history: styled.History,
+		ptySize: ptysize.Read, openHold: zmxhold.Open, now: time.Now}
 	if stateDir != "" {
 		h.store = resize.LoadStore(stateDir)
+	}
+	// Best effort, and read once: the palette line names this path, and the bundle it sits in is
+	// where the Mac app put it - the reason the line is installed by the bridge at all.
+	if exe, err := os.Executable(); err == nil {
+		h.executable = exe
 	}
 	// Published before anything can be served, so the first reply carries the setting the store was
 	// loaded with rather than a zero value.
@@ -484,12 +523,17 @@ func (h *Handler) Handle(ctx context.Context, req Request) Response {
 		// the pty showed, so a window the owner dragged wider stops being reported as fitted. The
 		// local control socket keeps reading fitNow, because its next move is a restore and that is
 		// a different question. See serialize.go.
-		inForce, columns := h.fitOnTheWire()
+		inForce, columns, rows := h.fitOnTheWire()
 		resp.FitEnabled = boolPtr(inForce)
 		// Never overwrites a count a verb already established: the resize reply carries what the
 		// laptop just MEASURED, which is the more specific truth about that request.
 		if resp.Columns == 0 {
 			resp.Columns = columns
+		}
+		// The height rides with the width, by the same rule: one fact, published together, so a poll
+		// never says "fitted, 41 columns" and leaves the phone to guess whether the pane is tall.
+		if resp.Rows == 0 {
+			resp.Rows = rows
 		}
 	}
 	return resp
@@ -763,13 +807,36 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 		return refuseContent(err.Error())
 	}
 
+	// One inventory for both things that need it: the styled read and the tall fit's hold check.
+	// Neither runs for a plain read of a pane nothing holds, so an ordinary poll costs what it always
+	// did; and when both run they share the round trip rather than asking agterm twice.
+	held, claim := h.holdsPane(req.Session, string(pane))
+	if held && !req.Styled {
+		// **A plain read of the held pane is the phone saying it no longer wants the height.** The
+		// colours-through-zmx setting is the only thing that asks for one, the phone reads with
+		// `styled` exactly while that setting is on, and switching it off sends no press - so this
+		// read is the first and only sign. Without it the bridge would go on re-claiming a 200-row
+		// pane, against the owner typing at the Mac, for a feature he has just switched off.
+		h.dropHeight(ctx, claim, "the phone reads this pane without colours through zmx now")
+		held = false
+	}
+	var inv *agterm.ZmxList
+	if req.Styled || held {
+		if list, err := h.client.ZmxList(ctx); err == nil {
+			inv = list
+		}
+	}
+	if held && inv != nil && h.keepHeight(ctx, req.Session, string(pane), inv) {
+		h.dropHeight(ctx, claim, "the daemon behind the held pane changed")
+	}
+
 	// A styled read is tried first and abandoned silently: the phone said what it would PREFER, and
 	// a pane without a daemon, a daemon that will not answer, or a zmx that fails to run are all
 	// reasons to show the plain screen rather than none. Only the plain read's failure is an error.
 	var text string
 	styledRead := false
-	if req.Styled {
-		if vt, ok := h.styledText(ctx, req.Session, string(pane), lines); ok {
+	if req.Styled && inv != nil {
+		if vt, ok := h.styledText(ctx, inv, req.Session, string(pane), lines); ok {
 			text, styledRead = vt, true
 		}
 	}
@@ -814,11 +881,7 @@ func (h *Handler) screen(ctx context.Context, req Request) Response {
 // styledText reads one pane's screen with its colours through the zmx daemon behind it, cut to the
 // last `lines` rows. False on any failure; the caller falls back to the plain read and the reason
 // is not reported, because none of the reasons is something the phone can act on.
-func (h *Handler) styledText(ctx context.Context, session, pane string, lines int) (string, bool) {
-	inv, err := h.client.ZmxList(ctx)
-	if err != nil {
-		return "", false
-	}
+func (h *Handler) styledText(ctx context.Context, inv *agterm.ZmxList, session, pane string, lines int) (string, bool) {
 	daemon, ok := styled.Pick(inv.Entries, session, pane)
 	if !ok || inv.Executable == "" || inv.SocketDir == "" {
 		return "", false

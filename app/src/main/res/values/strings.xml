@@ -309,6 +309,13 @@
       The COUNT is the fact, and it is the one thing here nobody could work out for themselves.
     -->
     <string name="agterm_fit_note_on">%1$d columns. Hold Fit to measure again.</string>
+    <!--
+      The same line when the laptop is also HOLDING A HEIGHT, which it can only do through zmx and so
+      only while "Colours through zmx" is on. The height is named because it is the thing the owner
+      cannot see: the pane on the Mac looks squeezed, not taller, and the rows are only visible from
+      here. "tall" rather than "high" because the pane is what is tall, not a value.
+    -->
+    <string name="agterm_fit_note_on_tall">%1$d columns, %2$d rows tall. Hold Fit to measure again.</string>
     <string name="agterm_fit_note_on_unmeasured">Fitted to this phone. Hold Fit to measure again.</string>
     <string name="agterm_fit_note_off">Laptop keeps its own width. Hold Fit to measure again.</string>
     <!--
@@ -416,6 +423,8 @@
     <string name="agterm_rename_session_a11y">Rename this session</string>
     <string name="agterm_fit_a11y">Fit the laptop\'s terminal to this phone, %1$d columns</string>
     <string name="agterm_fit_undo_a11y">Put the laptop\'s window back; it is fitted to %1$d columns</string>
+    <!-- The same, with the held height named, because a screen reader is the only place it can be said. -->
+    <string name="agterm_fit_undo_tall_a11y">Put the laptop\'s window back; it is fitted to %1$d columns and %2$d rows</string>
     <string name="agterm_fit_recalibrate_a11y">Measure the laptop\'s terminal again</string>
     <string name="agterm_failure_identity_unusable">This phone\'s key can no longer prove who it is, so your laptop has nothing to check. Open Settings and replace the key; you will have to pair again afterwards.</string>
     <string name="agterm_action_disconnect">Disconnect</string>

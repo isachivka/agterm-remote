@@ -966,11 +966,21 @@ private fun FitWidthToggle(
                 painter = painterResource(if (on) AppIcons.FitWidthOn else AppIcons.FitWidthOff),
                 // The count lives in the description, because the label cannot carry it and a screen
                 // reader is the only place it can still be said.
-                contentDescription = stringResource(
-                    if (on) R.string.agterm_fit_undo_a11y else R.string.agterm_fit_a11y,
+                // **Three descriptions, because a held height is a third state and not a
+                // decoration on the second.** The undo action is the only one that can carry it: the
+                // off state has no height to name, and inventing "and 0 rows" there would describe a
+                // pane nobody is holding.
+                contentDescription = when {
+                    on && fit.rows > 0 -> stringResource(
+                        R.string.agterm_fit_undo_tall_a11y,
+                        // The counts the LAPTOP reported, never ones computed here.
+                        fit.columns,
+                        fit.rows,
+                    )
                     // The count the LAPTOP reported, never one computed here. Zero until it answered.
-                    fit.columns,
-                ),
+                    on -> stringResource(R.string.agterm_fit_undo_a11y, fit.columns)
+                    else -> stringResource(R.string.agterm_fit_a11y, fit.columns)
+                },
                 modifier = Modifier.size(18.dp),
             )
             Text(
@@ -999,6 +1009,11 @@ private fun FitWidthToggle(
 private fun FitNote(fit: FitState) {
     val text = when {
         fit.enabled == null -> null
+        // **The height is named only when one is actually held.** `rows` is 0 for a width-only fit
+        // and for a tall one the laptop could not realise - no zmx daemon, the claim lost - and both
+        // of those are honestly described by the line that mentions no height at all.
+        fit.enabled == true && fit.columns > 0 && fit.rows > 0 ->
+            stringResource(R.string.agterm_fit_note_on_tall, fit.columns, fit.rows)
         fit.enabled == true && fit.columns > 0 ->
             stringResource(R.string.agterm_fit_note_on, fit.columns)
         // Fitted, but the count has not arrived on this reply. Saying "0 columns" would be a number

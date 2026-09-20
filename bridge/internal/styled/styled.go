@@ -32,12 +32,19 @@ import (
 // state for a session created before Live mode was switched on, a split whose process has exited,
 // or a scratch pane — none of which is an error the phone should see.
 func Pick(entries []agterm.ZmxEntry, sessionID, pane string) (string, bool) {
+	e, ok := Entry(entries, sessionID, pane)
+	return e.Daemon, ok
+}
+
+// Entry is [Pick] returning the whole row, for the tall fit, which needs the shell's pid as well
+// as the daemon's name. Same rule: running, and named.
+func Entry(entries []agterm.ZmxEntry, sessionID, pane string) (agterm.ZmxEntry, bool) {
 	for _, e := range entries {
 		if e.SessionID == sessionID && e.Pane == pane && e.Observation == "running" && e.Daemon != "" {
-			return e.Daemon, true
+			return e, true
 		}
 	}
-	return "", false
+	return agterm.ZmxEntry{}, false
 }
 
 // History runs the bundled zmx against agterm's socket directory and returns the raw --vt dump.

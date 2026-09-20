@@ -1,5 +1,9 @@
 // Command agterm-remote-bridge serves the phone's verbs over pinned mutual TLS.
 //
+// It has one subcommand, `undo-fit`, which is the other end of the same program: run by agterm's
+// command palette on the Mac, it asks the running bridge over its control socket to put the window
+// and the pane back. See undofit.go.
+//
 // It has no pty of its own. Every session it can name belongs to agterm, and this process reaches
 // them the same way a person's own terminal does: over agterm's control socket, one command at a
 // time, from a closed set it constructs itself. Nothing a caller sends becomes an agterm command.
@@ -107,6 +111,12 @@ const (
 const readyLine = "ready: listening on"
 
 func main() {
+	// The one subcommand, decided on the bare first argument before the daemon's flags are parsed.
+	// See undofit.go.
+	if handled, code := subcommand(os.Args[1:], os.Stdout, os.Stderr, notify); handled {
+		os.Exit(code)
+	}
+
 	listen := flag.String("listen", "", "host:port to listen on (required)")
 	advertise := flag.String("advertise", "", "host:port a phone should dial; empty means the bound address")
 	socket := flag.String("socket", "", "agterm control socket; empty means the default")
@@ -373,6 +383,11 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 		})
 	}
 
+	// The owner's way out of a tall fit, put in agterm's palette before anything could need it.
+	// Best effort: agterm is often not up yet at login, and the fit path installs it again before
+	// every claim, so a miss here costs nothing that the first press does not repair.
+	handler.InstallPalette(ctx)
+
 	// If a previous run died with the owner's window resized, put it back. Logged and not fatal: a
 	// bridge that refuses to start because agterm is not up yet would be a worse outcome than a
 	// window that stays narrow until the next resize.
@@ -435,8 +450,36 @@ func run(listenAddr, advertiseAddr, socketPath, stateDir, logPath string, lanCer
 	if err := srv.Serve(ctx, ln); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
+	putBackOnExit(handler)
 	return nil
 }
+
+// putBackOnExit is the half of stop()'s promise that was never kept: "a window this bridge resized
+// is put back the way it was found". The listener and the control socket halves are the defers
+// above; this is the fit. It matters more since the tall fit than it did before, because a fit
+// now also holds a zmx daemon's pty at 200 rows, and a hold that dies with the process leaves the
+// pane squeezed with nothing listening for "Undo phone fit" - the next start's restore is the only
+// way back, and Quit is the exit every owner takes.
+//
+// The context this ran under is cancelled by now, so the restore gets a fresh, short one: agterm
+// answers in well under this, and a bridge that will not exit because agterm is gone is the worse
+// outcome. Through the phone's own off path, so it is one implementation.
+func putBackOnExit(handler *api.Handler) {
+	if !handler.FitInForce() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), exitRestoreTimeout)
+	defer cancel()
+	if err := handler.RestoreFit(ctx); err != nil {
+		log.Printf("exit: the fit could not be put back (%v); the next start will try again", err)
+		return
+	}
+	log.Printf("exit: the fit was put back")
+}
+
+// exitRestoreTimeout bounds the put-back on exit. One agterm round trip is milliseconds; the
+// calibration this can never trigger is the only thing that would take longer.
+const exitRestoreTimeout = 5 * time.Second
 
 // identity loads the bridge's own certificate and key from the state directory, minting them on the
 // first run.
