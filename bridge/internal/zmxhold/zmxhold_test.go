@@ -222,3 +222,36 @@ func TestTheClaimInputIsAnEmptyBracketedPaste(t *testing.T) {
 		t.Fatal("the claim must not carry a newline")
 	}
 }
+
+// The socket path names the daemon and is enough to dial the owner's pty; the callers log these
+// errors, under a rule that says neither may appear there. So none of this package's errors carries
+// it, and the test checks the two ways a path could get in: the dial, and the connection's own end.
+func TestErrorsNameNeitherTheSocketNorTheDaemon(t *testing.T) {
+	d := zmxholdtest.Start(t)
+	missing := d.Path + "-gone"
+	if _, err := Open(context.Background(), missing, Size{Rows: tall, Cols: columns}); err == nil {
+		t.Fatal("opened a socket that is not there")
+	} else if strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), "agterm-1") {
+		t.Fatalf("the error carries the socket: %v", err)
+	}
+	if err := Restore(context.Background(), missing, Size{Rows: tall, Cols: columns}); err == nil {
+		t.Fatal("restored through a socket that is not there")
+	} else if strings.Contains(err.Error(), missing) {
+		t.Fatalf("the error carries the socket: %v", err)
+	}
+
+	h, err := Open(context.Background(), d.Path, Size{Rows: tall, Cols: columns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.AwaitFrames(t, 5)
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Err(); err == nil || strings.Contains(err.Error(), d.Path) || strings.Contains(err.Error(), "agterm-1") {
+		t.Fatalf("Err after close = %v", err)
+	}
+	if err := h.Claim(Size{Rows: tall, Cols: columns}); err == nil || strings.Contains(err.Error(), d.Path) {
+		t.Fatalf("Claim on a closed hold = %v", err)
+	}
+}

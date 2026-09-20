@@ -14,8 +14,11 @@
 //
 // # The protocol, as the daemon at rev fb1b6b6 speaks it
 //
-// A frame is a five-byte header - tag, then payload length as a little-endian u32 - followed by the
-// payload. A size is four little-endian u16 (rows, cols, xpixel, ypixel), and it is sent TWICE on
+// A frame is an EIGHT-byte header followed by the payload: the tag (u8), the payload length as a
+// little-endian u32, and three bytes of padding sent as zero. Eight and not five because zmx declares
+// the header as a packed struct, which Zig sizes as its u40 backing integer - see [frame], and the
+// daemon this once killed by sending five. A size is four little-endian u16 (rows, cols, xpixel,
+// ypixel), and it is sent TWICE on
 // every Init and Resize: the 8-byte form and then the 4-byte legacy form, exactly as zmx's own attach
 // does, because a daemon drops the length it does not expect and processes the other once.
 //
@@ -110,7 +113,7 @@ func Open(ctx context.Context, socketPath string, size Size) (*Hold, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("zmx daemon: %w", err)
+		return nil, daemonErr(err)
 	}
 	h := &Hold{conn: conn, held: size, done: make(chan struct{})}
 	go h.read()
@@ -212,16 +215,16 @@ func Restore(ctx context.Context, socketPath string, original Size) error {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", socketPath)
 	if err != nil {
-		return fmt.Errorf("zmx daemon: %w", err)
+		return daemonErr(err)
 	}
 	defer conn.Close()
 
 	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if _, err := conn.Write(sizeFrames(tagInit, original)); err != nil {
-		return fmt.Errorf("zmx daemon: %w", err)
+		return daemonErr(err)
 	}
 	if _, err := conn.Write(frame(tagDetach, nil)); err != nil {
-		return fmt.Errorf("zmx daemon: %w", err)
+		return daemonErr(err)
 	}
 	// Drain until the daemon closes us, so the frames are known to have been read. A daemon that
 	// never does is one that has died, and the pty it owned died with it.
@@ -240,7 +243,7 @@ func (h *Hold) write(frames []byte) error {
 	defer h.wmu.Unlock()
 	_ = h.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if _, err := h.conn.Write(frames); err != nil {
-		return fmt.Errorf("zmx daemon: %w", err)
+		return daemonErr(err)
 	}
 	return nil
 }
@@ -256,13 +259,13 @@ func (h *Hold) read() {
 	header := make([]byte, headerLen)
 	for {
 		if _, err := io.ReadFull(h.conn, header); err != nil {
-			h.readErr = err
+			h.readErr = daemonErr(err)
 			return
 		}
 		tag, n := header[0], int64(binary.LittleEndian.Uint32(header[1:5]))
 		if n > 0 {
 			if _, err := io.CopyN(io.Discard, h.conn, n); err != nil {
-				h.readErr = err
+				h.readErr = daemonErr(err)
 				return
 			}
 			continue
@@ -271,7 +274,7 @@ func (h *Hold) read() {
 			// "Tell me your size": the daemon just made us leader. The answer is what was claimed,
 			// which is the whole reason the size is remembered.
 			if err := h.write(sizeFrames(tagResize, h.Held())); err != nil {
-				h.readErr = err
+				h.readErr = daemonErr(err)
 				return
 			}
 		}
@@ -290,6 +293,21 @@ func (h *Hold) Err() error {
 	default:
 		return nil
 	}
+}
+
+// daemonErr is every error this package returns about the daemon, and it carries no address.
+//
+// A net.OpError renders as `dial unix /the/socket/dir/agterm-<name>: connect: ...`: the socket
+// path, which names the daemon and is enough to dial the owner's pty from. The callers log these
+// with `%v`, and their log has a rule against exactly that. So the operation and the underlying
+// error are kept and the address is dropped - nothing in a log needs it, and the bridge itself
+// already knows which daemon it was talking to.
+func daemonErr(err error) error {
+	var op *net.OpError
+	if errors.As(err, &op) && op.Err != nil {
+		return fmt.Errorf("zmx daemon: %s: %w", op.Op, op.Err)
+	}
+	return fmt.Errorf("zmx daemon: %w", err)
 }
 
 // frame is one message: an 8-byte header, then the payload.
