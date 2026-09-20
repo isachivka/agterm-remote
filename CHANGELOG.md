@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/isachivka/agterm-remote/compare/v0.8.1...v0.8.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* **bridge:** the phone types into a held pane through the bridge's own zmx client ([#109](https://github.com/isachivka/agterm-remote/issues/109)) ([4cd9524](https://github.com/isachivka/agterm-remote/commit/4cd95242cb0dba43491d5bafd7b7f7b3bad6915c))
+
 ## [0.8.1](https://github.com/isachivka/agterm-remote/compare/v0.8.0...v0.8.1) (2026-09-20)
 
 
