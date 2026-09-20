@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/isachivka/agterm-remote/compare/v0.8.0...v0.8.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **mac:** the bridge keeps a log file beside its state, and stderr still carries the ready line ([#107](https://github.com/isachivka/agterm-remote/issues/107)) ([57c1a2d](https://github.com/isachivka/agterm-remote/commit/57c1a2d31b336f0080557bb0ca7468c799547b3a))
+
 ## [0.8.0](https://github.com/isachivka/agterm-remote/compare/v0.7.0...v0.8.0) (2026-09-20)
 
 
