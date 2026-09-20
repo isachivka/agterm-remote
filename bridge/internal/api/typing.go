@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/isachivka/agterm-remote/bridge/internal/keys"
 	"github.com/isachivka/agterm-remote/bridge/internal/zmxhold"
@@ -79,15 +80,23 @@ func (h *Handler) typing(ctx context.Context, req Request) Response {
 
 	// A pane this bridge holds tall is typed into through the bridge's own zmx client, because the
 	// daemon drops a follower's input that its classifier does not call user input - and that
-	// classifier does not see UTF-8 as text. See zmxhold.Hold.Type. When the hold cannot carry it,
-	// agterm types it as before, with the claim input in front so the classifier lets it through.
+	// classifier does not see UTF-8 as text. See zmxhold.Hold.Type. When the hold cannot carry it -
+	// none is live after a restart, or the daemon dropped it - agterm types it as before, and the
+	// claim input goes first for input that could not claim on its own, as a session.type of ITS
+	// OWN with the same pause the hold uses: in one payload it would reach the pty as one write, and
+	// that is the chunk a program reads as a paste that swallows the key behind it.
 	if held, _ := h.holdsPane(req.Session, string(pane)); held {
 		if err := h.typeThroughHold(out); err == nil {
 			return Response{OK: true}
 		} else {
 			log.Printf("type: not through the hold (%v); through agterm instead", err)
 		}
-		out = zmxhold.ClaimInput + out
+		if !zmxhold.ClaimsLeadership([]byte(out)) {
+			if err := h.client.Type(ctx, req.Session, zmxhold.ClaimInput, pane); err != nil {
+				return unreadable(describe(err))
+			}
+			time.Sleep(zmxhold.ClaimSettle)
+		}
 	}
 	if err := h.client.Type(ctx, req.Session, out, pane); err != nil {
 		// unreadable rather than fail: a pane that vanished on the laptop is a thing that CHANGED
