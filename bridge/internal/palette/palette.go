@@ -142,7 +142,9 @@ func splice(current, block string) (string, error) {
 	}
 	switch {
 	case open < 0 && close < 0:
-		if strings.TrimSpace(current) == "" {
+		// An EMPTY file gets the block alone. A file holding only whitespace is not empty: those
+		// bytes are outside the fences and come out as they went in, like every other byte.
+		if current == "" {
 			return block + "\n", nil
 		}
 		if !strings.HasSuffix(current, "\n") {

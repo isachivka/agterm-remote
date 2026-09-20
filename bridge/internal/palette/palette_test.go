@@ -204,3 +204,19 @@ func TestNoKeymapNoWrite(t *testing.T) {
 		t.Fatal("a line with no executable was written")
 	}
 }
+
+// Whitespace is bytes outside the fences, and bytes outside the fences come out as they went in.
+func TestAWhitespaceOnlyKeymapKeepsItsBytesAndGetsTheBlock(t *testing.T) {
+	c, path := keymapIn(t, "\n  \n")
+
+	changed, err := Ensure(context.Background(), c, exe, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("nothing was written")
+	}
+	if got := read(t, path); got != "\n  \n\n"+block {
+		t.Fatalf("file = %q", got)
+	}
+}
