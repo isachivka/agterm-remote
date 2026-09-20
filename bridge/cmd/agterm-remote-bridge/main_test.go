@@ -588,3 +588,43 @@ func TestALanCertificateComesWithItsKeyOrNotAtAll(t *testing.T) {
 		})
 	}
 }
+
+// The Mac app reads the ready line off stderr and passes --log for a file it can open later. The
+// two must not compete: with a log file the line goes to BOTH, or the app's backstop stops a
+// healthy bridge on every start.
+func TestTheLogFileDoesNotTakeTheReadyLineOffStderr(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	_ = probe.Close()
+
+	said := &safeBuffer{}
+	log.SetOutput(said)
+	defer log.SetOutput(io.Discard)
+	logPath := filepath.Join(t.TempDir(), "bridge.log")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- run(addr, "", filepath.Join(t.TempDir(), "absent.sock"), t.TempDir(), logPath, "", "", 0)
+	}()
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(said.String(), readyLine) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the ready line never reached stderr with --log set; stderr said:\n%s", said.String())
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the bridge stopped first: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	file, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(file), readyLine) {
+		t.Fatalf("the log file lacks the ready line:\n%s", file)
+	}
+}

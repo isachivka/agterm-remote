@@ -781,17 +781,23 @@ struct BridgeProcessTests {
             "the bridge's readyLine and this app's readyMarker have come apart")
     }
 
-    /// **A second thing the ready line depends on.** `--log` would send the bridge's output to a
-    /// file, this app would never see the marker, and the backstop would stop a healthy bridge on
-    /// every start. Weaker than the cross-language check above, and kept because it guards a
-    /// different way of breaking the same thing.
-    @Test func noLogFileIsPassedBecauseTheReadyLineArrivesOnStderr() throws {
+    /// **A second thing the ready line depends on.** `--log` names a file, and the bridge writes to
+    /// that file AND to stderr - `TestTheLogFileDoesNotTakeTheReadyLineOffStderr` on the Go side is
+    /// what holds that. If the bridge ever went back to the file alone, this app would never see the
+    /// marker and the backstop would stop a healthy bridge on every start. The file is passed because
+    /// the 2026-09-20 "typing from the phone does nothing" report could not be answered from the few
+    /// hundred bytes of stderr this app keeps.
+    @Test func theLogFileIsBesideTheStateAndTheReadyLineStillComesOnStderr() throws {
         let launcher = RecordingLauncher()
         let bridge = bridge(launcher)
 
         try bridge.start(listen: "0.0.0.0:8443", socket: nil)
 
-        #expect(!launcher.arguments.contains("--log"))
+        guard let at = launcher.arguments.firstIndex(of: "--log") else {
+            Issue.record("no --log in \(launcher.arguments)")
+            return
+        }
+        #expect(launcher.arguments[at + 1].hasSuffix("/" + BridgeProcess.logFileName))
     }
 
     /// The refusal carries the command **separately**, because an `NSAlert`'s informative text is not
