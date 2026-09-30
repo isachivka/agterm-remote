@@ -10,5 +10,5 @@
       Not matched to the app's dark theme, deliberately: a launcher icon sits among other people's
       icons, not among this app's screens, and every icon on that home screen is a different colour.
     -->
-    <color name="ic_launcher_background">#DFD9D2</color>
+    <color name="ic_launcher_background">#0A56EC</color>
 </resources>
