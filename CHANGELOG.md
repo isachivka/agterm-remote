@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/isachivka/agterm-remote/compare/v0.8.4...v0.9.0) (2026-09-30)
+
+
+### Features
+
+* **app:** an icon made from agterm's own, and the Play graphics beside their sources ([#119](https://github.com/isachivka/agterm-remote/issues/119)) ([2312e1d](https://github.com/isachivka/agterm-remote/commit/2312e1db9e87bc713565a0c0988d55779d446088))
+
 ## [0.8.4](https://github.com/isachivka/agterm-remote/compare/v0.8.3...v0.8.4) (2026-09-20)
 
 
