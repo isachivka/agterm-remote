@@ -1594,19 +1594,23 @@ private fun WorkspaceHeader(
     // a label fetched outside one is a label that exists when the block runs.
     val attentionLabel = stringResource(R.string.agterm_group_attention)
     val countLabel = stringResource(R.string.agterm_group_count_a11y, group.sessions.size)
+    // **Whether rows follow this header, which is not the same as whether it is open.** An open
+    // workspace with no sessions has nothing below to close its card, and drawn as an open header it
+    // was a card with a top and no bottom, touching the next one.
+    val continues = open && group.sessions.isNotEmpty()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             // A folded group is the whole card, so it is rounded on all four corners and carries the
             // gap to the next one. An open group's card continues into its rows.
-            .padding(bottom = if (open) 0.dp else 12.dp)
-            .clip(if (open) CardTopShape else CardShape)
+            .padding(bottom = if (continues) 0.dp else 12.dp)
+            .clip(if (continues) CardTopShape else CardShape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             // The design lifts an OPEN header a shade above the card it sits on. `#252118` is not in
             // the palette and its nearest role is; four near-duplicate hexes
             // did not join ui/theme.
-            .then(if (open) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)
+            .then(if (continues) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)
             // **Long press renames, tap folds.** One dialog reached from four places rather than a
             // rename flow of its own - see RenameRequest.
             .combinedClickable(
