@@ -249,6 +249,7 @@ func TestAnAnonymousEnrolmentConnectionReachesNoAPIVerb(t *testing.T) {
 		api.VerbSessions, api.VerbScreen, api.VerbResize, api.VerbType, api.VerbFile,
 		api.VerbWorkspaceCreate, api.VerbSessionCreate, api.VerbWorkspaceRename, api.VerbSessionRename,
 		api.VerbSessionClose, api.VerbWorkspaceDelete, api.VerbPaneOpen, api.VerbPaneShow,
+		api.VerbLimits,
 	}
 
 	for _, verb := range verbs {

@@ -105,6 +105,13 @@ var named = map[string]string{
 	"pagedown": "\x1b[6~",
 	"delete":   "\x1b[3~",
 
+	// Ctrl+Enter, in the kitty keyboard protocol's CSI u form: key 13 (Return), modifier 5 (1 +
+	// Ctrl). Legacy encoding has no Ctrl+Enter at all - it is CR, indistinguishable from Enter - so
+	// the only spelling a program can tell apart is this one. Codex reads it (crossterm decodes CSI u
+	// whether or not it asked for the protocol), and zmx counts a CSI ending in `u` as user input, so
+	// it claims leadership of a held pane on its own.
+	"ctrlenter": "\x1b[13;5u",
+
 	// The control characters, named for what they DO rather than for the letter, because the owner is
 	// pressing a button on a phone and not holding a modifier.
 	"interrupt": "\x03", // Ctrl-C

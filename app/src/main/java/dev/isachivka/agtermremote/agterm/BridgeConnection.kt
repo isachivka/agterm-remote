@@ -101,6 +101,38 @@ class BridgeConnection private constructor(
     }
 
     /**
+     * The Claude Code and Codex limits of the laptop. [force] asks the bridge to skip its cache.
+     *
+     * A bridge older than this verb refuses it by name, as [BridgeRefused]; the caller keeps its
+     * screen and hides the card.
+     */
+    fun limits(force: Boolean): List<LimitsProvider> {
+        val request = JSONObject().put("verb", "limits")
+        if (force) request.put("force", true)
+        val array = exchange(request).optJSONArray("limits") ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            array.optJSONObject(i)?.let { p ->
+                val windows = p.optJSONArray("windows")
+                LimitsProvider(
+                    name = p.optString("name"),
+                    plan = p.optString("plan"),
+                    windows = if (windows == null) emptyList() else (0 until windows.length()).mapNotNull { j ->
+                        windows.optJSONObject(j)?.let { w ->
+                            LimitWindow(
+                                label = w.optString("label"),
+                                usedPercent = w.optDouble("used_percent", 0.0),
+                                resetsAt = w.optLong("resets_at"),
+                            )
+                        }
+                    },
+                    fetchedAt = p.optLong("fetched_at"),
+                    error = p.optString("error"),
+                )
+            }
+        }
+    }
+
+    /**
      * Creates a workspace and returns its id.
      *
      * **No name is sent and none comes back.** The owner names it by renaming it afterwards, and
@@ -512,10 +544,14 @@ class BridgeConnection private constructor(
      * far end not speaking, and the copy says different things about them.
      */
     private fun exchange(request: JSONObject): JSONObject {
-        writer.write((request.toString() + "\n").toByteArray(Charsets.UTF_8))
-        writer.flush()
-
-        val line = reader.readLine() ?: throw WireException(WireFailure.CannotReach)
+        // **One request and its reply, never interleaved with another.** The poll, a keystroke and
+        // the limits card can each be on the wire from a different coroutine; without this, two
+        // writes go out back to back and each caller reads the OTHER one's reply.
+        val line = synchronized(this) {
+            writer.write((request.toString() + "\n").toByteArray(Charsets.UTF_8))
+            writer.flush()
+            reader.readLine()
+        } ?: throw WireException(WireFailure.CannotReach)
         val reply = try {
             JSONObject(line)
         } catch (e: JSONException) {
