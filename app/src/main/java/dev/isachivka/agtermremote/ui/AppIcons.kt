@@ -76,11 +76,15 @@ object AppIcons {
      * stay orange rather than be repainted - so wherever it is drawn, the tint must be left
      * unspecified. See the drawable's header.
      *
-     * It is here because a key on the typing bar draws it. OpenAI's mark used to sit beside it for a
-     * screen this app no longer has, and it went with that screen: an unused third-party logo inside
-     * a shipped `.apk` is a liability with no upside.
+     * It is here because a key on the typing bar draws it.
      */
     @DrawableRes val Claude = R.drawable.ic_claude
+
+    /** The OpenAI mark, on the key that starts Codex. Monochrome, tinted at the call site. */
+    @DrawableRes val Codex = R.drawable.ic_codex
+
+    /** The limits card's refresh, which asks the bridge past its cache. */
+    @DrawableRes val Refresh = R.drawable.ic_refresh
 
     // The open session: Send on the input bar, and the connection notes over the terminal with the
     // control that puts one away.
@@ -140,6 +144,8 @@ object AppIcons {
         "unfold_more" to UnfoldMore,
         "add" to Add,
         "claude" to Claude,
+        "codex" to Codex,
+        "refresh" to Refresh,
         "arrow_upward" to ArrowUpward,
         "close" to Close,
         "lan" to Lan,

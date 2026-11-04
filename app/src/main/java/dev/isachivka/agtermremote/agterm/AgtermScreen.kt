@@ -41,6 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -195,6 +198,12 @@ fun AgtermScreen(
     onDismissNotice: () -> Unit = {},
     terminalVertical: ScrollState = rememberScrollState(),
     terminalHorizontal: ScrollState = rememberScrollState(),
+    /** Bumped by every `watch`, a heal's included - see `AgtermSessions.opened`. */
+    opened: Int = 0,
+    /** The laptop's Claude Code and Codex limits, drawn under the list. */
+    limits: LimitsState = LimitsState(),
+    /** The card's refresh button: asks the bridge past its cache. */
+    onRefreshLimits: () -> Unit = {},
 ) {
     val watching = (state as? AgtermUiState.Sessions)?.watching
     // The hierarchy, built once per state and read by the header control as well as by the list.
@@ -535,7 +544,20 @@ fun AgtermScreen(
                     // wall of text with the composer far below. The owner, 2026-09-20: "I need it scrolled to the very
                     // bottom whenever I open any session".
                     var landingOnOpen by remember { mutableStateOf(false) }
-                    LaunchedEffect(watching.id) {
+                    // **Coming back to the app is an opening too.** The owner, 2026-11-04: after the
+                    // phone had been away, the held pane came back at its top and "every time I have
+                    // to scroll down a million screens". Whatever the scroll memory says about where
+                    // they were before the phone slept, five hundred rows redrawn while they were
+                    // gone are not the page they were reading. Counted rather than flagged so each
+                    // return is a new key; the first count arrives with composition and coincides
+                    // with opening, which lands at the bottom anyway.
+                    var returns by remember { mutableIntStateOf(0) }
+                    LifecycleEventEffect(Lifecycle.Event.ON_START) { returns++ }
+                    // Keyed on `opened` as well as the id: a heal calls `watch` for the session that
+                    // is already on screen, the id does not change, and the screen it blanks would
+                    // otherwise leave the owner at offset zero.
+                    val screenNow = rememberUpdatedState(state.screen)
+                    LaunchedEffect(watching.id, opened, returns) {
                         landingOnOpen = true
                         if (TerminalScroll.onSessionOpened() == TerminalScroll.Scroll.ToBottom) {
                             // The new text has not been laid out yet, so maxValue is still the old
@@ -543,6 +565,14 @@ fun AgtermScreen(
                             // rather than the last position of the previous one.
                             withFrameNanos { }
                             terminalVertical.scrollTo(terminalVertical.maxValue)
+                            // A return to a screen that is already there has landed now. Left armed,
+                            // it would fire on whatever poll next changes the text - possibly after
+                            // the owner has started scrolling up to read.
+                            if (screenNow.value.isNotEmpty()) {
+                                awaitStableMax(terminalVertical)
+                                terminalVertical.scrollTo(terminalVertical.maxValue)
+                                landingOnOpen = false
+                            }
                         }
                     }
 
@@ -832,6 +862,7 @@ fun AgtermScreen(
                             SessionList(
                                 groups, onOpen, onRefresh, listAnchor, onListAnchor,
                                 closedWorkspaces, onClosedWorkspaces, onCreateSession, onBeginRename,
+                                limits, onRefreshLimits,
                             )
                         }
                         val notice = noticeFor(link, typing, mutation)
@@ -1342,6 +1373,8 @@ private fun SessionList(
     onClosed: (Set<String>) -> Unit,
     onCreateSession: (String) -> Unit,
     onBeginRename: (RenameTarget) -> Unit,
+    limits: LimitsState,
+    onRefreshLimits: () -> Unit,
 ) {
     if (groups.isEmpty()) {
         Failure(R.string.agterm_empty, onRefresh, R.string.agterm_action_retry)
@@ -1405,6 +1438,14 @@ private fun SessionList(
                     onOpen = { onOpen(session) },
                     onRename = { onBeginRename(RenameTarget.Session(session.id)) },
                 )
+            }
+        }
+        // **Last, so it moves no row above it.** The remembered position is an index into
+        // `listKeys`, which knows nothing of this card; anywhere but the end it would shift every
+        // restore by one.
+        if (limitsCardShown(limits)) {
+            item(key = LIMITS_ITEM_KEY) {
+                LimitsCard(state = limits, onRefresh = onRefreshLimits)
             }
         }
     }

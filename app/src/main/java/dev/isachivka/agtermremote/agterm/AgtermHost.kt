@@ -74,6 +74,8 @@ fun AgtermHost(
     val recalibrated by sessions.recalibrated.collectAsStateWithLifecycle()
     val link by sessions.link.collectAsStateWithLifecycle()
     val mutation by sessions.mutation.collectAsStateWithLifecycle()
+    val opened by sessions.opened.collectAsStateWithLifecycle()
+    val limits by sessions.limits.collectAsStateWithLifecycle()
 
     // **Refresh whenever the list BECOMES VISIBLE**, which is entry and the return from a session as
     // one event rather than two call sites that must both remember. The owner asked for the listing
@@ -86,7 +88,14 @@ fun AgtermHost(
     // showsList, which stays true across Loading -> Sessions and across a refresh. A rotation does not
     // re-fetch either, because the predicate does not change across one.
     val listOnScreen = showsList(state)
-    LaunchedEffect(listOnScreen) { if (listOnScreen) sessions.refresh() }
+    // The limits card under the list follows the listing, on the same connection - after it rather
+    // than beside it, because the list is what the owner came for.
+    LaunchedEffect(listOnScreen) {
+        if (listOnScreen) {
+            sessions.refresh().join()
+            sessions.loadLimits()
+        }
+    }
 
     // **Coming back to this screen re-asks the one question only the settings screen can change.**
     //
@@ -195,6 +204,9 @@ fun AgtermHost(
         onDismissMutation = { sessions.dismissMutationNote() },
         terminalVertical = model.terminalVertical,
         terminalHorizontal = model.terminalHorizontal,
+        opened = opened,
+        limits = limits,
+        onRefreshLimits = { sessions.loadLimits(force = true) },
     )
 }
 

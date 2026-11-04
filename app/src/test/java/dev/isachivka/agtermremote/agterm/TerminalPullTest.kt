@@ -281,19 +281,15 @@ class TerminalPullTest {
     }
 
     /**
-     * **The gesture sends the same two key names the buttons do**, and they are names the bridge
-     * accepts.
+     * **The gesture sends key names the bridge accepts.**
      *
-     * `PgUp` and `PgDn` moved under the fold rather than being deleted, so there are now two
-     * ways to send each. If these strings drifted from the cells', one route would work and the other
-     * would be refused four layers away as a keystroke that silently does nothing — which is exactly
-     * the failure `KeyCell` was made a sealed type to prevent.
+     * The PgUp and PgDn buttons left the bar on 2026-11-04 - the gesture had replaced them - so the
+     * gesture is now the only route for these two keys. Names drifting from `bridge/internal/keys`
+     * would be refused four layers away as a pull that silently does nothing.
      */
     @Test
-    fun `the gesture sends the same names the key bar does`() {
-        val onTheBar = KEY_ROWS.flatten().filterIsInstance<KeyCell.Key>().map { it.name }.toSet()
-
-        assertTrue("pageup is not on the bar any more - has it been deleted?", TerminalPull.PAGE_UP in onTheBar)
-        assertTrue("pagedown is not on the bar any more - has it been deleted?", TerminalPull.PAGE_DOWN in onTheBar)
+    fun `the gesture sends names the bridge accepts`() {
+        assertEquals("pageup", TerminalPull.PAGE_UP)
+        assertEquals("pagedown", TerminalPull.PAGE_DOWN)
     }
 }

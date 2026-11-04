@@ -28,6 +28,7 @@ import (
 
 	"github.com/isachivka/agterm-remote/bridge/internal/agterm"
 	"github.com/isachivka/agterm-remote/bridge/internal/keys"
+	"github.com/isachivka/agterm-remote/bridge/internal/limits"
 	"github.com/isachivka/agterm-remote/bridge/internal/ptysize"
 	"github.com/isachivka/agterm-remote/bridge/internal/resize"
 	"github.com/isachivka/agterm-remote/bridge/internal/styled"
@@ -149,6 +150,9 @@ type Request struct {
 	// through DisallowUnknownFields, which is the safe direction for the same reason it was for
 	// `cached_only`.
 	Rows int `json:"rows,omitempty"`
+
+	// Force asks the limits verb to skip its cache. See [VerbLimits].
+	Force bool `json:"force,omitempty"`
 }
 
 // Response is what goes back. Fields are omitted rather than zeroed so a response says only what it
@@ -275,6 +279,9 @@ type Response struct {
 	NeedsFit bool `json:"needs_fit"`
 	// Path is where the bridge put a sent file. The phone puts it in the draft; it does not run it.
 	Path string `json:"path,omitempty"`
+
+	// Limits answers [VerbLimits]: every CLI signed in on this Mac. Empty when none is.
+	Limits []limits.Provider `json:"limits,omitempty"`
 }
 
 // Workspace is one heading in the phone's list. Id and name only — the phone groups by the id and
@@ -396,6 +403,10 @@ type Handler struct {
 	executable string
 	// The live height hold and its pacing. See height.go.
 	height heightState
+	// limits answers VerbLimits. An interface so a test can stand in numbers without a network.
+	limits interface {
+		Get(ctx context.Context, force bool) []limits.Provider
+	}
 	// The store is reachable by two independent callers - the phone and the local control socket -
 	// so access to it is serialized. See serialize.go, which explains why removing this while
 	// looking at a single-caller trace would be a mistake.
@@ -405,7 +416,7 @@ type Handler struct {
 // New builds a handler. stateDir is where the resize calibration cache lives; empty disables resize.
 func New(client *agterm.Client, stateDir string) *Handler {
 	h := &Handler{client: client, stateDir: stateDir, history: styled.History,
-		ptySize: ptysize.Read, openHold: zmxhold.Open, now: time.Now}
+		ptySize: ptysize.Read, openHold: zmxhold.Open, now: time.Now, limits: limits.New(stateDir)}
 	if stateDir != "" {
 		h.store = resize.LoadStore(stateDir)
 	}
@@ -493,6 +504,11 @@ const (
 	// **It creates nothing.** Where [VerbPaneOpen] may start a shell, this only ever rearranges panes
 	// that already exist, and refuses a session that has none.
 	VerbPaneShow = "pane.show"
+
+	// VerbLimits reports the Claude Code and Codex subscription limits of the Mac the bridge runs
+	// on, read with the logins those CLIs already keep here. Answered from a cache - the endpoints
+	// are rate limited per account - unless `force` is set. See [limits].
+	VerbLimits = "limits"
 )
 
 // Handle dispatches one request.
@@ -606,6 +622,8 @@ func (h *Handler) dispatch(ctx context.Context, req Request) Response {
 		return h.openPane(ctx, req)
 	case VerbPaneShow:
 		return h.showPane(ctx, req)
+	case VerbLimits:
+		return Response{OK: true, Limits: h.limits.Get(ctx, req.Force)}
 	default:
 		return fail("unknown verb")
 	}

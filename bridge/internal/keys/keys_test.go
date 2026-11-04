@@ -308,6 +308,17 @@ func TestTheC0BytesAreExactlyTheOnesNamedInTheComment(t *testing.T) {
 	}
 }
 
+// Ctrl+Enter only exists as CSI u - its legacy form is a bare CR, which is Enter.
+func TestCtrlEnterIsTheKittyCSIu(t *testing.T) {
+	got, err := Key("ctrlenter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "\x1b[13;5u" {
+		t.Errorf("ctrlenter sent %q, want %q", got, "\x1b[13;5u")
+	}
+}
+
 // **A key that is no longer offered is no longer REACHABLE.** That is the difference between an
 // allowlist and a catalogue.
 //

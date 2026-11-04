@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -393,7 +394,7 @@ private fun KeyCellButton(
 ) {
     val tag = when (cell) {
         is KeyCell.Key -> "$TAG_TYPING_KEY${cell.name}"
-        is KeyCell.Macro -> TAG_TYPING_MACRO
+        is KeyCell.Macro -> cell.tag
     }
     Surface(
         onClick = {
@@ -428,7 +429,7 @@ private fun KeyCellButton(
                 is KeyCell.Macro -> Icon(
                     painter = painterResource(cell.icon),
                     contentDescription = stringResource(cell.description),
-                    tint = Color.Unspecified,
+                    tint = if (cell.tinted) LocalContentColor.current else Color.Unspecified,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -483,6 +484,13 @@ internal sealed interface KeyCell {
         val command: String,
         @param:DrawableRes val icon: Int,
         @param:StringRes val description: Int,
+        /** Its own test tag: two macros on one bar cannot share one. */
+        val tag: String,
+        /**
+         * Whether the glyph takes the key label's colour. The Claude mark keeps its own orange
+         * (see `ic_claude.xml`); the OpenAI mark is monochrome and is drawn in the label colour.
+         */
+        val tinted: Boolean = false,
     ) : KeyCell
 }
 
@@ -509,7 +517,10 @@ internal val KEYS_ON_THE_BAR: List<KeyCell> = listOf(
     //
     // A Macro rather than a Key, because `claude_yolo` is not a name the bridge's key allowlist has
     // or should have. See KeyCell.
-    KeyCell.Macro(CLAUDE_COMMAND, AppIcons.Claude, R.string.agterm_macro_claude),
+    KeyCell.Macro(CLAUDE_COMMAND, AppIcons.Claude, R.string.agterm_macro_claude, TAG_TYPING_MACRO),
+    // The Codex button, asked for beside it on 2026-11-04, for the same reason: it starts the other
+    // agent this app is used to talk to. Seven cells across is 55.4dp each - still above 48.
+    KeyCell.Macro(CODEX_COMMAND, AppIcons.Codex, R.string.agterm_macro_codex, TAG_TYPING_MACRO_CODEX, tinted = true),
 )
 
 /**
@@ -546,14 +557,11 @@ internal val KEYS_UNDER_THE_FOLD: List<List<KeyCell>> = listOf(
         KeyCell.Key("right", R.string.agterm_key_right),
         KeyCell.Key("backspace", R.string.agterm_key_backspace),
     ),
-    // **PgUp and PgDn joined this row on 2026-08-22, and they are the only two here that were not
-    // folded for being unused.** They were folded because they got a better control: an overpull of
-    // the terminal itself now sends them - see TerminalPull. The buttons stay because the gesture is
-    // new and unproven on a real thumb, and taking away the working control on the same day as
-    // offering an untested one is how a person ends up with neither.
+    // **PgUp and PgDn left this row on 2026-11-04**, at the owner's word: the overpull gesture
+    // replaced them (see TerminalPull) and the buttons went unused. The keys stay in the bridge's
+    // allowlist because the gesture still sends them. Ctrl+Enter took the space - Codex wants it.
     listOf(
-        KeyCell.Key("pageup", R.string.agterm_key_pageup),
-        KeyCell.Key("pagedown", R.string.agterm_key_pagedown),
+        KeyCell.Key("ctrlenter", R.string.agterm_key_ctrlenter),
         KeyCell.Key("linestart", R.string.agterm_key_linestart),
         // **^E replaced Ctrl-D here on 2026-07-31**, at the owner's word. It is the twin of the ^A
         // beside it - the two ends of a line.
@@ -615,6 +623,8 @@ const val TAG_TYPING_KEY = "agterm_typing_key_"
  * is the whole point of [KeyCell].
  */
 const val TAG_TYPING_MACRO = "agterm_typing_macro"
+/** The Codex button. */
+const val TAG_TYPING_MACRO_CODEX = "agterm_typing_macro_codex"
 /**
  * The ellipsis — the cell that brings [KEYS_UNDER_THE_FOLD] out and puts them back.
  *

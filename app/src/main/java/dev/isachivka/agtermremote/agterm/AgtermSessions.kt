@@ -47,6 +47,9 @@ sealed interface RenameTarget {
  */
 const val CLAUDE_COMMAND = "claude"
 
+/** The Codex button's command, typed and followed by Return exactly as [CLAUDE_COMMAND] is. */
+const val CODEX_COMMAND = "codex"
+
 /**
  * The Return that follows it.
  *
@@ -361,6 +364,22 @@ class AgtermSessions(
      * Prose that is right about what was checked is not evidence about what was not — and here it
      * described the trap as already handled, which is why nobody went looking for it.
      */
+    /**
+     * How many times [watch] has run - opening a session, or a heal putting the same one back.
+     *
+     * The screen lands at the bottom on each, and the session id alone cannot say so: a heal re-opens
+     * the session that was already on screen, the id does not change, and the screen it resets to
+     * blank used to leave the owner at offset zero - the top - whenever the scroll memory had them as
+     * reading. In zmx mode that is the top of five hundred rows.
+     */
+    private val _limits = MutableStateFlow(LimitsState())
+
+    /** The laptop's Claude Code and Codex limits, for the card under the list. See [loadLimits]. */
+    val limits: StateFlow<LimitsState> = _limits.asStateFlow()
+
+    private val _opened = MutableStateFlow(0)
+    val opened: StateFlow<Int> = _opened.asStateFlow()
+
     private val _pane = MutableStateFlow(Pane.Left)
 
     /**
@@ -689,6 +708,29 @@ class AgtermSessions(
     fun refresh(): Job = scope.launch { refreshNow() }
 
     /**
+     * Asks the laptop for its limits. Without [force] the bridge answers from its cache, so this runs
+     * on every arrival at the list; with it - the card's refresh button - the bridge asks the
+     * providers again.
+     *
+     * **A refusal keeps the screen.** An older bridge does not know the verb, and the owner pressed
+     * nothing that deserves an error page: the card simply does not appear.
+     */
+    fun loadLimits(force: Boolean = false): Job = scope.launch {
+        if (_limits.value.loading) return@launch
+        // Only over a list that arrived: a failure screen has its own button, and asking under it
+        // would retry the connection behind the owner's back.
+        if (_state.value !is AgtermUiState.Sessions) return@launch
+        _limits.value = _limits.value.copy(loading = true)
+        var refused = false
+        val answered = withConnection(onRefused = { refused = true }) { bridge ->
+            _limits.value = LimitsState(providers = bridge.limits(force), known = true)
+        }
+        if (!answered) {
+            _limits.value = _limits.value.copy(loading = false, unsupported = refused || _limits.value.unsupported)
+        }
+    }
+
+    /**
      * [refresh]'s body, as something a caller can WAIT for.
      *
      * A create has to read the default name agterm chose, and that name is only in the listing — the
@@ -990,6 +1032,7 @@ class AgtermSessions(
         val opening = if (remembered == Pane.Right && session.splitPane) Pane.Right else Pane.Left
         _pane.value = opening
         _state.value = AgtermUiState.Sessions(listed, watching = session)
+        _opened.value++
         // This session's own draft, from memory or from disk - never the previous session's.
         _draft.value = heldDrafts.getOrPut(session.id) { drafts?.read(session.id).orEmpty() }
 

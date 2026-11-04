@@ -229,6 +229,8 @@
     <string name="agterm_key_pagedown">PgDn</string>
     <string name="agterm_key_linestart">^A</string>
     <string name="agterm_key_killline">^U</string>
+    <!-- Ctrl+Enter: the caret notation the other control keys use, and the Return glyph. -->
+    <string name="agterm_key_ctrlenter">^⏎</string>
     <!--
       The Claude button. A content description rather than a label, because the cell draws
       the logo instead of text.
@@ -237,6 +239,13 @@
       command itself, `claude_yolo`, is the owner's own shell alias and not a phrase to read aloud.
     -->
     <string name="agterm_macro_claude">Start Claude</string>
+    <string name="agterm_macro_codex">Start Codex</string>
+    <!-- The limits card under the session list: the laptop's Claude Code and Codex subscription windows. -->
+    <string name="agterm_limits_title">Limits</string>
+    <string name="agterm_limits_age">%1$s ago</string>
+    <string name="agterm_limits_refresh">Refresh limits</string>
+    <string name="agterm_limits_claude">Claude Code</string>
+    <string name="agterm_limits_codex">Codex</string>
     <!--
       The fold. It draws an ellipsis - the owner's own idea, hiding some of the keys behind one - so
       these two are content descriptions, not labels: a screen reader saying "ellipsis" would announce

@@ -18,7 +18,7 @@ class KeyRowsTest {
     /**
      * **The bridge's closed set, as the phone believes it.**
      *
-     * Nineteen names, copied from `bridge/internal/keys/keys.go`. This is a second copy and no type
+     * Twenty names, copied from `bridge/internal/keys/keys.go`. This is a second copy and no type
      * can join a Kotlin list to a Go map, so the honest version of "keep them in sync" is a test that
      * fails when they diverge — the same arrangement as `MaxLabelRunes` and the bridge's 64-rune cap.
      *
@@ -28,7 +28,7 @@ class KeyRowsTest {
     private val bridgeKeys = setOf(
         "enter", "tab", "backspace", "escape",
         "up", "down", "left", "right",
-        "home", "end", "pageup", "pagedown", "delete",
+        "home", "end", "pageup", "pagedown", "delete", "ctrlenter",
         "interrupt", "suspend", "clear", "killline", "linestart", "lineend",
     )
 
@@ -57,15 +57,17 @@ class KeyRowsTest {
      * would demand `claude_yolo` be in the bridge's key allowlist — and it must never be there.
      */
     @Test
-    fun `the Claude cell is a macro and its command is not a key name`() {
+    fun `the agent cells are macros and their commands are not key names`() {
         val macros = KEY_ROWS.flatten().filterIsInstance<KeyCell.Macro>()
 
-        assertEquals("exactly one macro cell", 1, macros.size)
-        assertEquals(CLAUDE_COMMAND, macros.single().command)
-        assertTrue(
-            "the command must never be in the key allowlist; it is text, not a key",
-            CLAUDE_COMMAND !in bridgeKeys,
-        )
+        assertEquals(listOf(CLAUDE_COMMAND, CODEX_COMMAND), macros.map { it.command })
+        assertEquals("each macro has its own test tag", macros.size, macros.map { it.tag }.toSet().size)
+        macros.forEach {
+            assertTrue(
+                "the command must never be in the key allowlist; it is text, not a key",
+                it.command !in bridgeKeys,
+            )
+        }
     }
 
     /**
@@ -80,11 +82,9 @@ class KeyRowsTest {
      */
     @Test
     fun `one row on the bar and two behind the fold`() {
-        assertEquals("the bar is five keys, and the fold's cell makes six", 5, KEYS_ON_THE_BAR.size)
+        assertEquals("the bar is six cells, and the fold's cell makes seven", 6, KEYS_ON_THE_BAR.size)
         assertEquals("the fold holds two rows", 2, KEYS_UNDER_THE_FOLD.size)
-        KEYS_UNDER_THE_FOLD.forEach { row ->
-            assertEquals("a folded row is five cells - 80dp each, the widest keys we draw", 5, row.size)
-        }
+        assertEquals(listOf(5, 4), KEYS_UNDER_THE_FOLD.map { it.size })
         assertEquals("KEY_ROWS is the union and nothing else", 3, KEY_ROWS.size)
     }
 
@@ -99,15 +99,16 @@ class KeyRowsTest {
      * A key added back to the front row is therefore not a small change — it is that number moving.
      */
     @Test
-    fun `the visible row is six cells wide`() {
+    fun `the visible row is seven cells wide`() {
         val visibleCells = KEYS_ON_THE_BAR.size + 1
         val usableDp = 424.0
         val gapDp = 6.0
 
         val cellDp = (usableDp - (visibleCells - 1) * gapDp) / visibleCells
 
-        assertEquals(6, visibleCells)
-        assertEquals("a key must stay above Material's 48dp minimum", 65.67, cellDp, 0.01)
+        assertEquals(7, visibleCells)
+        assertEquals("a key must stay above Material's 48dp minimum", 55.43, cellDp, 0.01)
+        assertTrue(cellDp >= 48.0)
     }
 
     /**
@@ -128,7 +129,7 @@ class KeyRowsTest {
         val before = setOf(
             "escape", "left", "up", "down", "right",
             ENTER_KEY, "tab", "backspace", "interrupt", "lineend",
-            "pageup", "pagedown", "linestart", "killline",
+            "linestart", "killline", "ctrlenter",
         )
 
         val now = KEY_ROWS.flatten().filterIsInstance<KeyCell.Key>().map { it.name }.toSet()
@@ -155,11 +156,8 @@ class KeyRowsTest {
                 "left", "up", "down", "right", "backspace", "linestart", "lineend",
                 // Ours: the fourth member of the line-editing family whose other three they named.
                 "killline",
-                // **Not folded for being unused - folded because they got a gesture.** an
-                // overpull of the terminal sends these two now. The buttons stay because the gesture
-                // has never been tried by a thumb, and withdrawing the working control on the same
-                // day as offering an untested one leaves the owner with neither.
-                "pageup", "pagedown",
+                // Asked for on 2026-11-04 for Codex; reached for rarely enough to live here.
+                "ctrlenter",
             ),
             folded.toSet(),
         )
