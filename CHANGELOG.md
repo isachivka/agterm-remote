@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/isachivka/agterm-remote/compare/v0.9.0...v0.10.0) (2026-11-04)
+
+
+### Features
+
+* Claude and Codex limits under the list, a Codex key and Ctrl+Enter, and a healed pane lands at its bottom ([#126](https://github.com/isachivka/agterm-remote/issues/126)) ([9a863e7](https://github.com/isachivka/agterm-remote/commit/9a863e796f20cc5252699a6d01457f969ee40e51))
+
 ## [0.9.0](https://github.com/isachivka/agterm-remote/compare/v0.8.4...v0.9.0) (2026-09-30)
 
 
