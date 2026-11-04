@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/isachivka/agterm-remote/compare/v0.10.0...v0.10.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **app:** an open workspace with no sessions is a whole card ([#128](https://github.com/isachivka/agterm-remote/issues/128)) ([2af8caa](https://github.com/isachivka/agterm-remote/commit/2af8caa44cc22c8babba36d3b78c9887b1f79537))
+
 ## [0.10.0](https://github.com/isachivka/agterm-remote/compare/v0.9.0...v0.10.0) (2026-11-04)
 
 
